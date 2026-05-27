@@ -1,0 +1,2 @@
+=== PACKAGES RESOLVED ===
+ls: /tmp/bentozip-spm-cache/SourcePackages/checkouts/: No such file or directory

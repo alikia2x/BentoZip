@@ -1,32 +1,45 @@
-//
-//  BentoZipApp.swift
-//  BentoZip
-//
-//  Created by alikia on 2026/5/28.
-//
-
 import SwiftUI
 import SwiftData
+import BentoZipCore
 
 @main
 struct BentoZipApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @State private var progressState = ProgressState()
+    private let preferencesManager = PreferencesManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(progressState)
         }
-        .modelContainer(sharedModelContainer)
+        .commands {
+            InspectorCommands()
+        }
+        .modelContainer(createModelContainer())
+
+        WindowGroup(id: "progress") {
+            ProgressWindowView()
+                .environment(progressState)
+        }
+        .defaultSize(width: 380, height: 140)
+        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
+    }
+
+    private func createModelContainer() -> ModelContainer {
+        let schema = Schema([AppPreferences.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        do {
+            let container = try ModelContainer(for: schema, configurations: [config])
+            preferencesManager.configure(with: container.mainContext)
+            return container
+        } catch {
+            let container = try! ModelContainer(
+                for: schema,
+                configurations: [ModelConfiguration(isStoredInMemoryOnly: true)]
+            )
+            preferencesManager.configure(with: container.mainContext)
+            return container
+        }
     }
 }

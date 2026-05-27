@@ -1,53 +1,60 @@
-//
-//  ContentView.swift
-//  BentoZip
-//
-//  Created by alikia on 2026/5/28.
-//
-
 import SwiftUI
-import SwiftData
+import BentoZipCore
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var appState = AppState()
+    @Environment(ProgressState.self) private var progressState
+    @State private var showErrorAlert = false
+    @State private var isTargeted = false
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        @Bindable var appState = appState
+
+        ZStack {
+            switch appState.mode {
+            case .empty:
+                EmptyStateView()
+            case .compress, .browseArchive:
+                fileBrowsingView
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
+        }
+        .inspector(isPresented: $appState.showInspector) {
+            CompressionSettingsView()
+                .environment(appState)
+                .inspectorColumnWidth(min: 250, ideal: 300, max: 400)
+        }
+        .toolbar {
+            ToolbarCommands()
+        }
+        .environment(appState)
+        .disabled(progressState.isOperationInProgress)
+        .onChange(of: appState.lastError) { _, newValue in
+            showErrorAlert = newValue != nil
+        }
+        .alert("错误", isPresented: $showErrorAlert) {
+            Button("确定") { appState.lastError = nil }
+        } message: {
+            Text(appState.lastError ?? "")
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+    private var fileBrowsingView: some View {
+        VStack(spacing: 0) {
+            BreadcrumbView()
+            FileListView()
         }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+        .dropDestination(for: URL.self) { items, _ in
+            guard appState.mode == .compress else { return false }
+            appState.addEntries(from: items)
+            return true
+        } isTargeted: { targeted in
+            isTargeted = targeted
+        }
+        .overlay {
+            if isTargeted && appState.mode == .compress {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.accentColor, lineWidth: 2)
+                    .allowsHitTesting(false)
             }
         }
     }
@@ -55,5 +62,6 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .environment(AppState())
+        .environment(ProgressState())
 }
