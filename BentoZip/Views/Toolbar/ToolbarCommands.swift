@@ -29,13 +29,15 @@ struct ToolbarCommands: ToolbarContent {
                     appState.addEntries(from: urls)
                 }
             } label: {
-                Label("添加文件", systemImage: "plus")
+                Label("添加", systemImage: "plus")
+                    .labelStyle(.titleAndIcon)
             }
 
             Button {
                 appState.removeSelectedEntries()
             } label: {
                 Label("删除", systemImage: "trash")
+                    .labelStyle(.titleAndIcon)
             }
             .disabled(!canDelete)
 
@@ -43,6 +45,7 @@ struct ToolbarCommands: ToolbarContent {
                 Task { await appState.coordinator.compress(appState: appState, progressState: progressState, openWindow: openWindow) }
             } label: {
                 Label("压缩", systemImage: "doc.zipper")
+                    .labelStyle(.titleAndIcon)
             }
             .disabled(appState.mode != .compress)
 
@@ -50,15 +53,26 @@ struct ToolbarCommands: ToolbarContent {
                 Task { await appState.coordinator.extract(appState: appState, progressState: progressState, openWindow: openWindow) }
             } label: {
                 Label("解压", systemImage: "square.and.arrow.down")
+                    .labelStyle(.titleAndIcon)
             }
             .disabled(appState.mode != .browseArchive)
         }
 
         ToolbarItem(placement: .primaryAction) {
             Button {
+                progressState.shouldDismiss = true
+                appState.reset()
+            } label: {
+                Label("主页", systemImage: "house")
+            }
+            .disabled(appState.mode == .empty)
+        }
+        
+        ToolbarItem(placement: .primaryAction) {
+            Button {
                 appState.showInspector.toggle()
             } label: {
-                Label("检查器", systemImage: "sidebar.trailing")
+                Label("边栏", systemImage: "sidebar.trailing")
             }
         }
     }
