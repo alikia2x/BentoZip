@@ -2,32 +2,10 @@ import Foundation
 import Testing
 import BentoZipCore
 
-@MainActor
+@Suite(.serialized) @MainActor
 struct CompressionCoordinatorTests {
     let coordinator = CompressionCoordinator()
     let fm = FileManager.default
-
-    // MARK: - Engine selection
-
-    @Test func engineFor_zip_returnsZIPEngine() {
-        let engine = coordinator.engine(for: .zip)
-        #expect(engine is ZIPEngine)
-    }
-
-    @Test func engineFor_sevenZip_returnsLibArchiveWriter() {
-        let engine = coordinator.engine(for: .sevenZip)
-        #expect(engine is LibArchiveWriter)
-    }
-
-    @Test func engineFor_tarGz_returnsLibArchiveWriter() {
-        let engine = coordinator.engine(for: .tarGz)
-        #expect(engine is LibArchiveWriter)
-    }
-
-    @Test func readerEngine_returnsLibArchiveReader() {
-        let engine = coordinator.readerEngine()
-        #expect(engine is LibArchiveReader)
-    }
 
     // MARK: - browseArchive
 
@@ -39,9 +17,9 @@ struct CompressionCoordinatorTests {
         let fileURL = tmp.appendingPathComponent("data.txt")
         try "test content".write(to: fileURL, atomically: true, encoding: .utf8)
 
-        let zipEngine = ZIPEngine()
+        let engine = Bento7zEngine()
         let archiveURL = tmp.appendingPathComponent("browse.zip")
-        try await zipEngine.create(from: [fileURL], to: archiveURL,
+        try await engine.create(from: [fileURL], to: archiveURL,
             settings: CompressionSettings(), progress: { _ in })
 
         let appState = AppState()
@@ -70,15 +48,16 @@ struct CompressionCoordinatorTests {
     }
 
     @Test func detectFormat_tarGzExtension() {
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.tar.gz")) == .tarGz)
+        // tar.gz is now handled by bento7z auto-detection, mapped to sevenZip
+        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.tar.gz")) == .sevenZip)
     }
 
     @Test func detectFormat_tgzExtension() {
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.tgz")) == .tarGz)
+        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.tgz")) == .sevenZip)
     }
 
     @Test func detectFormat_gzExtension() {
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.gz")) == .tarGz)
+        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.gz")) == .sevenZip)
     }
 
     @Test func detectFormat_unknown() {
@@ -115,7 +94,8 @@ struct CompressionCoordinatorTests {
         let bytes: [UInt8] = [0x1F, 0x8B]
         try Data(bytes).write(to: file)
 
-        #expect(FormatDetector.detectFormat(of: file) == .tarGz)
+        // gzip magic now maps to sevenZip (bento7z handles it)
+        #expect(FormatDetector.detectFormat(of: file) == .sevenZip)
     }
 
     @Test func detectFormat_emptyFile() throws {
@@ -145,20 +125,5 @@ struct CompressionCoordinatorTests {
 
     @Test func isArchiveFile_false() {
         #expect(!FormatDetector.isArchiveFile(URL(fileURLWithPath: "readme.txt")))
-    }
-
-    // MARK: - Duplicated LibArchiveReader.detectFormat
-
-    @Test func libArchiveReaderDetectFormat_matchesFormatDetector() throws {
-        let tmp = fm.temporaryDirectory.appendingPathComponent("dupdetect_\(UUID().uuidString)"); try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: tmp) }
-
-        let zipFile = tmp.appendingPathComponent("dup.zip")
-        let bytes: [UInt8] = [0x50, 0x4B, 0x03, 0x04]
-        try Data(bytes).write(to: zipFile)
-
-        let fromLibArchive = LibArchiveReader.detectFormat(of: zipFile)
-        let fromFormatDetector = FormatDetector.detectFormat(of: zipFile)
-        #expect(fromLibArchive == fromFormatDetector)
     }
 }

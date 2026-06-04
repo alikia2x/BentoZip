@@ -6,6 +6,7 @@ final class DragDropManager {
 
     private let sessionTempDir: URL
     private var extractedFiles: [String: URL] = [:]
+    private let engine = Bento7zEngine()
 
     private init() {
         sessionTempDir = FileManager.default.temporaryDirectory
@@ -22,13 +23,12 @@ final class DragDropManager {
             return cached
         }
 
-        let reader = LibArchiveReader()
         let tempURL = sessionTempDir.appendingPathComponent(entry.name)
 
         do {
             if let archiveURL = sourceArchiveURL {
                 let archivePath = extractArchivePath(from: entry)
-                try await reader.extractEntry(from: archiveURL, entryPath: archivePath, to: tempURL)
+                try await engine.extractEntry(from: archiveURL, entryPath: archivePath, to: tempURL)
                 extractedFiles[entry.id.uuidString] = tempURL
                 return tempURL
             }

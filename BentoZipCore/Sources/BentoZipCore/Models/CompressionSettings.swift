@@ -26,17 +26,17 @@ public struct CompressionSettings {
 }
 
 public enum ArchiveFormat: String, CaseIterable, Identifiable {
-    case zip = "ZIP"
     case sevenZip = "7z"
-    case tarGz = "tar.gz"
+    case zip = "ZIP"
+    case tar = "TAR"
 
     public var id: String { rawValue }
 
     public var fileExtension: String {
         switch self {
-        case .zip: return "zip"
         case .sevenZip: return "7z"
-        case .tarGz: return "tar.gz"
+        case .zip: return "zip"
+        case .tar: return "tar"
         }
     }
 }

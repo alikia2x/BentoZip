@@ -5,26 +5,9 @@ import Observation
 @Observable
 @MainActor
 public class CompressionCoordinator {
-    private let zipEngine = ZIPEngine()
-    private let archiveReader = LibArchiveReader()
-    private let archiveWriter = LibArchiveWriter()
+    private let engine = Bento7zEngine()
 
     public init() {}
-
-    public func engine(for format: ArchiveFormat) -> ArchiveEngine {
-        switch format {
-        case .zip: return zipEngine
-        case .sevenZip, .tarGz: return archiveWriter
-        }
-    }
-
-    public func readerEngine() -> some ArchiveEngine {
-        return archiveReader
-    }
-
-    public func zipEngineRef() -> ZIPEngine {
-        return zipEngine
-    }
 
     private func unwrapSingleTopDirectory(at url: URL) {
         let fm = FileManager.default
@@ -47,13 +30,11 @@ public class CompressionCoordinator {
         appState.sourceArchiveURL = url
 
         do {
-            let format = FormatDetector.detectFormat(of: url) ?? .zip
-            let engine = format == .zip ? (archiveReader as ArchiveEngine) : archiveReader
             let entries = try await engine.listEntries(in: url)
             appState.fileEntries = entries
         } catch {
-            appState.lastError = "无法读取压缩包: \(error.localizedDescription)"
             appState.reset()
+            appState.lastError = "无法读取压缩包: \(error.localizedDescription)"
         }
     }
 
@@ -91,7 +72,6 @@ public class CompressionCoordinator {
         }
 
         do {
-            let engine = engine(for: settings.format)
             try await engine.create(
                 from: sourceURLs,
                 to: saveURL,
@@ -103,10 +83,10 @@ public class CompressionCoordinator {
             progressState.isOperationInProgress = false
             appState.lastError = nil
 
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .milliseconds(300))
             progressState.shouldDismiss = true
 
-            await browseArchive(at: saveURL, appState: appState)
+            NSWorkspace.shared.activateFileViewerSelecting([saveURL])
         } catch {
             progressState.isOperationInProgress = false
             progressState.shouldDismiss = true
@@ -119,20 +99,9 @@ public class CompressionCoordinator {
         guard appState.mode == .browseArchive, let archiveURL = appState.sourceArchiveURL else { return }
 
         let destinationURL: URL
-        if PathUtils.allShareParentDirectory([archiveURL]) {
-            let parent = archiveURL.deletingLastPathComponent()
-            let folderName = archiveURL.deletingPathExtension().lastPathComponent
-            destinationURL = parent.appendingPathComponent(folderName)
-        } else {
-            let panel = NSOpenPanel()
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.canCreateDirectories = true
-            panel.prompt = "选择解压位置"
-            let response = panel.runModal()
-            guard response == .OK, let url = panel.url else { return }
-            destinationURL = url
-        }
+        let parent = archiveURL.deletingLastPathComponent()
+        let folderName = archiveURL.deletingPathExtension().lastPathComponent
+        destinationURL = parent.appendingPathComponent(folderName)
 
         progressState.isOperationInProgress = true
         progressState.operationProgress = 0.0
@@ -144,8 +113,6 @@ public class CompressionCoordinator {
         }
 
         do {
-            let format = FormatDetector.detectFormat(of: archiveURL) ?? .zip
-            let engine = format == .zip ? (archiveReader as ArchiveEngine) : archiveReader
             try await engine.extract(
                 archiveURL: archiveURL,
                 entries: nil,
@@ -159,14 +126,44 @@ public class CompressionCoordinator {
 
             unwrapSingleTopDirectory(at: destinationURL)
 
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .milliseconds(300))
             progressState.shouldDismiss = true
 
-            NSWorkspace.shared.open(destinationURL)
+            NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
         } catch {
             progressState.isOperationInProgress = false
             progressState.shouldDismiss = true
             appState.lastError = "解压失败: \(error.localizedDescription)"
+        }
+    }
+    
+    public func addEntries(appState: AppState, urls: [URL], progressState: ProgressState, openWindow: OpenWindowAction) async {
+        guard appState.mode == .browseArchive, let archiveURL = appState.sourceArchiveURL else { return }
+
+        progressState.isOperationInProgress = true
+        progressState.operationProgress = 0.0
+        progressState.operationDescription = "正在添加..."
+        openWindow(id: "progress")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        do {
+            try await engine.addEntries(to: archiveURL, from: urls, progress:  { progressState.operationProgress = $0 })
+            
+            progressState.operationProgress = 1.0
+            progressState.isOperationInProgress = false
+            appState.lastError = nil
+
+
+            try? await Task.sleep(for: .milliseconds(250))
+            progressState.shouldDismiss = true
+
+        } catch {
+            progressState.isOperationInProgress = false
+            progressState.shouldDismiss = true
+            appState.lastError = "添加失败: \(error.localizedDescription)"
         }
     }
 }

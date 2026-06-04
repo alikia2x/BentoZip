@@ -27,6 +27,9 @@ struct ToolbarCommands: ToolbarContent {
                 if panel.runModal() == .OK {
                     let urls = panel.urls
                     appState.addEntries(from: urls)
+                    if appState.mode == .browseArchive {
+                        Task { await appState.coordinator.addEntries(appState: appState, urls: urls, progressState: progressState, openWindow: openWindow) }
+                    }
                 }
             } label: {
                 Label("添加", systemImage: "plus")

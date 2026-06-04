@@ -9,8 +9,7 @@
 /* Begin PBXBuildFile section */
 		C402B2072FCB3D3D00F97BE8 /* BentoZipCore in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0060000000000000006 /* BentoZipCore */; };
 		C402B2082FCB3D3D00F97BE8 /* BentoZipCore in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0060000000000000006 /* BentoZipCore */; };
-		C4A4A8762FC79400003523FF /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0030000000000000003 /* ZIPFoundation */; };
-		C4A4A8772FC79400003523FF /* libarchive in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0040000000000000004 /* libarchive */; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,8 +59,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				C402B2072FCB3D3D00F97BE8 /* BentoZipCore in Frameworks */,
-				C4A4A8772FC79400003523FF /* libarchive in Frameworks */,
-				C4A4A8762FC79400003523FF /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -123,8 +120,6 @@
 			);
 			name = BentoZip;
 			packageProductDependencies = (
-				D4E1A0030000000000000003 /* ZIPFoundation */,
-				D4E1A0040000000000000004 /* libarchive */,
 				D4E1A0060000000000000006 /* BentoZipCore */,
 			);
 			productName = BentoZip;
@@ -211,8 +206,6 @@
 			mainGroup = C4A4A7892FC7772E003523FF;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				D4E1A0010000000000000001 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
-				D4E1A0020000000000000002 /* XCRemoteSwiftPackageReference "libarchive-for-swift" */,
 				D4E1A0050000000000000005 /* XCLocalSwiftPackageReference "BentoZipCore" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -595,36 +588,10 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		D4E1A0010000000000000001 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.9.0;
-			};
-		};
-		D4E1A0020000000000000002 /* XCRemoteSwiftPackageReference "libarchive-for-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/matteo-pacini/libarchive-for-swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		D4E1A0030000000000000003 /* ZIPFoundation */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = D4E1A0010000000000000001 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
-			productName = ZIPFoundation;
-		};
-		D4E1A0040000000000000004 /* libarchive */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = D4E1A0020000000000000002 /* XCRemoteSwiftPackageReference "libarchive-for-swift" */;
-			productName = libarchive;
-		};
+
 		D4E1A0060000000000000006 /* BentoZipCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D4E1A0050000000000000005 /* XCLocalSwiftPackageReference "BentoZipCore" */;

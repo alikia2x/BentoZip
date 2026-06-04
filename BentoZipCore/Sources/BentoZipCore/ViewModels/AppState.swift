@@ -27,8 +27,6 @@ public class AppState {
 
     public var lastError: String?
 
-    public var archiveEngine: ArchiveEngine?
-
     public var coordinator = CompressionCoordinator()
     public var preferencesManager: PreferencesManager?
 

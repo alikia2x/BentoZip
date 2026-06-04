@@ -7,14 +7,11 @@ let package = Package(
     products: [
         .library(name: "BentoZipCore", targets: ["BentoZipCore"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.0"),
-        .package(url: "https://github.com/matteo-pacini/libarchive-for-swift.git", from: "1.0.0"),
-    ],
+    dependencies: [],
     targets: [
         .target(
             name: "BentoZipCore",
-            dependencies: ["ZIPFoundation", .product(name: "libarchive", package: "libarchive-for-swift")],
+            dependencies: [],
             path: "Sources/BentoZipCore"
         ),
     ]

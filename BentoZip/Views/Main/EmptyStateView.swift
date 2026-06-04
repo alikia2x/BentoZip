@@ -21,7 +21,7 @@ struct EmptyStateView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Text("支持格式: ZIP, 7z, tar.gz")
+            Text("支持格式: ZIP, 7z, tar.gz, gz, bz2, xz")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }

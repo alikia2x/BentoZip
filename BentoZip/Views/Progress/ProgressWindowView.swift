@@ -5,38 +5,28 @@ struct ProgressWindowView: View {
     @Environment(ProgressState.self) private var progressState
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: progressState.operationDescription.contains("压缩") ? "doc.zipper" : "arrow.down.doc.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            Image(systemName: progressState.operationDescription.contains("压缩") ? "doc.zipper" : "arrow.down.doc.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(.secondary)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(progressState.operationDescription)
-                        .font(.headline)
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(progressState.operationDescription)
+                    .font(.body)
+                    .lineLimit(1)
+                
+                ProgressView(value: progressState.operationProgress, total: 1.0)
+                    .progressViewStyle(.linear)
 
-                    Text(progressDetailText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-            }
-
-            ProgressView(value: progressState.operationProgress, total: 1.0)
-                .progressViewStyle(.linear)
-
-            HStack {
                 Text("\(Int(progressState.operationProgress * 100))%")
-                    .font(.system(.body, design: .monospaced))
+                    .font(.system(.subheadline, design: .monospaced))
                     .foregroundStyle(.secondary)
-
-                Spacer()
             }
+
+            Spacer()
         }
-        .padding(16)
+        .padding(.vertical, 8)
+        .padding(.leading, 16)
         .frame(width: 360)
         .background(.regularMaterial)
         .onChange(of: progressState.shouldDismiss) { _, shouldDismiss in

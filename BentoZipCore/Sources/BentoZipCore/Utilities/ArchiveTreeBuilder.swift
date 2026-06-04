@@ -1,7 +1,7 @@
 import Foundation
 
 /// Builds a hierarchical tree of FileEntry from flat archive entry paths.
-/// Both ZIPEngine and LibArchiveReader use this to produce consistent directory trees.
+/// Bento7zEngine and FormatDetector use this to produce consistent directory trees.
 enum ArchiveTreeBuilder {
 
     /// A flat entry description used as input for tree building.
