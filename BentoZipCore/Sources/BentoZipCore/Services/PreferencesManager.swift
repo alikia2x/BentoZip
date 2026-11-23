@@ -3,12 +3,17 @@ import SwiftData
 
 @MainActor
 public final class PreferencesManager {
+    /// Posted whenever persisted preferences are saved so all windows and view models stay synchronized.
+    public static let preferencesDidChangeNotification = Notification.Name("BentoZipPreferencesDidChange")
+
+    private var modelContainer: ModelContainer?
     private var modelContext: ModelContext?
 
     public init() {}
 
     public func configure(with context: ModelContext) {
         self.modelContext = context
+        self.modelContainer = context.container
     }
 
     public func loadPreferences() -> AppPreferences {
@@ -27,10 +32,17 @@ public final class PreferencesManager {
 
     public func savePreferences(_ prefs: AppPreferences) {
         try? modelContext?.save()
+        NotificationCenter.default.post(name: Self.preferencesDidChangeNotification, object: nil)
+    }
+
+    public func updatePreferences(_ update: (AppPreferences) -> Void) {
+        let prefs = loadPreferences()
+        update(prefs)
+        savePreferences(prefs)
     }
 
     public func applyDefaults(to settings: inout CompressionSettings, from prefs: AppPreferences) {
-        if let format = ArchiveFormat(rawValue: prefs.defaultFormat) {
+        if let format = ArchiveFormat.fromPersistedValue(prefs.defaultFormat) {
             settings.format = format
         }
         if let level = CompressionLevel(rawValue: prefs.defaultCompressionLevel) {
@@ -48,5 +60,10 @@ public final class PreferencesManager {
         }
         prefs.recentArchives = recent
         savePreferences(prefs)
+    }
+
+    public func recordArchive(_ path: String) {
+        let prefs = loadPreferences()
+        recordArchive(path, in: prefs)
     }
 }

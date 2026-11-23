@@ -35,9 +35,22 @@
 		C4A4A7AB2FC77730003523FF /* BentoZipUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BentoZipUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D4E1B0010000000000000001 /* Exceptions for "BentoZip" folder in "BentoZip" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C4A4A7912FC7772E003523FF /* BentoZip */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C4A4A7942FC7772E003523FF /* BentoZip */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D4E1B0010000000000000001 /* Exceptions for "BentoZip" folder in "BentoZip" target */,
+			);
 			path = BentoZip;
 			sourceTree = "<group>";
 		};
@@ -110,6 +123,7 @@
 				C4A4A78E2FC7772E003523FF /* Sources */,
 				C4A4A78F2FC7772E003523FF /* Frameworks */,
 				C4A4A7902FC7772E003523FF /* Resources */,
+				D4E1B0020000000000000002 /* Bundle bento7z Engine */,
 			);
 			buildRules = (
 			);
@@ -243,6 +257,31 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		D4E1B0020000000000000002 /* Bundle bento7z Engine */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(PROJECT_DIR)/../bento7z/build/bento7z",
+				"$(PROJECT_DIR)/../bento7z/build/7z.so",
+			);
+			name = "Bundle bento7z Engine";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/bento7z",
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/7z.so",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nif [ ! -f \"${SCRIPT_INPUT_FILE_0}\" ] || [ ! -f \"${SCRIPT_INPUT_FILE_1}\" ]; then\n  echo \"error: Missing bento7z engine binaries. Build ../bento7z first (expected ${SCRIPT_INPUT_FILE_0} and ${SCRIPT_INPUT_FILE_1}).\" >&2\n  exit 1\nfi\nSTAGE_DIR=\"${TEMP_DIR}/bento7z_stage\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers\"\nmkdir -p \"${STAGE_DIR}\" \"${DEST_DIR}\"\ncp -f \"${SCRIPT_INPUT_FILE_0}\" \"${STAGE_DIR}/bento7z\"\ncp -f \"${SCRIPT_INPUT_FILE_1}\" \"${STAGE_DIR}/7z.so\"\nchmod 755 \"${STAGE_DIR}/bento7z\" \"${STAGE_DIR}/7z.so\"\nSIGN_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\n/usr/bin/codesign --force --sign \"${SIGN_IDENTITY}\" --timestamp=none \"${STAGE_DIR}/7z.so\"\n/usr/bin/codesign --force --sign \"${SIGN_IDENTITY}\" --timestamp=none \"${STAGE_DIR}/bento7z\"\ncp -fp \"${STAGE_DIR}/bento7z\" \"${SCRIPT_OUTPUT_FILE_0}\"\ncp -fp \"${STAGE_DIR}/7z.so\" \"${SCRIPT_OUTPUT_FILE_1}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C4A4A78E2FC7772E003523FF /* Sources */ = {
@@ -392,7 +431,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -474,7 +513,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alikia.BentoZipTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -492,7 +531,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alikia.BentoZipTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";

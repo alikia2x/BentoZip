@@ -4,126 +4,480 @@ import BentoZipCore
 
 @Suite(.serialized) @MainActor
 struct CompressionCoordinatorTests {
-    let coordinator = CompressionCoordinator()
-    let fm = FileManager.default
+    private let fm = FileManager.default
 
-    // MARK: - browseArchive
+    private func makeTempDir() throws -> URL {
+        let url = fm.temporaryDirectory.appendingPathComponent("CoordinatorTest_\(UUID().uuidString)")
+        try fm.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
 
-    @Test
-    func browseArchive_listEntries_populatesAppState() async throws {
-        let tmp = fm.temporaryDirectory.appendingPathComponent("CCBrowseTest_\(UUID().uuidString)")
+    // MARK: - Mock Engine for Deterministic Coordinator Tests
+
+    private final class MockArchiveEngine: ArchiveEngine, @unchecked Sendable {
+        var listResult: Result<[FileEntry], Error> = .success([])
+        var listHandler: ((URL, String?) async throws -> [FileEntry])?
+        var extractHandler: ((URL, [FileEntry]?, URL, String?, @Sendable (ArchiveProgress) -> Void) async throws -> Void)?
+        var createHandler: (([URL], URL, CompressionSettings, @escaping @Sendable (ArchiveProgress) -> Void) async throws -> Void)?
+        var addHandler: ((URL, [URL], String?, @Sendable (ArchiveProgress) -> Void) async throws -> Void)?
+        var removeHandler: ((URL, [FileEntry], String?) async throws -> Void)?
+
+        func listEntries(in archiveURL: URL, password: String?) async throws -> [FileEntry] {
+            if let listHandler {
+                return try await listHandler(archiveURL, password)
+            }
+            return try listResult.get()
+        }
+
+        func extract(
+            archiveURL: URL,
+            entries: [FileEntry]?,
+            to destinationURL: URL,
+            password: String?,
+            onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+        ) async throws {
+            if let extractHandler {
+                try await extractHandler(archiveURL, entries, destinationURL, password, onProgress)
+            }
+        }
+
+        func create(
+            from sourceURLs: [URL],
+            to archiveURL: URL,
+            settings: CompressionSettings,
+            onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+        ) async throws {
+            if let createHandler {
+                try await createHandler(sourceURLs, archiveURL, settings, onProgress)
+            }
+        }
+
+        func removeEntries(from archiveURL: URL, entries: [FileEntry], password: String?) async throws {
+            if let removeHandler {
+                try await removeHandler(archiveURL, entries, password)
+            }
+        }
+
+        func addEntries(
+            to archiveURL: URL,
+            from sourceURLs: [URL],
+            password: String?,
+            onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+        ) async throws {
+            if let addHandler {
+                try await addHandler(archiveURL, sourceURLs, password, onProgress)
+            }
+        }
+    }
+
+    // MARK: - browseArchive & Password Flow
+
+    @Test func browseArchive_realZip_populatesAppState() async throws {
+        let tmp = try makeTempDir()
         defer { try? fm.removeItem(at: tmp) }
-        try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+
         let fileURL = tmp.appendingPathComponent("data.txt")
         try "test content".write(to: fileURL, atomically: true, encoding: .utf8)
 
         let engine = Bento7zEngine()
         let archiveURL = tmp.appendingPathComponent("browse.zip")
-        try await engine.create(from: [fileURL], to: archiveURL,
-            settings: CompressionSettings(), progress: { _ in })
+        try await engine.create(from: [fileURL], to: archiveURL, settings: CompressionSettings()) { _ in }
 
+        let coordinator = CompressionCoordinator(engine: engine)
         let appState = AppState()
         await coordinator.browseArchive(at: archiveURL, appState: appState)
 
         #expect(appState.mode == .browseArchive)
+        #expect(appState.sourceArchiveURL == archiveURL)
         #expect(!appState.fileEntries.isEmpty)
+        #expect(appState.archiveFormatName == "ZIP")
     }
 
-    @Test
-    func browseArchive_nonexistent_setsError() async throws {
+    @Test func browseArchive_nonexistent_setsError() async {
+        let coordinator = CompressionCoordinator()
         let appState = AppState()
         let nonexistent = URL(fileURLWithPath: "/tmp/__no_such_browse_xyz_999.zip")
+
         await coordinator.browseArchive(at: nonexistent, appState: appState)
         #expect(appState.lastError != nil)
+        #expect(appState.mode == .empty)
     }
 
-    // MARK: - FormatDetector
+    @Test func browseArchive_encrypted_triggersPasswordPromptAndSubmitUnlocks() async throws {
+        let mock = MockArchiveEngine()
+        mock.listHandler = { _, password in
+            if password == nil {
+                throw Bento7zError.passwordRequired
+            }
+            if password != "secret" {
+                throw Bento7zError.wrongPassword
+            }
+            return [
+                FileEntry(
+                    url: URL(fileURLWithPath: "/archive-root/secret.txt"),
+                    name: "secret.txt",
+                    size: 100,
+                    isEncrypted: true,
+                    isFromArchive: true,
+                    archiveRelativePath: "secret.txt"
+                )
+            ]
+        }
 
-    @Test func detectFormat_zipExtension() {
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.zip")) == .zip)
+        let coordinator = CompressionCoordinator(engine: mock)
+        let appState = AppState()
+        let archiveURL = URL(fileURLWithPath: "/tmp/locked.7z")
+
+        await coordinator.browseArchive(at: archiveURL, appState: appState)
+        #expect(appState.needsPasswordPrompt)
+        #expect(appState.pendingPasswordArchiveURL == archiveURL)
+        #expect(appState.lastError == nil)
+
+        await coordinator.submitPassword("wrong", appState: appState)
+        #expect(appState.needsPasswordPrompt)
+        #expect(appState.passwordPromptReason == Bento7zError.wrongPassword.localizedDescription)
+
+        await coordinator.submitPassword("secret", appState: appState)
+        #expect(!appState.needsPasswordPrompt)
+        #expect(appState.mode == .browseArchive)
+        #expect(appState.archivePassword == "secret")
+        #expect(appState.isArchiveEncrypted)
+        #expect(appState.fileEntries.count == 1)
     }
 
-    @Test func detectFormat_7zExtension() {
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.7z")) == .sevenZip)
-    }
+    // MARK: - Compress & Progress
 
-    @Test func detectFormat_tarGzExtension() {
-        // tar.gz is now handled by bento7z auto-detection, mapped to sevenZip
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.tar.gz")) == .sevenZip)
-    }
-
-    @Test func detectFormat_tgzExtension() {
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.tgz")) == .sevenZip)
-    }
-
-    @Test func detectFormat_gzExtension() {
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "test.gz")) == .sevenZip)
-    }
-
-    @Test func detectFormat_unknown() {
-        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "readme.txt")) == nil)
-    }
-
-    @Test func detectFormat_zipMagicBytes() throws {
-        let tmp = fm.temporaryDirectory.appendingPathComponent("detect_\(UUID().uuidString)"); try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    @Test func compress_resetsShouldDismissAndUpdatesCurrentFileName() async throws {
+        let tmp = try makeTempDir()
         defer { try? fm.removeItem(at: tmp) }
 
-        let file = tmp.appendingPathComponent("data.bin")
-        let bytes: [UInt8] = [0x50, 0x4B, 0x03, 0x04]
-        try Data(bytes).write(to: file)
+        let fileURL = tmp.appendingPathComponent("hello.txt")
+        try "hello".write(to: fileURL, atomically: true, encoding: .utf8)
 
-        #expect(FormatDetector.detectFormat(of: file) == .zip)
+        let mock = MockArchiveEngine()
+        mock.createHandler = { _, archiveURL, _, onProgress in
+            onProgress(ArchiveProgress(fractionCompleted: 0.5, currentFile: "/path/to/hello.txt"))
+            try Data("zip".utf8).write(to: archiveURL)
+            onProgress(ArchiveProgress(fractionCompleted: 1.0, currentFile: "/path/to/hello.txt"))
+        }
+
+        let coordinator = CompressionCoordinator(engine: mock)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        await appState.loadFilesAsync(from: [fileURL])
+
+        let progressState = ProgressState()
+        progressState.shouldDismiss = true // stale state from an earlier operation
+
+        var openedWindowCount = 0
+        await coordinator.compress(appState: appState, progressState: progressState) {
+            openedWindowCount += 1
+        }
+
+        #expect(openedWindowCount == 1)
+        #expect(progressState.operationProgress == 1.0)
+        #expect(progressState.currentFileName == "hello.txt")
+        #expect(progressState.shouldDismiss)
+        #expect(!progressState.isOperationInProgress)
+        #expect(appState.lastError == nil)
     }
 
-    @Test func detectFormat_7zMagicBytes() throws {
-        let tmp = fm.temporaryDirectory.appendingPathComponent("detect_\(UUID().uuidString)"); try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    // MARK: - Extract Unique Naming & Unwrapping
+
+    @Test func extract_twiceUsesUniqueFolderAndHandlesSameNameUnwrap() async throws {
+        let tmp = try makeTempDir()
         defer { try? fm.removeItem(at: tmp) }
 
-        let file = tmp.appendingPathComponent("data.bin")
-        let bytes: [UInt8] = [0x37, 0x7A, 0xBC, 0xAF]
-        try Data(bytes).write(to: file)
+        let srcDir = tmp.appendingPathComponent("src")
+        let innerDir = srcDir.appendingPathComponent("bundle/bundle")
+        try fm.createDirectory(at: innerDir, withIntermediateDirectories: true)
+        try "payload".write(to: srcDir.appendingPathComponent("bundle/item.txt"), atomically: true, encoding: .utf8)
 
-        #expect(FormatDetector.detectFormat(of: file) == .sevenZip)
+        let archiveURL = tmp.appendingPathComponent("bundle.zip")
+        let realEngine = Bento7zEngine()
+        try await realEngine.create(
+            from: [srcDir.appendingPathComponent("bundle")],
+            to: archiveURL,
+            settings: CompressionSettings(format: .zip)
+        ) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: realEngine)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        appState.unwrapSingleTopDirectory = true
+
+        await coordinator.browseArchive(at: archiveURL, appState: appState)
+        let progressState = ProgressState()
+
+        await coordinator.extract(appState: appState, progressState: progressState)
+        let firstOutput = tmp.appendingPathComponent("bundle")
+        #expect(fm.fileExists(atPath: firstOutput.appendingPathComponent("item.txt").path))
+
+        // Second extraction creates "bundle 2" instead of overwriting "bundle"
+        await coordinator.extract(appState: appState, progressState: progressState)
+        let secondOutput = tmp.appendingPathComponent("bundle 2")
+        #expect(fm.fileExists(atPath: secondOutput.appendingPathComponent("item.txt").path))
     }
 
-    @Test func detectFormat_gzipMagicBytes() throws {
-        let tmp = fm.temporaryDirectory.appendingPathComponent("detect_\(UUID().uuidString)"); try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    // MARK: - Add & Remove Refresh
+
+    @Test func addAndRemoveEntries_refreshesBrowseTreeViaListEntries() async throws {
+        let tmp = try makeTempDir()
         defer { try? fm.removeItem(at: tmp) }
 
-        let file = tmp.appendingPathComponent("data.bin")
-        let bytes: [UInt8] = [0x1F, 0x8B]
-        try Data(bytes).write(to: file)
+        let fileA = tmp.appendingPathComponent("a.txt")
+        let fileB = tmp.appendingPathComponent("b.txt")
+        try "a".write(to: fileA, atomically: true, encoding: .utf8)
+        try "b".write(to: fileB, atomically: true, encoding: .utf8)
 
-        // gzip magic now maps to sevenZip (bento7z handles it)
-        #expect(FormatDetector.detectFormat(of: file) == .sevenZip)
+        let archiveURL = tmp.appendingPathComponent("archive.zip")
+        let engine = Bento7zEngine()
+        try await engine.create(from: [fileA], to: archiveURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: engine)
+        let appState = AppState()
+        let progressState = ProgressState()
+
+        await coordinator.browseArchive(at: archiveURL, appState: appState)
+        #expect(appState.fileEntries.map(\.name) == ["a.txt"])
+
+        await coordinator.addEntries(appState: appState, urls: [fileB], progressState: progressState)
+        #expect(Set(appState.fileEntries.map(\.name)) == ["a.txt", "b.txt"])
+        #expect(appState.fileEntries.allSatisfy { $0.isFromArchive })
+
+        let toRemove = appState.fileEntries.filter { $0.name == "a.txt" }
+        await coordinator.removeEntries(appState: appState, entries: toRemove, progressState: progressState)
+        #expect(appState.fileEntries.map(\.name) == ["b.txt"])
     }
 
-    @Test func detectFormat_emptyFile() throws {
-        let tmp = fm.temporaryDirectory.appendingPathComponent("detect_\(UUID().uuidString)"); try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    // MARK: - Cancellation
+
+    @Test func cancelOperation_abortsActiveOperationAndCleansUp() async throws {
+        let tmp = try makeTempDir()
         defer { try? fm.removeItem(at: tmp) }
 
-        let file = tmp.appendingPathComponent("empty.bin")
-        try Data().write(to: file)
+        let fileURL = tmp.appendingPathComponent("data.txt")
+        try "data".write(to: fileURL, atomically: true, encoding: .utf8)
 
-        #expect(FormatDetector.detectFormat(of: file) == nil)
+        let mock = MockArchiveEngine()
+        mock.createHandler = { _, archiveURL, _, _ in
+            try Data("partial".utf8).write(to: archiveURL)
+            try await Task.sleep(for: .seconds(10))
+        }
+
+        let coordinator = CompressionCoordinator(engine: mock)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        await appState.loadFilesAsync(from: [fileURL])
+
+        let progressState = ProgressState()
+        let opTask = Task {
+            await coordinator.compress(appState: appState, progressState: progressState)
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        coordinator.cancelOperation(progressState: progressState)
+        await opTask.value
+
+        #expect(!progressState.isOperationInProgress)
+        #expect(progressState.shouldDismiss)
+        #expect(appState.lastError == nil)
+        #expect(!fm.fileExists(atPath: tmp.appendingPathComponent("data.zip").path))
     }
 
-    @Test func detectFormat_extensionWinsOverMagic() throws {
-        let tmp = fm.temporaryDirectory.appendingPathComponent("detect_\(UUID().uuidString)"); try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    // MARK: - DragDropManager
+
+    @Test func dragDropManager_preparesLocalAndArchiveEntries() async throws {
+        let tmp = try makeTempDir()
+        defer {
+            try? fm.removeItem(at: tmp)
+            DragDropManager.shared.cleanup()
+        }
+
+        let fileURL = tmp.appendingPathComponent("dragme.txt")
+        try "drag-payload".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        // Local entry returns original URL
+        let localEntry = FileEntry(url: fileURL, name: "dragme.txt", isFromArchive: false)
+        let localResult = await DragDropManager.shared.prepareForDrag(localEntry, sourceArchiveURL: nil)
+        #expect(localResult == fileURL)
+
+        // Archive entry extracts only requested entry
+        let engine = Bento7zEngine()
+        let archiveURL = tmp.appendingPathComponent("drag.zip")
+        try await engine.create(from: [fileURL], to: archiveURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let entries = try await engine.listEntries(in: archiveURL)
+        let archiveEntry = try #require(entries.first(where: { $0.name == "dragme.txt" }))
+        let draggedURL = try #require(await DragDropManager.shared.prepareForDrag(archiveEntry, sourceArchiveURL: archiveURL))
+        #expect(fm.fileExists(atPath: draggedURL.path))
+        #expect(try String(contentsOf: draggedURL, encoding: .utf8) == "drag-payload")
+    }
+
+    @Test func dragDropManager_rejectsUnsafeNamesAndPropagatesPasswordErrors() async throws {
+        let tmp = try makeTempDir()
+        defer {
+            try? fm.removeItem(at: tmp)
+            DragDropManager.shared.cleanup()
+        }
+
+        let fileURL = tmp.appendingPathComponent("secret.txt")
+        try "secret-payload".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let archiveURL = tmp.appendingPathComponent("locked.7z")
+        try await engine.create(
+            from: [fileURL],
+            to: archiveURL,
+            settings: CompressionSettings(format: .sevenZip, password: "pw123")
+        ) { _ in }
+
+        let entries = try await engine.listEntries(in: archiveURL, password: "pw123")
+        let entry = try #require(entries.first)
+
+        // Password error propagates via throwing API instead of returning nil silently
+        do {
+            _ = try await DragDropManager.shared.prepareForDragThrowing(entry, sourceArchiveURL: archiveURL, password: nil)
+            #expect(Bool(false), "Expected password error")
+        } catch let err as Bento7zError {
+            #expect(err == .passwordRequired || err == .wrongPassword)
+        }
+
+        // Unsafe entry name is rejected
+        let evilEntry = FileEntry(
+            url: URL(fileURLWithPath: "/archive-root/secret.txt"),
+            name: "../evil.txt",
+            isFromArchive: true,
+            archiveRelativePath: "secret.txt"
+        )
+        do {
+            _ = try await DragDropManager.shared.prepareForDragThrowing(evilEntry, sourceArchiveURL: archiveURL, password: "pw123")
+            #expect(Bool(false), "Expected INVALID_PATH error")
+        } catch let err as Bento7zError {
+            if case .operationFailed(_, let code) = err {
+                #expect(code == "INVALID_PATH")
+            } else {
+                #expect(Bool(false), "Expected INVALID_PATH")
+            }
+        }
+    }
+
+    @Test func extract_headerUnencryptedArchive_retriesExtractionOnSubmitPassword() async throws {
+        let tmp = try makeTempDir()
         defer { try? fm.removeItem(at: tmp) }
 
-        let file = tmp.appendingPathComponent("test.zip")
-        let bytes: [UInt8] = [0x1F, 0x8B]
-        try Data(bytes).write(to: file)
+        let fileURL = tmp.appendingPathComponent("doc.txt")
+        try "classified".write(to: fileURL, atomically: true, encoding: .utf8)
 
-        #expect(FormatDetector.detectFormat(of: file) == .zip)
+        // ZIP encrypts file payloads while leaving headers readable during list
+        let engine = Bento7zEngine()
+        let archiveURL = tmp.appendingPathComponent("header_open.zip")
+        try await engine.create(
+            from: [fileURL],
+            to: archiveURL,
+            settings: CompressionSettings(format: .zip, password: "unlock-me")
+        ) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: engine)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        await coordinator.browseArchive(at: archiveURL, appState: appState)
+
+        #expect(appState.mode == .browseArchive)
+        #expect(!appState.needsPasswordPrompt)
+
+        let progressState = ProgressState()
+        await coordinator.extract(appState: appState, progressState: progressState)
+
+        #expect(appState.needsPasswordPrompt)
+        #expect(!appState.isPasswordRetryError)
+        #expect(appState.pendingPasswordAction == .extract(archiveURL, entries: nil, chooseDestination: false))
+
+        await coordinator.submitPassword("wrong-pw", appState: appState, progressState: progressState)
+        #expect(appState.needsPasswordPrompt)
+        #expect(appState.isPasswordRetryError)
+
+        await coordinator.submitPassword("unlock-me", appState: appState, progressState: progressState)
+        #expect(!appState.needsPasswordPrompt)
+        #expect(!appState.isPasswordRetryError)
+        #expect(appState.pendingPasswordAction == nil)
+        #expect(appState.archivePassword == "unlock-me")
+
+        let extractedFile = tmp.appendingPathComponent("header_open/doc.txt")
+        #expect(fm.fileExists(atPath: extractedFile.path))
+        #expect(try String(contentsOf: extractedFile, encoding: .utf8) == "classified")
     }
 
-    @Test func isArchiveFile_true() {
-        #expect(FormatDetector.isArchiveFile(URL(fileURLWithPath: "test.zip")))
+    @Test func compress_preservesDirectoryWithDotsAndSanitizesArchiveName() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let versionedDir = tmp.appendingPathComponent("Project.v1.0")
+        try fm.createDirectory(at: versionedDir, withIntermediateDirectories: true)
+        try "hello".write(to: versionedDir.appendingPathComponent("main.swift"), atomically: true, encoding: .utf8)
+
+        var recordedDestinations: [URL] = []
+        let mock = MockArchiveEngine()
+        mock.createHandler = { _, archiveURL, _, _ in
+            recordedDestinations.append(archiveURL)
+            try Data("zip".utf8).write(to: archiveURL)
+        }
+
+        let coordinator = CompressionCoordinator(engine: mock)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        await appState.loadFilesAsync(from: [versionedDir])
+
+        // Empty archiveName preserves dots in directory name
+        let progressState = ProgressState()
+        await coordinator.compress(appState: appState, progressState: progressState)
+        #expect(recordedDestinations.last?.lastPathComponent == "Project.v1.0.zip")
+
+        // Bare/dirty archiveName is sanitized and gets format extension appended
+        appState.compressionSettings.archiveName = "  my/dirty:backup  "
+        await coordinator.compress(appState: appState, progressState: progressState)
+        #expect(recordedDestinations.last?.lastPathComponent == "mydirtybackup.zip")
     }
 
-    @Test func isArchiveFile_false() {
-        #expect(!FormatDetector.isArchiveFile(URL(fileURLWithPath: "readme.txt")))
+    @Test func coordinator_ignoresLateProgressAfterCompletionAndPreventsReentrantCompress() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let fileURL = tmp.appendingPathComponent("data.txt")
+        try "data".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let mock = MockArchiveEngine()
+        var createCount = 0
+        mock.createHandler = { _, archiveURL, _, onProgress in
+            createCount += 1
+            onProgress(ArchiveProgress(fractionCompleted: 0.4, currentFile: "working.txt"))
+            try await Task.sleep(for: .milliseconds(80))
+            try Data("zip".utf8).write(to: archiveURL)
+            // Schedule a late progress update after create returns
+            Task {
+                try? await Task.sleep(for: .milliseconds(60))
+                onProgress(ArchiveProgress(fractionCompleted: 0.25, currentFile: "stale.txt"))
+            }
+        }
+
+        let coordinator = CompressionCoordinator(engine: mock)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        await appState.loadFilesAsync(from: [fileURL])
+
+        let progressState = ProgressState()
+        async let first: Void = coordinator.compress(appState: appState, progressState: progressState)
+        try await Task.sleep(for: .milliseconds(20))
+        // Second re-entrant call while first is active must be ignored
+        await coordinator.compress(appState: appState, progressState: progressState)
+        await first
+
+        #expect(createCount == 1)
+
+        // Wait past the late callback delay and verify progressState was not overwritten
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(progressState.operationProgress == 1.0)
+        #expect(progressState.currentFileName != "stale.txt")
+        #expect(!progressState.isOperationInProgress)
     }
 }
