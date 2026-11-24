@@ -16,6 +16,6 @@ struct CompressionSettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(VisualEffectBackground(material: .sidebar))
+        .background(Color(nsColor: .controlBackgroundColor).ignoresSafeArea(edges: .top))
     }
 }

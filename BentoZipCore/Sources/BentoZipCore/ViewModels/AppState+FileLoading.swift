@@ -8,13 +8,18 @@ extension AppState {
     public func loadFiles(from urls: [URL]) {
         loadTask?.cancel()
         loadTask = Task { [weak self] in
-            await self?.loadFilesAsync(from: urls)
+            await self?.performLoadFiles(from: urls)
         }
     }
 
     /// Async variant of `loadFiles(from:)` suitable for awaiting completion in callers and tests.
     public func loadFilesAsync(from urls: [URL]) async {
         loadTask?.cancel()
+        loadTask = nil
+        await performLoadFiles(from: urls)
+    }
+
+    private func performLoadFiles(from urls: [URL]) async {
         navigationPath = []
         selectedEntryIDs = []
         lastError = nil
@@ -53,11 +58,17 @@ extension AppState {
         guard mode == .compress else { return }
         loadTask?.cancel()
         loadTask = Task { [weak self] in
-            await self?.addEntriesAsync(from: urls)
+            await self?.performAddEntries(from: urls)
         }
     }
 
     public func addEntriesAsync(from urls: [URL]) async {
+        loadTask?.cancel()
+        loadTask = nil
+        await performAddEntries(from: urls)
+    }
+
+    private func performAddEntries(from urls: [URL]) async {
         guard mode == .compress, !urls.isEmpty else { return }
         let existingPaths = Set(fileEntries.map { $0.url.standardizedFileURL.path })
         let newURLs = urls.filter { !existingPaths.contains($0.standardizedFileURL.path) }

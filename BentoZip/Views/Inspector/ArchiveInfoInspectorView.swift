@@ -19,7 +19,7 @@ struct ArchiveInfoInspectorView: View {
 
         VStack(spacing: 0) {
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 14) {
                     if let archiveURL = appState.sourceArchiveURL {
                         HStack(spacing: 10) {
                             Image(nsImage: FileIconCache.icon(forFileAt: archiveURL.path))
@@ -34,7 +34,7 @@ struct ArchiveInfoInspectorView: View {
                                     .truncationMode(.middle)
 
                                 Text(archiveMetaSummary)
-                                    .font(.system(size: 11))
+                                    .font(.system(size: 11.5))
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -42,11 +42,7 @@ struct ArchiveInfoInspectorView: View {
                         Divider()
                     }
 
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text("Info")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-
+                    VStack(alignment: .leading, spacing: 8) {
                         infoRow("Items", value: String(localized: "\(totalCount) items"))
                         infoRow("Size", value: uncompressedStr)
 
@@ -64,12 +60,29 @@ struct ArchiveInfoInspectorView: View {
                         }
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
             }
 
             Divider()
 
-            VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button("Extract To…") {
+                    Task {
+                        await appState.coordinator.extract(
+                            appState: appState,
+                            progressState: progressState,
+                            chooseDestination: true,
+                            openWindow: openWindow
+                        )
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+
+                Spacer()
+
                 Button {
                     Task {
                         await appState.coordinator.extract(
@@ -81,30 +94,13 @@ struct ArchiveInfoInspectorView: View {
                     }
                 } label: {
                     Text("Extract")
-                        .font(.system(size: 13, weight: .medium))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 2)
+                        .frame(minWidth: 74)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-
-                Button {
-                    Task {
-                        await appState.coordinator.extract(
-                            appState: appState,
-                            progressState: progressState,
-                            chooseDestination: true,
-                            openWindow: openWindow
-                        )
-                    }
-                } label: {
-                    Text("Extract To…")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
             }
-            .padding(14)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
     }
 

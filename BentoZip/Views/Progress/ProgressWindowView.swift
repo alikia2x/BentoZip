@@ -16,30 +16,38 @@ struct ProgressWindowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 11) {
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 36, height: 36)
+                .frame(width: 32, height: 32)
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(progressState.operationDescription.isEmpty ? String(localized: "Processing…") : progressState.operationDescription)
                         .font(.system(size: 12.5, weight: .semibold))
                         .lineLimit(1)
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 4)
 
                     Text(percentageText)
                         .font(.system(size: 11.5, weight: .medium).monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .contentTransition(.numericText())
                 }
 
                 HStack(spacing: 8) {
-                    ProgressView(value: clampedProgress, total: 1.0)
-                        .progressViewStyle(.linear)
-                        .animation(.easeOut(duration: 0.14), value: clampedProgress)
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.primary.opacity(0.10))
+
+                            Capsule()
+                                .fill(Color.accentColor)
+                                .frame(width: max(0, proxy.size.width * clampedProgress))
+                                .animation(.linear(duration: 0.08), value: clampedProgress)
+                        }
+                    }
+                    .frame(height: 5)
 
                     if progressState.isCancellable {
                         Button {
@@ -52,6 +60,7 @@ struct ProgressWindowView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .focusEffectDisabled()
                         .help("Cancel")
                     }
                 }
@@ -63,10 +72,15 @@ struct ProgressWindowView: View {
                     .truncationMode(.middle)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(width: 360)
-        .background(.regularMaterial)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(width: 356, height: 72)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5)
+        )
+        .background(ProgressWindowConfigurator(targetSize: NSSize(width: 356, height: 72)))
         .onAppear {
             scheduleDismissIfNeeded()
         }
@@ -94,5 +108,38 @@ struct ProgressWindowView: View {
         dismissWindow(id: "progress")
         dismiss()
         progressState.shouldDismiss = false
+    }
+}
+
+private struct ProgressWindowConfigurator: NSViewRepresentable {
+    let targetSize: NSSize
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            configure(window: view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            configure(window: nsView.window)
+        }
+    }
+
+    private func configure(window: NSWindow?) {
+        guard let window else { return }
+        if window.styleMask.contains(.titled) {
+            window.styleMask.remove(.titled)
+        }
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        window.isMovableByWindowBackground = true
+        window.level = .floating
+        if window.frame.size != targetSize {
+            window.setContentSize(targetSize)
+        }
     }
 }

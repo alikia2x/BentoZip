@@ -2,7 +2,6 @@
   "sourceLanguage" : "en",
   "strings" : {
     "Adding to archive…" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -33,7 +32,6 @@
       }
     },
     "Compressing…" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -44,7 +42,6 @@
       }
     },
     "Compression failed: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -105,7 +102,6 @@
       }
     },
     "Extract Here" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -116,7 +112,6 @@
       }
     },
     "Extracting…" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -127,7 +122,6 @@
       }
     },
     "Extraction failed: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -138,7 +132,6 @@
       }
     },
     "Failed to add items: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -149,7 +142,6 @@
       }
     },
     "Failed to remove items: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -300,7 +292,6 @@
       }
     },
     "Removing items…" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -331,7 +322,6 @@
       }
     },
     "Unable to read archive: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {

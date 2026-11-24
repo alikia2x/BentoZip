@@ -36,7 +36,11 @@ struct ExclusionPatternsEditor: View {
                         .padding(.vertical, 3)
                         .background(
                             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(Color.primary.opacity(0.065))
+                                .fill(Color(nsColor: .textBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.75)
                         )
                     }
                 }

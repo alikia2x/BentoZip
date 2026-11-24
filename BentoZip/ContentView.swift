@@ -153,9 +153,10 @@ struct ContentView: View {
 
             if appState.showInspector {
                 Divider()
+                    .ignoresSafeArea(edges: .top)
 
                 CompressionSettingsView()
-                    .frame(width: 272)
+                    .frame(width: 268)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }

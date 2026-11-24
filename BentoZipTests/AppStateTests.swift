@@ -247,4 +247,30 @@ struct AppStateTests {
         #expect(reloadedState.mode == .empty)
         #expect(reloadedState.compressionSettings.format == .sevenZip)
     }
+
+    @Test func loadFiles_fireAndForget_entersCompressModeForDirectory() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let sub = dir.appendingPathComponent("Album")
+        try fm.createDirectory(at: sub, withIntermediateDirectories: true)
+        try Data(repeating: 0x55, count: 128).write(to: sub.appendingPathComponent("track.wav"))
+
+        let appState = AppState()
+        appState.loadFiles(from: [sub])
+
+        for _ in 0..<50 {
+            if appState.mode == .compress && !appState.isLoading {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(appState.mode == .compress)
+        #expect(appState.showInspector)
+        #expect(!appState.isLoading)
+        #expect(appState.fileEntries.count == 1)
+        #expect(appState.fileEntries[0].name == "Album")
+        #expect(appState.totalSize == 128)
+    }
 }

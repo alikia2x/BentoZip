@@ -11,206 +11,86 @@ struct CompressInspectorView: View {
     @State private var savedFeedbackVisible: Bool = false
     @State private var feedbackTask: Task<Void, Never>?
 
-    private let formatColumns = [
-        GridItem(.flexible(), spacing: 6),
-        GridItem(.flexible(), spacing: 6),
-        GridItem(.flexible(), spacing: 6),
-    ]
-
     var body: some View {
         @Bindable var appState = appState
 
         VStack(spacing: 0) {
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 13) {
-                    formatSection
-                    levelSection(appState: appState)
-                    outputNameSection(appState: appState)
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(spacing: 10) {
+                        inspectorRow("Format") {
+                            Picker("", selection: formatBinding) {
+                                ForEach(ArchiveFormat.allCases) { format in
+                                    Text(format.rawValue).tag(format)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
 
-                    if supportsPasswordEncryption {
-                        passwordSection
+                        inspectorRow("Level") {
+                            Picker("", selection: $appState.compressionSettings.compressionLevel) {
+                                ForEach(CompressionLevel.allCases) { level in
+                                    Text(level.localizedName).tag(level)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        inspectorRow("Name") {
+                            TextField(
+                                "",
+                                text: $appState.compressionSettings.archiveName,
+                                prompt: Text(appState.suggestedArchiveName)
+                            )
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12.5))
+                        }
+
+                        if supportsPasswordEncryption {
+                            inspectorRow("Password") {
+                                passwordField
+                            }
+                        }
                     }
 
                     Divider()
 
-                    exclusionsSection(appState: appState)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Preserve Folders")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(.primary)
+
+                            Spacer()
+
+                            Toggle("", isOn: $appState.compressionSettings.preserveDirectoryStructure)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Exclude")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+
+                            ExclusionPatternsEditor(patterns: $appState.compressionSettings.exclusionPatterns)
+                        }
+                    }
                 }
-                .padding(14)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
             }
 
             Divider()
-            footerActions
-        }
-        .onDisappear {
-            feedbackTask?.cancel()
-            feedbackTask = nil
-        }
-    }
 
-    private var formatSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("Format")
-
-            LazyVGrid(columns: formatColumns, spacing: 6) {
-                ForEach(ArchiveFormat.allCases) { format in
-                    let selected = appState.compressionSettings.format == format
-                    Button {
-                        appState.updateCompressionFormat(to: format)
-                    } label: {
-                        Text(format.rawValue)
-                            .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
-                            .foregroundStyle(selected ? .white : .primary)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 27)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(selected ? Color.accentColor : Color.primary.opacity(0.055))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .strokeBorder(
-                                        selected ? Color.clear : Color.primary.opacity(0.07),
-                                        lineWidth: 0.75
-                                    )
-                            )
-                            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private func levelSection(appState: AppState) -> some View {
-        @Bindable var appState = appState
-        return VStack(alignment: .leading, spacing: 7) {
-            sectionHeader("Compression")
-
-            Picker("", selection: $appState.compressionSettings.compressionLevel) {
-                ForEach(CompressionLevel.allCases) { level in
-                    Text(level.shortLocalizedName).tag(level)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.regular)
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    private func outputNameSection(appState: AppState) -> some View {
-        @Bindable var appState = appState
-        return VStack(alignment: .leading, spacing: 7) {
-            sectionHeader("Output Name")
-
-            TextField(
-                "",
-                text: $appState.compressionSettings.archiveName,
-                prompt: Text(appState.suggestedArchiveName)
-            )
-            .labelsHidden()
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 12.5))
-        }
-    }
-
-    private var passwordSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            sectionHeader("Password")
-
-            HStack(spacing: 4) {
-                Group {
-                    if showPassword {
-                        TextField("", text: passwordBinding, prompt: Text("Optional"))
-                    } else {
-                        SecureField("", text: passwordBinding, prompt: Text("Optional"))
-                    }
-                }
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
-
-                if !(appState.compressionSettings.password ?? "").isEmpty {
-                    Button {
-                        appState.compressionSettings.password = nil
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Button {
-                    showPassword.toggle()
-                } label: {
-                    Image(systemName: showPassword ? "eye.slash" : "eye")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color(nsColor: .textBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
-            )
-        }
-    }
-
-    private func exclusionsSection(appState: AppState) -> some View {
-        @Bindable var appState = appState
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Preserve Folders")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                Toggle("", isOn: $appState.compressionSettings.preserveDirectoryStructure)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                sectionHeader("Exclude")
-                ExclusionPatternsEditor(patterns: $appState.compressionSettings.exclusionPatterns)
-            }
-        }
-    }
-
-    private var footerActions: some View {
-        VStack(spacing: 10) {
-            Button {
-                Task {
-                    await appState.coordinator.compress(
-                        appState: appState,
-                        progressState: progressState,
-                        openWindow: openWindow
-                    )
-                }
-            } label: {
-                Text("Compress")
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 2)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .disabled(appState.fileEntries.isEmpty || appState.isLoading)
-
-            HStack {
+            HStack(spacing: 8) {
                 Button("Save as Default") {
                     appState.savePreferences()
                     feedbackTask?.cancel()
@@ -226,39 +106,123 @@ struct CompressInspectorView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 11.5))
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .contentShape(Rectangle())
 
-                Spacer()
-
                 if savedFeedbackVisible {
-                    Label("Saved", systemImage: "checkmark")
-                        .font(.system(size: 11, weight: .medium))
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                         .transition(.opacity)
                 }
+
+                Spacer()
+
+                Button {
+                    Task {
+                        await appState.coordinator.compress(
+                            appState: appState,
+                            progressState: progressState,
+                            openWindow: openWindow
+                        )
+                    }
+                } label: {
+                    Text("Compress")
+                        .frame(minWidth: 74)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .disabled(appState.fileEntries.isEmpty || appState.isLoading)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
-        .padding(14)
+        .onDisappear {
+            feedbackTask?.cancel()
+            feedbackTask = nil
+        }
     }
 
-    private func sectionHeader(_ title: LocalizedStringKey) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
+    private func inspectorRow<Control: View>(
+        _ label: LocalizedStringKey,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 60, alignment: .trailing)
+
+            control()
+        }
+    }
+
+    private var passwordField: some View {
+        HStack(spacing: 4) {
+            Group {
+                if showPassword {
+                    TextField("", text: passwordBinding, prompt: Text("Optional"))
+                } else {
+                    SecureField("", text: passwordBinding, prompt: Text("Optional"))
+                }
+            }
+            .labelsHidden()
+            .textFieldStyle(.plain)
+            .font(.system(size: 12.5))
+
+            if !(appState.compressionSettings.password ?? "").isEmpty {
+                Button {
+                    appState.compressionSettings.password = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button {
+                showPassword.toggle()
+            } label: {
+                Image(systemName: showPassword ? "eye.slash" : "eye")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+        )
     }
 
     private var supportsPasswordEncryption: Bool {
         appState.compressionSettings.format == .zip || appState.compressionSettings.format == .sevenZip
     }
 
+    private var formatBinding: Binding<ArchiveFormat> {
+        Binding(
+            get: { appState.compressionSettings.format },
+            set: { appState.updateCompressionFormat(to: $0) }
+        )
+    }
+
     private var passwordBinding: Binding<String> {
         Binding(
             get: { appState.compressionSettings.password ?? "" },
-            set: { newValue in
-                appState.compressionSettings.password = newValue.isEmpty ? nil : newValue
-            }
+            set: { appState.compressionSettings.password = $0.isEmpty ? nil : $0 }
         )
     }
 }
