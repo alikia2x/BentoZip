@@ -14,38 +14,49 @@ struct ContentView: View {
         appState.mode == .compress || appState.isWritableArchive
     }
 
+    private var windowTitle: String {
+        switch appState.mode {
+        case .empty:
+            return ""
+        case .compress:
+            return appState.compressionSettings.archiveName.isEmpty
+                ? appState.suggestedArchiveName
+                : appState.compressionSettings.archiveName
+        case .browseArchive:
+            return appState.sourceArchiveURL?.lastPathComponent ?? ""
+        }
+    }
+
     private var windowSubtitle: String {
         switch appState.mode {
         case .empty:
             return ""
         case .compress:
-            return "准备压缩 \(appState.fileEntries.count) 个项目"
+            return String(localized: "\(appState.fileEntries.count) items")
         case .browseArchive:
-            return appState.sourceArchiveURL?.lastPathComponent ?? ""
+            if let format = appState.archiveFormatName {
+                return appState.isReadOnlyArchive
+                    ? String(localized: "\(format) (Read-Only)")
+                    : format
+            }
+            return ""
         }
     }
 
     var body: some View {
         @Bindable var appState = appState
 
-        ZStack {
+        Group {
             switch appState.mode {
             case .empty:
                 EmptyStateView()
-                    .transition(.opacity.combined(with: .scale(scale: 0.99)))
             case .compress, .browseArchive:
-                fileBrowsingView
-                    .transition(.opacity.combined(with: .scale(scale: 0.99)))
+                workspaceView
             }
         }
-        .animation(.snappy(duration: 0.22), value: appState.mode)
-        .navigationTitle("BentoZip")
+        .navigationTitle(windowTitle)
         .navigationSubtitle(windowSubtitle)
-        .inspector(isPresented: $appState.showInspector) {
-            CompressionSettingsView()
-                .environment(appState)
-                .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
-        }
+        .toolbarBackground(appState.mode == .empty ? .hidden : .automatic, for: .windowToolbar)
         .toolbar {
             ToolbarCommands(showDeleteConfirmation: $showToolbarDeleteConfirmation)
         }
@@ -70,17 +81,17 @@ struct ContentView: View {
             .environment(appState)
             .interactiveDismissDisabled(appState.isLoading)
         }
-        .alert("操作失败", isPresented: $showErrorAlert) {
-            Button("确定") { appState.lastError = nil }
+        .alert("Operation Failed", isPresented: $showErrorAlert) {
+            Button("OK") { appState.lastError = nil }
         } message: {
             Text(appState.lastError ?? "")
         }
         .confirmationDialog(
-            "确定从压缩包中删除所选的 \(appState.selectedEntries.count) 个项目吗？",
+            Text("Delete \(appState.selectedEntries.count) selected items from archive?"),
             isPresented: $showToolbarDeleteConfirmation,
             titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 let entriesToDelete = appState.selectedEntries
                 Task {
                     await appState.coordinator.removeEntries(
@@ -91,70 +102,63 @@ struct ContentView: View {
                     )
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("此操作将修改原压缩包文件且不可撤销。")
+            Text("This modifies the archive and cannot be undone.")
         }
     }
 
-    private var fileBrowsingView: some View {
-        VStack(spacing: 0) {
-            BreadcrumbView()
-            FileListView()
-            StatusBarView()
-        }
-        .dropDestination(for: URL.self) { items, _ in
-            guard !items.isEmpty, canAcceptFileDrop else { return false }
-            if appState.mode == .compress {
-                appState.addEntries(from: items)
-                return true
-            } else if appState.isWritableArchive {
-                Task {
-                    await appState.coordinator.addEntries(
-                        appState: appState,
-                        urls: items,
-                        progressState: progressState,
-                        openWindow: openWindow
-                    )
-                }
-                return true
+    private var workspaceView: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                FileListView()
+                BreadcrumbView()
+                StatusBarView()
             }
-            return false
-        } isTargeted: { targeted in
-            isTargeted = targeted && canAcceptFileDrop
-        }
-        .overlay {
-            if isTargeted && canAcceptFileDrop {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color.accentColor, lineWidth: 2.5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color.accentColor.opacity(0.06))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .dropDestination(for: URL.self) { items, _ in
+                guard !items.isEmpty, canAcceptFileDrop else { return false }
+                if appState.mode == .compress {
+                    appState.addEntries(from: items)
+                    return true
+                } else if appState.isWritableArchive {
+                    Task {
+                        await appState.coordinator.addEntries(
+                            appState: appState,
+                            urls: items,
+                            progressState: progressState,
+                            openWindow: openWindow
+                        )
+                    }
+                    return true
+                }
+                return false
+            } isTargeted: { targeted in
+                isTargeted = targeted && canAcceptFileDrop
+            }
+            .overlay {
+                if isTargeted && canAcceptFileDrop {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.05))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 2)
                         )
                         .padding(6)
-
-                    Label(
-                        appState.mode == .browseArchive ? "松开以添加到压缩包" : "松开以添加到压缩列表",
-                        systemImage: "plus.circle.fill"
-                    )
-                    .font(.headline)
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial, in: Capsule())
-                    .shadow(radius: 8)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
                 }
-                .allowsHitTesting(false)
-                .transition(.opacity)
+            }
+            .animation(.easeOut(duration: 0.14), value: isTargeted)
+
+            if appState.showInspector {
+                Divider()
+
+                CompressionSettingsView()
+                    .frame(width: 272)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .animation(.snappy(duration: 0.18), value: isTargeted)
+        .clipped()
     }
-}
-
-#Preview {
-    ContentView()
-        .environment(AppState())
-        .environment(ProgressState())
 }

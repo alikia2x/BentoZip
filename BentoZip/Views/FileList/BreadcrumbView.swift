@@ -1,6 +1,9 @@
-import SwiftUI
+import AppKit
 import BentoZipCore
+import SwiftUI
+import UniformTypeIdentifiers
 
+/// Finder-style bottom Path Bar displayed above the Status Bar when inside a subfolder or scanning.
 struct BreadcrumbView: View {
     @Environment(AppState.self) private var appState
     @State private var hoveredSegmentIndex: Int?
@@ -9,86 +12,72 @@ struct BreadcrumbView: View {
         if appState.mode == .browseArchive, let name = appState.sourceArchiveURL?.lastPathComponent {
             return name
         }
-        return "全部文件"
+        return String(localized: "Root")
     }
 
-    private var rootIcon: String {
-        appState.mode == .browseArchive ? "doc.zipper" : "folder.fill"
+    private var rootIcon: NSImage {
+        if appState.mode == .browseArchive, let path = appState.sourceArchiveURL?.path {
+            return FileIconCache.icon(forFileAt: path)
+        }
+        return NSWorkspace.shared.icon(for: .folder)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Button {
-                    appState.navigateUp()
-                } label: {
-                    Image(systemName: "chevron.backward")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 24, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .disabled(!appState.canNavigateUp)
-                .help("返回上一级 (⌘↑)")
-
+        if appState.canNavigateUp || appState.isLoading {
+            VStack(spacing: 0) {
                 Divider()
-                    .frame(height: 14)
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 2) {
-                        breadcrumbButton(
-                            title: rootLabel,
-                            icon: rootIcon,
-                            index: 0,
-                            isCurrent: appState.navigationPath.isEmpty
-                        ) {
-                            appState.navigateBack(to: 0)
-                        }
+                HStack(spacing: 4) {
+                    if appState.canNavigateUp {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 2) {
+                                pathSegment(
+                                    title: rootLabel,
+                                    icon: rootIcon,
+                                    index: 0,
+                                    isCurrent: false
+                                ) {
+                                    appState.navigateBack(to: 0)
+                                }
 
-                        ForEach(Array(appState.navigationPath.enumerated()), id: \.element.id) { index, entry in
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                                .padding(.horizontal, 2)
+                                ForEach(Array(appState.navigationPath.enumerated()), id: \.element.id) { index, entry in
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(.tertiary)
+                                        .padding(.horizontal, 2)
 
-                            let isLast = index == appState.navigationPath.count - 1
-                            breadcrumbButton(
-                                title: entry.name,
-                                icon: "folder.fill",
-                                index: index + 1,
-                                isCurrent: isLast
-                            ) {
-                                appState.navigateBack(to: index + 1)
+                                    let isLast = index == appState.navigationPath.count - 1
+                                    pathSegment(
+                                        title: entry.name,
+                                        icon: FileIconCache.icon(for: entry),
+                                        index: index + 1,
+                                        isCurrent: isLast
+                                    ) {
+                                        appState.navigateBack(to: index + 1)
+                                    }
+                                }
                             }
                         }
                     }
-                    .padding(.vertical, 4)
-                }
 
-                if appState.isLoading {
-                    HStack(spacing: 6) {
+                    Spacer(minLength: 8)
+
+                    if appState.isLoading {
                         ProgressView()
                             .controlSize(.small)
-                        Text("正在扫描...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .scaleEffect(0.72)
                     }
-                    .padding(.leading, 8)
-                    .transition(.opacity)
                 }
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .background(.bar)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .background(.bar)
-
-            Divider()
         }
-        .animation(.easeInOut(duration: 0.15), value: appState.isLoading)
     }
 
-    private func breadcrumbButton(
+    private func pathSegment(
         title: String,
-        icon: String,
+        icon: NSImage,
         index: Int,
         isCurrent: Bool,
         action: @escaping () -> Void
@@ -100,33 +89,28 @@ struct BreadcrumbView: View {
                 action()
             }
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.caption)
-                    .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
+            HStack(spacing: 4) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 14, height: 14)
 
                 Text(title)
-                    .font(.callout.weight(isCurrent ? .semibold : .regular))
+                    .font(.system(size: 11.5, weight: isCurrent ? .medium : .regular))
                     .foregroundStyle(isCurrent ? .primary : .secondary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isHovered ? Color.secondary.opacity(0.14) : Color.clear)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(isHovered ? Color.primary.opacity(0.07) : Color.clear)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isCurrent)
         .onHover { hovering in
             hoveredSegmentIndex = hovering ? index : (hoveredSegmentIndex == index ? nil : hoveredSegmentIndex)
         }
     }
-}
-
-#Preview {
-    BreadcrumbView()
-        .environment(AppState())
 }

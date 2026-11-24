@@ -10,42 +10,39 @@ struct PasswordPromptSheet: View {
     var onSubmit: ((String) async -> Void)? = nil
 
     private var archiveName: String {
-        (appState.pendingPasswordArchiveURL ?? appState.sourceArchiveURL)?.lastPathComponent ?? "压缩包"
+        (appState.pendingPasswordArchiveURL ?? appState.sourceArchiveURL)?.lastPathComponent ?? String(localized: "Archive")
     }
 
     var body: some View {
-        VStack(spacing: 18) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.orange.opacity(0.14))
-                    .frame(width: 52, height: 52)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.secondary)
 
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.orange)
+                Text(archiveName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
-            VStack(spacing: 6) {
-                Text("输入密码以打开「\(archiveName)」")
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-
-                Text(appState.passwordPromptReason ?? "此压缩包受密码保护，请输入密码以继续。")
-                    .font(.callout)
-                    .foregroundStyle(appState.isPasswordRetryError ? .red : .secondary)
-                    .multilineTextAlignment(.center)
+            if appState.isPasswordRetryError {
+                Text("Incorrect password, please try again")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.red)
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 Group {
                     if showPassword {
-                        TextField("输入密码", text: $password)
+                        TextField("", text: $password, prompt: Text("Enter Password"))
                     } else {
-                        SecureField("输入密码", text: $password)
+                        SecureField("", text: $password, prompt: Text("Enter Password"))
                     }
                 }
-                .textFieldStyle(.roundedBorder)
+                .labelsHidden()
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
                 .focused($isPasswordFocused)
                 .onSubmit {
                     submit()
@@ -55,20 +52,25 @@ struct PasswordPromptSheet: View {
                     showPassword.toggle()
                 } label: {
                     Image(systemName: showPassword ? "eye.slash" : "eye")
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(showPassword ? "隐藏密码" : "显示密码")
             }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+            )
 
-            HStack(spacing: 10) {
-                Button("取消") {
-                    cancel()
-                }
-                .keyboardShortcut(.cancelAction)
-
+            HStack(spacing: 8) {
                 Spacer()
 
                 if appState.isLoading {
@@ -76,16 +78,22 @@ struct PasswordPromptSheet: View {
                         .controlSize(.small)
                 }
 
-                Button("解锁") {
+                Button("Cancel") {
+                    appState.cancelPasswordPrompt()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Unlock") {
                     submit()
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(password.isEmpty || appState.isLoading)
             }
+            .padding(.top, 2)
         }
-        .padding(24)
-        .frame(width: 380)
+        .padding(20)
+        .frame(width: 340)
         .onAppear {
             password = ""
             isPasswordFocused = true
@@ -113,13 +121,4 @@ struct PasswordPromptSheet: View {
             }
         }
     }
-
-    private func cancel() {
-        appState.cancelPasswordPrompt()
-    }
-}
-
-#Preview {
-    PasswordPromptSheet()
-        .environment(AppState())
 }

@@ -1,6 +1,7 @@
 import SwiftUI
 import BentoZipCore
 
+/// Finder-style bottom Status Bar with zero middle dots.
 struct StatusBarView: View {
     @Environment(AppState.self) private var appState
 
@@ -20,7 +21,16 @@ struct StatusBarView: View {
         }
     }
 
-    private var formattedPackedInfo: String? {
+    private var summaryText: String {
+        let count = appState.displayedEntries.count
+        if !appState.selectedEntryIDs.isEmpty {
+            let selectedSize = Self.byteFormatter.string(fromByteCount: selectedEntriesSize)
+            return String(localized: "\(appState.selectedEntryIDs.count) of \(count) selected, \(selectedSize)")
+        }
+        return String(localized: "\(count) items, \(formattedTotalSize)")
+    }
+
+    private var packedSummaryText: String? {
         guard appState.mode == .browseArchive,
               let packed = appState.totalPackedSize,
               packed > 0 else {
@@ -29,9 +39,9 @@ struct StatusBarView: View {
         let packedStr = Self.byteFormatter.string(fromByteCount: packed)
         if appState.totalSize > 0 && packed <= appState.totalSize {
             let ratio = Int(((Double(appState.totalSize - packed) / Double(appState.totalSize)) * 100).rounded())
-            return "压缩后 \(packedStr) · 节省 \(ratio)%"
+            return String(localized: "Packed \(packedStr) (\(ratio)% saved)")
         }
-        return "压缩后 \(packedStr)"
+        return String(localized: "Packed \(packedStr)")
     }
 
     var body: some View {
@@ -39,64 +49,27 @@ struct StatusBarView: View {
             Divider()
 
             HStack(spacing: 10) {
-                Text("共 \(appState.displayedEntries.count) 项")
-                    .monospacedDigit()
-
-                if !appState.selectedEntryIDs.isEmpty {
-                    Text("·")
-                        .foregroundStyle(.tertiary)
-                    Text("已选 \(appState.selectedEntryIDs.count) 项 (\(Self.byteFormatter.string(fromByteCount: selectedEntriesSize)))")
-                        .foregroundStyle(.primary)
-                        .monospacedDigit()
-                }
-
-                Text("·")
-                    .foregroundStyle(.tertiary)
-
-                Text("总大小 \(formattedTotalSize)")
+                Text(summaryText)
                     .monospacedDigit()
 
                 Spacer(minLength: 12)
 
-                if let packedInfo = formattedPackedInfo {
-                    Text(packedInfo)
+                if let packedSummary = packedSummaryText {
+                    Text(packedSummary)
                         .monospacedDigit()
                 }
 
                 if appState.mode == .browseArchive && appState.isArchiveEncrypted {
-                    Label("已加密", systemImage: "lock.fill")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(Color.orange.opacity(0.14))
-                        )
-                }
-
-                if appState.mode == .browseArchive, let formatName = appState.archiveFormatName {
-                    HStack(spacing: 4) {
-                        Text(formatName)
-                            .font(.caption2.weight(.semibold))
-                        if appState.isReadOnlyArchive {
-                            Text("只读")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(Color.secondary.opacity(0.14))
-                    )
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .help("Encrypted")
                 }
             }
-            .font(.caption)
+            .font(.system(size: 11))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .frame(height: 23)
             .background(.bar)
         }
     }
@@ -107,9 +80,4 @@ struct StatusBarView: View {
         }
         return entry.size
     }
-}
-
-#Preview {
-    StatusBarView()
-        .environment(AppState())
 }

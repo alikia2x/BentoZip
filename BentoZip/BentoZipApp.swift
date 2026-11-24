@@ -26,16 +26,18 @@ struct BentoZipApp: App {
             ContentView()
                 .environment(appState)
                 .environment(progressState)
-                .frame(minWidth: 720, minHeight: 460)
+                .frame(minWidth: 700, minHeight: 440)
         }
-        .defaultSize(width: 900, height: 600)
+        .defaultSize(width: 860, height: 540)
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified)
         .handlesExternalEvents(matching: ["*"])
         .commands {
             InspectorCommands()
         }
         .modelContainer(sharedModelContainer)
 
-        Window("进度", id: "progress") {
+        Window("Progress", id: "progress") {
             ProgressWindowView()
                 .environment(progressState)
         }

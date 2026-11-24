@@ -1,23 +1,6 @@
 import AppKit
 import BentoZipCore
 import SwiftUI
-import UniformTypeIdentifiers
-
-private extension FileEntry {
-    var sortableSize: Int64 {
-        isDirectory ? -1 : size
-    }
-
-    var sortableType: String {
-        if isDirectory { return "文件夹" }
-        let ext = url.pathExtension
-        return ext.isEmpty ? "文件" : ext.uppercased()
-    }
-
-    var sortableModificationDate: Date {
-        modificationDate ?? .distantPast
-    }
-}
 
 struct FileListView: View {
     @Environment(AppState.self) private var appState
@@ -27,13 +10,15 @@ struct FileListView: View {
     @State private var sortOrder: [KeyPathComparator<FileEntry>] = [
         KeyPathComparator(\.name, comparator: .localizedStandard, order: .forward)
     ]
+    @State private var sortedEntries: [FileEntry] = []
     @State private var showDeleteConfirmation = false
     @State private var pendingDeleteEntries: [FileEntry] = []
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateStyle = .short
+        formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        formatter.doesRelativeDateFormatting = true
         return formatter
     }()
 
@@ -50,278 +35,311 @@ struct FileListView: View {
         )
     }
 
-    private var emptyOverlayDescription: String {
-        if appState.canNavigateUp {
-            return "按 Escape 或点击返回上一级"
-        }
-        if appState.isReadOnlyArchive {
-            return "此压缩包为空"
-        }
-        return "拖放文件到窗口中即可添加"
-    }
-
-    private var sortedEntries: [FileEntry] {
-        let base = appState.displayedEntries
-        if let firstComparator = sortOrder.first, firstComparator.keyPath == \FileEntry.name {
-            let folders = base.filter(\.isDirectory).sorted(using: sortOrder)
-            let files = base.filter { !$0.isDirectory }.sorted(using: sortOrder)
-            return folders + files
-        }
-        return base.sorted(using: sortOrder)
-    }
-
     var body: some View {
-        Table(of: FileEntry.self, selection: selectionBinding, sortOrder: $sortOrder) {
-            TableColumn("名称", value: \.name) { entry in
-                HStack(spacing: 8) {
-                    Image(systemName: iconName(for: entry))
-                        .foregroundStyle(iconForegroundColor(for: entry))
-                        .font(.system(size: 14))
-                        .frame(width: 18)
-
-                    Text(entry.name)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    if entry.isEncrypted {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.orange)
-                            .help("此条目已加密")
-                    }
-                }
-            }
-            .width(min: 180, ideal: 280)
-
-            TableColumn("大小", value: \.sortableSize) { entry in
-                if entry.isDirectory {
-                    Text("\(entry.children?.count ?? 0) 项")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                } else {
-                    Text(Self.byteFormatter.string(fromByteCount: entry.size))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-            }
-            .width(min: 70, ideal: 95)
-
-            TableColumn("类型", value: \.sortableType) { entry in
-                Text(entry.sortableType)
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 70, ideal: 90)
-
-            TableColumn("修改日期", value: \.sortableModificationDate) { entry in
-                if let date = entry.modificationDate {
-                    Text(Self.dateFormatter.string(from: date))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                } else {
-                    Text("—")
+        tableView
+            .tableStyle(.inset(alternatesRowBackgrounds: true))
+            .onAppear { rebuildSortedEntries() }
+            .onChange(of: appState.displayedEntries) { _, _ in rebuildSortedEntries() }
+            .onChange(of: sortOrder) { _, _ in rebuildSortedEntries() }
+            .overlay {
+                if sortedEntries.isEmpty && !appState.isLoading {
+                    Text("Empty Folder")
+                        .font(.system(size: 13))
                         .foregroundStyle(.tertiary)
                 }
             }
-            .width(min: 120, ideal: 150)
-        } rows: {
-            ForEach(sortedEntries) { entry in
-                TableRow(entry)
-                    .itemProvider {
-                        makeItemProvider(for: entry)
-                    }
+            .onKeyPress(.return) { handleOpenSelection(); return .handled }
+            .onKeyPress(.space) { toggleQuickLook(); return .handled }
+            .onKeyPress(.delete) { handleDeleteSelection(); return .handled }
+            .onKeyPress(.escape) {
+                if appState.canNavigateUp { appState.navigateUp() } else { appState.clearSelection() }
+                return .handled
             }
-        }
-        .overlay {
-            if sortedEntries.isEmpty && !appState.isLoading {
-                ContentUnavailableView(
-                    "此文件夹为空",
-                    systemImage: "folder",
-                    description: Text(emptyOverlayDescription)
-                )
-            }
-        }
-        .onKeyPress(.return) {
-            handleReturnKey()
-            return .handled
-        }
-        .onKeyPress(.space) {
-            toggleQuickLookForSelection()
-            return .handled
-        }
-        .onKeyPress(.delete) {
-            handleDeleteKey()
-            return .handled
-        }
-        .onKeyPress(.escape) {
-            if appState.canNavigateUp {
+            .onKeyPress(keys: [.upArrow]) { press in
+                guard press.modifiers.contains(.command), appState.canNavigateUp else { return .ignored }
                 appState.navigateUp()
-            } else {
-                appState.clearSelection()
+                return .handled
             }
-            return .handled
-        }
-        .onKeyPress(keys: [.upArrow]) { press in
-            guard press.modifiers.contains(.command), appState.canNavigateUp else {
-                return .ignored
+            .onKeyPress(keys: [.downArrow]) { press in
+                guard press.modifiers.contains(.command) else { return .ignored }
+                handleOpenSelection()
+                return .handled
             }
-            appState.navigateUp()
-            return .handled
-        }
-        .contextMenu(forSelectionType: UUID.self) { selection in
-            let targets = entriesForContextAction(selection: selection)
-            if targets.count == 1, let entry = targets.first {
-                if entry.isDirectory {
-                    Button("打开文件夹") {
-                        appState.navigateInto(entry)
-                    }
-                } else {
-                    Button("快速查看") {
-                        previewEntries([entry])
-                    }
-                }
-                Divider()
-            } else if targets.contains(where: { !$0.isDirectory }) {
-                Button("快速查看") {
-                    previewEntries(targets)
-                }
-                Divider()
+            .contextMenu(forSelectionType: UUID.self) { selection in
+                contextMenuItems(for: selection)
+            } primaryAction: { selection in
+                handlePrimaryAction(for: selection)
             }
-
-            if appState.mode == .browseArchive && !targets.isEmpty {
-                Button("解压所选...") {
+            .confirmationDialog(
+                Text("Delete \(pendingDeleteEntries.count) selected items from archive?"),
+                isPresented: $showDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    let entriesToDelete = pendingDeleteEntries
+                    pendingDeleteEntries = []
                     Task {
-                        await appState.coordinator.extract(
+                        await appState.coordinator.removeEntries(
                             appState: appState,
+                            entries: entriesToDelete,
                             progressState: progressState,
-                            entries: targets,
-                            chooseDestination: true,
                             openWindow: openWindow
                         )
                     }
                 }
+                Button("Cancel", role: .cancel) { pendingDeleteEntries = [] }
+            } message: {
+                Text("This modifies the archive and cannot be undone.")
             }
+    }
 
-            if appState.mode == .compress && !targets.isEmpty {
-                Button("从列表移除", role: .destructive) {
-                    appState.selectedEntryIDs = Set(targets.map(\.id))
-                    appState.removeSelectedEntries()
-                }
-            } else if appState.isWritableArchive && !targets.isEmpty {
-                Button("从压缩包中删除...", role: .destructive) {
-                    pendingDeleteEntries = targets
-                    showDeleteConfirmation = true
-                }
-            }
+    // MARK: - Finder Table
 
-            if targets.count == 1, let entry = targets.first {
-                Divider()
-                Button(entry.isFromArchive ? "复制归档路径" : "复制路径") {
-                    let pathString = entry.archiveRelativePath ?? entry.url.path
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(pathString, forType: .string)
-                }
+    @ViewBuilder
+    private var tableView: some View {
+        if appState.mode == .browseArchive {
+            Table(of: FileEntry.self, selection: selectionBinding, sortOrder: $sortOrder) {
+                TableColumn("Name", value: \.name) { nameCell(for: $0) }
+                    .width(min: 140, ideal: 200)
+                TableColumn("Date Modified", value: \.sortableModificationDate) { dateCell(for: $0) }
+                    .width(min: 108, ideal: 132)
+                TableColumn("Size", value: \.sortableSize) { sizeCell(for: $0) }
+                    .width(min: 62, ideal: 74)
+                TableColumn("Packed", value: \.sortablePackedSize) { packedCell(for: $0) }
+                    .width(min: 62, ideal: 74)
+                TableColumn("Kind") { kindCell(for: $0) }
+                    .width(min: 68, ideal: 92)
+            } rows: {
+                tableRows
             }
-        } primaryAction: { selection in
-            handlePrimaryAction(for: selection)
+        } else {
+            Table(of: FileEntry.self, selection: selectionBinding, sortOrder: $sortOrder) {
+                TableColumn("Name", value: \.name) { nameCell(for: $0) }
+                    .width(min: 150, ideal: 215)
+                TableColumn("Date Modified", value: \.sortableModificationDate) { dateCell(for: $0) }
+                    .width(min: 112, ideal: 138)
+                TableColumn("Size", value: \.sortableSize) { sizeCell(for: $0) }
+                    .width(min: 64, ideal: 78)
+                TableColumn("Kind") { kindCell(for: $0) }
+                    .width(min: 72, ideal: 96)
+            } rows: {
+                tableRows
+            }
         }
-        .confirmationDialog(
-            "确定从压缩包中删除所选的 \(pendingDeleteEntries.count) 个项目吗？",
-            isPresented: $showDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("删除", role: .destructive) {
-                let entriesToDelete = pendingDeleteEntries
-                pendingDeleteEntries = []
+    }
+
+    // MARK: - Finder Columns
+
+    private func nameCell(for entry: FileEntry) -> some View {
+        HStack(spacing: 6) {
+            Image(nsImage: FileIconCache.icon(for: entry))
+                .resizable()
+                .frame(width: 16, height: 16)
+
+            Text(entry.name)
+                .font(.system(size: 13))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            if entry.isEncrypted {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func dateCell(for entry: FileEntry) -> some View {
+        Group {
+            if let date = entry.modificationDate {
+                Text(Self.dateFormatter.string(from: date))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("--")
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .font(.system(size: 12))
+        .monospacedDigit()
+    }
+
+    private func sizeCell(for entry: FileEntry) -> some View {
+        let text: String = if entry.isDirectory {
+            entry.size > 0 ? Self.byteFormatter.string(fromByteCount: entry.size) : "--"
+        } else {
+            Self.byteFormatter.string(fromByteCount: entry.size)
+        }
+        return Text(text)
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func packedCell(for entry: FileEntry) -> some View {
+        Group {
+            if let packed = entry.packedSize, !entry.isDirectory, packed > 0 {
+                Text(Self.byteFormatter.string(fromByteCount: packed))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("--")
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .font(.system(size: 12))
+        .monospacedDigit()
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func kindCell(for entry: FileEntry) -> some View {
+        Text(FileKindCache.localizedKind(for: entry))
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+
+    // MARK: - Finder Outline Disclosure Rows
+
+    @TableRowBuilder<FileEntry>
+    private var tableRows: some TableRowContent<FileEntry> {
+        ForEach(sortedEntries) { entry in
+            outlineRowLevel0(entry)
+        }
+    }
+
+    @TableRowBuilder<FileEntry>
+    private func outlineRowLevel0(_ entry: FileEntry) -> some TableRowContent<FileEntry> {
+        if entry.isDirectory, let children = entry.children, !children.isEmpty {
+            DisclosureTableRow(entry) {
+                ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
+                    outlineRowLevel1(child)
+                }
+            }
+        } else {
+            TableRow(entry)
+                .itemProvider { FileListTreeSupport.makeItemProvider(for: entry, appState: appState) }
+        }
+    }
+
+    @TableRowBuilder<FileEntry>
+    private func outlineRowLevel1(_ entry: FileEntry) -> some TableRowContent<FileEntry> {
+        if entry.isDirectory, let children = entry.children, !children.isEmpty {
+            DisclosureTableRow(entry) {
+                ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
+                    outlineRowLevel2(child)
+                }
+            }
+        } else {
+            TableRow(entry)
+                .itemProvider { FileListTreeSupport.makeItemProvider(for: entry, appState: appState) }
+        }
+    }
+
+    @TableRowBuilder<FileEntry>
+    private func outlineRowLevel2(_ entry: FileEntry) -> some TableRowContent<FileEntry> {
+        if entry.isDirectory, let children = entry.children, !children.isEmpty {
+            DisclosureTableRow(entry) {
+                ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
+                    TableRow(child)
+                        .itemProvider { FileListTreeSupport.makeItemProvider(for: child, appState: appState) }
+                }
+            }
+        } else {
+            TableRow(entry)
+                .itemProvider { FileListTreeSupport.makeItemProvider(for: entry, appState: appState) }
+        }
+    }
+
+    // MARK: - Context Menu & Actions
+
+    @ViewBuilder
+    private func contextMenuItems(for selection: Set<UUID>) -> some View {
+        let ids = selection.isEmpty ? appState.selectedEntryIDs : selection
+        let targets = FileListTreeSupport.findEntries(matching: ids, in: sortedEntries)
+
+        if targets.count == 1, let entry = targets.first {
+            if entry.isDirectory {
+                Button("Open") { appState.navigateInto(entry) }
+            } else {
+                Button("Quick Look") { previewEntries([entry]) }
+            }
+            Divider()
+        } else if targets.contains(where: { !$0.isDirectory }) {
+            Button("Quick Look") { previewEntries(targets) }
+            Divider()
+        }
+
+        if appState.mode == .browseArchive && !targets.isEmpty {
+            Button("Extract Selected…") {
                 Task {
-                    await appState.coordinator.removeEntries(
+                    await appState.coordinator.extract(
                         appState: appState,
-                        entries: entriesToDelete,
                         progressState: progressState,
+                        entries: targets,
+                        chooseDestination: true,
                         openWindow: openWindow
                     )
                 }
             }
-            Button("取消", role: .cancel) {
-                pendingDeleteEntries = []
+        }
+
+        if appState.mode == .compress && targets.count == 1, let entry = targets.first {
+            Button("Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([entry.url])
             }
-        } message: {
-            Text("此操作将修改原压缩包文件且不可撤销。")
+        }
+
+        if appState.mode == .compress && !targets.isEmpty {
+            Button("Remove", role: .destructive) {
+                appState.selectedEntryIDs = Set(targets.map(\.id))
+                appState.removeSelectedEntries()
+            }
+        } else if appState.isWritableArchive && !targets.isEmpty {
+            Button("Delete…", role: .destructive) {
+                pendingDeleteEntries = targets
+                showDeleteConfirmation = true
+            }
+        }
+
+        if targets.count == 1, let entry = targets.first {
+            Divider()
+            Button("Copy Path") {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(entry.archiveRelativePath ?? entry.url.path, forType: .string)
+            }
         }
     }
 
-    // MARK: - Drag & Drop
-
-    private func makeItemProvider(for entry: FileEntry) -> NSItemProvider {
-        let provider = NSItemProvider()
-        provider.suggestedName = entry.name
-
-        let sourceArchiveURL = appState.sourceArchiveURL
-        let password = appState.archivePassword
-
-        provider.registerFileRepresentation(
-            forTypeIdentifier: UTType.item.identifier,
-            fileOptions: [],
-            visibility: .all
-        ) { completion in
-            Task { @MainActor in
-                do {
-                    let localURL = try await DragDropManager.shared.prepareForDragThrowing(
-                        entry,
-                        sourceArchiveURL: sourceArchiveURL,
-                        password: password
-                    )
-                    completion(localURL, false, nil)
-                } catch {
-                    handleEntryExtractionError(error)
-                    completion(nil, false, error)
-                }
-            }
-            return nil
-        }
-
-        return provider
-    }
-
-    // MARK: - Actions
-
-    private func entriesForContextAction(selection: Set<UUID>) -> [FileEntry] {
-        let ids = selection.isEmpty ? appState.selectedEntryIDs : selection
-        return sortedEntries.filter { ids.contains($0.id) }
+    private func rebuildSortedEntries() {
+        sortedEntries = FileListTreeSupport.sorted(appState.displayedEntries, using: sortOrder)
     }
 
     private func handlePrimaryAction(for selection: Set<UUID>) {
         guard selection.count == 1,
               let selectedID = selection.first,
-              let entry = sortedEntries.first(where: { $0.id == selectedID }) else {
+              let entry = FileListTreeSupport.findEntries(matching: [selectedID], in: sortedEntries).first else {
             return
         }
-        if entry.isDirectory {
-            appState.navigateInto(entry)
-        } else {
-            previewEntries([entry])
-        }
+        if entry.isDirectory { appState.navigateInto(entry) } else { previewEntries([entry]) }
     }
 
-    private func handleReturnKey() {
-        let selected = appState.selectedEntries
+    private func handleOpenSelection() {
+        let selected = FileListTreeSupport.findEntries(matching: appState.selectedEntryIDs, in: sortedEntries)
         guard selected.count == 1, let entry = selected.first else { return }
-        if entry.isDirectory {
-            appState.navigateInto(entry)
-        } else {
-            previewEntries([entry])
-        }
+        if entry.isDirectory { appState.navigateInto(entry) } else { previewEntries([entry]) }
     }
 
-    private func toggleQuickLookForSelection() {
-        let selected = appState.selectedEntries
+    private func toggleQuickLook() {
+        let selected = FileListTreeSupport.findEntries(matching: appState.selectedEntryIDs, in: sortedEntries)
         guard !selected.isEmpty else { return }
         QuickLookHelper.shared.togglePreview(
             entries: selected,
             sourceArchiveURL: appState.sourceArchiveURL,
             password: appState.archivePassword
         ) { error in
-            handleEntryExtractionError(error)
+            FileListTreeSupport.handleExtractionError(error, appState: appState)
         }
     }
 
@@ -331,90 +349,18 @@ struct FileListView: View {
             sourceArchiveURL: appState.sourceArchiveURL,
             password: appState.archivePassword
         ) { error in
-            handleEntryExtractionError(error)
+            FileListTreeSupport.handleExtractionError(error, appState: appState)
         }
     }
 
-    private func handleEntryExtractionError(_ error: Error) {
-        if let bentoError = error as? Bento7zError,
-           bentoError == .passwordRequired || bentoError == .wrongPassword {
-            if bentoError == .wrongPassword {
-                appState.archivePassword = nil
-            }
-            appState.pendingPasswordArchiveURL = appState.sourceArchiveURL
-            appState.isPasswordRetryError = (bentoError == .wrongPassword)
-            appState.passwordPromptReason = bentoError.localizedDescription
-            appState.needsPasswordPrompt = true
-        } else {
-            appState.lastError = error.localizedDescription
-        }
-    }
-
-    private func handleDeleteKey() {
-        guard !appState.selectedEntries.isEmpty else { return }
+    private func handleDeleteSelection() {
+        let selected = FileListTreeSupport.findEntries(matching: appState.selectedEntryIDs, in: sortedEntries)
+        guard !selected.isEmpty else { return }
         if appState.mode == .compress {
             appState.removeSelectedEntries()
         } else if appState.isWritableArchive {
-            pendingDeleteEntries = appState.selectedEntries
+            pendingDeleteEntries = selected
             showDeleteConfirmation = true
         }
     }
-
-    // MARK: - Icons & Colors
-
-    private func iconName(for entry: FileEntry) -> String {
-        if entry.isDirectory { return "folder.fill" }
-        let ext = entry.url.pathExtension.lowercased()
-        switch ext {
-        case "zip", "zipx", "7z", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "rar":
-            return "doc.zipper"
-        case "pdf":
-            return "doc.richtext.fill"
-        case "jpg", "jpeg", "png", "gif", "tiff", "bmp", "svg", "heic", "webp":
-            return "photo.fill"
-        case "mp3", "wav", "aac", "flac", "m4a", "ogg":
-            return "music.note"
-        case "mp4", "mov", "avi", "mkv", "webm":
-            return "film.fill"
-        case "txt", "md", "rtf", "log":
-            return "doc.text.fill"
-        case "json", "xml", "yaml", "yml", "plist", "toml":
-            return "curlybraces"
-        case "swift", "py", "js", "ts", "go", "rs", "java", "c", "cpp", "h", "hpp", "sh":
-            return "chevron.left.forwardslash.chevron.right"
-        case "dmg", "iso":
-            return "opticaldiscdrive"
-        case "app":
-            return "app.fill"
-        default:
-            return "doc.fill"
-        }
-    }
-
-    private func iconForegroundColor(for entry: FileEntry) -> Color {
-        if entry.isDirectory { return .cyan }
-        let ext = entry.url.pathExtension.lowercased()
-        switch ext {
-        case "zip", "zipx", "7z", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "rar":
-            return .orange
-        case "pdf":
-            return .red
-        case "jpg", "jpeg", "png", "gif", "tiff", "bmp", "svg", "heic", "webp":
-            return .cyan
-        case "mp3", "wav", "aac", "flac", "m4a", "ogg":
-            return .pink
-        case "mp4", "mov", "avi", "mkv", "webm":
-            return .purple
-        case "swift", "py", "js", "ts", "go", "rs", "java", "c", "cpp", "h", "hpp", "sh", "json", "xml", "yaml", "yml":
-            return .indigo
-        default:
-            return .secondary
-        }
-    }
-}
-
-#Preview {
-    FileListView()
-        .environment(AppState())
-        .environment(ProgressState())
 }

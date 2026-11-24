@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		C402B2072FCB3D3D00F97BE8 /* BentoZipCore in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0060000000000000006 /* BentoZipCore */; };
 		C402B2082FCB3D3D00F97BE8 /* BentoZipCore in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0060000000000000006 /* BentoZipCore */; };
-
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -215,6 +214,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = C4A4A7892FC7772E003523FF;
@@ -627,10 +627,7 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
-/* End XCRemoteSwiftPackageReference section */
-
 /* Begin XCSwiftPackageProductDependency section */
-
 		D4E1A0060000000000000006 /* BentoZipCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D4E1A0050000000000000005 /* XCLocalSwiftPackageReference "BentoZipCore" */;

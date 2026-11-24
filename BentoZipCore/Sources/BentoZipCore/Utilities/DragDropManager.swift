@@ -42,7 +42,10 @@ public final class DragDropManager {
         let basePath = sessionTempDir.standardizedFileURL.path
         let basePrefix = basePath.hasSuffix("/") ? basePath : basePath + "/"
         guard proposedURL.standardizedFileURL.path.hasPrefix(basePrefix) else {
-            throw Bento7zError.operationFailed("拖放目标路径越界: \(entry.name)", "INVALID_PATH")
+            throw Bento7zError.operationFailed(
+                String(localized: "Drag destination escapes temporary directory: \(entry.name)", bundle: .module),
+                "INVALID_PATH"
+            )
         }
 
         let tempURL = PathUtils.uniqueFileURL(for: proposedURL)
@@ -85,7 +88,10 @@ public final class DragDropManager {
               !trimmed.contains("\0"),
               trimmed != ".",
               trimmed != ".." else {
-            throw Bento7zError.operationFailed("非法拖放文件名: \(name)", "INVALID_PATH")
+            throw Bento7zError.operationFailed(
+                String(localized: "Invalid drag item name: \(name)", bundle: .module),
+                "INVALID_PATH"
+            )
         }
         return trimmed
     }

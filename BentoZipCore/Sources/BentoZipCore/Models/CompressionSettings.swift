@@ -193,4 +193,22 @@ public enum CompressionLevel: String, CaseIterable, Identifiable, Sendable, Equa
     case best = "最佳"
 
     public var id: String { rawValue }
+
+    public var localizedName: String {
+        switch self {
+        case .none: return String(localized: "Store", bundle: .module)
+        case .fast: return String(localized: "Fast", bundle: .module)
+        case .normal: return String(localized: "Normal", bundle: .module)
+        case .best: return String(localized: "Best", bundle: .module)
+        }
+    }
+
+    public var shortLocalizedName: String {
+        switch self {
+        case .none: return String(localized: "None", bundle: .module)
+        case .fast: return String(localized: "Fast", bundle: .module)
+        case .normal: return String(localized: "Normal", bundle: .module)
+        case .best: return String(localized: "Best", bundle: .module)
+        }
+    }
 }

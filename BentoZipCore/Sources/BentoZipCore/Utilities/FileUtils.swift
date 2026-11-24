@@ -57,6 +57,13 @@ enum FileUtils {
         return contents.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
 
+    /// Build lightweight top-level entries off the main actor without recursive disk traversal.
+    static func buildShallowEntriesAsync(from urls: [URL]) async -> [FileEntry] {
+        await Task.detached(priority: .userInitiated) {
+            buildShallowEntries(from: urls)
+        }.value
+    }
+
     /// Build lightweight top-level entries immediately without recursive disk traversal.
     static func buildShallowEntries(from urls: [URL]) -> [FileEntry] {
         urls.map { url in

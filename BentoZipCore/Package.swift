@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "BentoZipCore",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "BentoZipCore", targets: ["BentoZipCore"]),
@@ -12,7 +13,10 @@ let package = Package(
         .target(
             name: "BentoZipCore",
             dependencies: [],
-            path: "Sources/BentoZipCore"
+            path: "Sources/BentoZipCore",
+            resources: [
+                .process("Resources"),
+            ]
         ),
     ]
 )
