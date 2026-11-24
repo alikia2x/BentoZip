@@ -15,7 +15,5 @@ struct CompressionSettingsView: View {
                 EmptyView()
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor).ignoresSafeArea(edges: .top))
     }
 }

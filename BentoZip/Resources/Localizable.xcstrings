@@ -199,16 +199,6 @@
         }
       }
     },
-    "Level" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "级别"
-          }
-        }
-      }
-    },
     "Copy Path" : {
       "localizations" : {
         "zh-Hans" : {
@@ -471,6 +461,7 @@
       }
     },
     "Info" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -506,6 +497,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "种类"
+          }
+        }
+      }
+    },
+    "Level" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "级别"
           }
         }
       }
@@ -591,6 +592,7 @@
       }
     },
     "Output Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -771,6 +773,7 @@
       }
     },
     "Saved" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {

@@ -16,26 +16,26 @@ struct ProgressWindowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 10) {
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 32, height: 32)
+                .frame(width: 28, height: 28)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(progressState.operationDescription.isEmpty ? String(localized: "Processing…") : progressState.operationDescription)
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
 
                     Spacer(minLength: 4)
 
                     Text(percentageText)
-                        .font(.system(size: 11.5, weight: .medium).monospacedDigit())
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
                             Capsule()
@@ -54,9 +54,9 @@ struct ProgressWindowView: View {
                             progressState.cancel()
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 14))
+                                .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
-                                .frame(width: 18, height: 18)
+                                .frame(width: 16, height: 16)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -66,21 +66,17 @@ struct ProgressWindowView: View {
                 }
 
                 Text(progressState.currentFileName.isEmpty ? String(localized: "Preparing…") : progressState.currentFileName)
-                    .font(.system(size: 11))
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(width: 356, height: 72)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5)
-        )
-        .background(ProgressWindowConfigurator(targetSize: NSSize(width: 356, height: 72)))
+        .padding(.top, 2)
+        .padding(.bottom, 10)
+        .frame(width: 340)
+        .fixedSize(horizontal: true, vertical: true)
         .onAppear {
             scheduleDismissIfNeeded()
         }
@@ -108,38 +104,5 @@ struct ProgressWindowView: View {
         dismissWindow(id: "progress")
         dismiss()
         progressState.shouldDismiss = false
-    }
-}
-
-private struct ProgressWindowConfigurator: NSViewRepresentable {
-    let targetSize: NSSize
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            configure(window: view.window)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            configure(window: nsView.window)
-        }
-    }
-
-    private func configure(window: NSWindow?) {
-        guard let window else { return }
-        if window.styleMask.contains(.titled) {
-            window.styleMask.remove(.titled)
-        }
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = true
-        window.isMovableByWindowBackground = true
-        window.level = .floating
-        if window.frame.size != targetSize {
-            window.setContentSize(targetSize)
-        }
     }
 }
