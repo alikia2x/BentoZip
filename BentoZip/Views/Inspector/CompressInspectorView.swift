@@ -5,7 +5,6 @@ import SwiftUI
 struct CompressInspectorView: View {
     @Environment(AppState.self) private var appState
     @Environment(ProgressState.self) private var progressState
-    @Environment(\.openWindow) private var openWindow
 
     @State private var showPassword: Bool = false
     @State private var savedFeedbackVisible: Bool = false
@@ -64,6 +63,8 @@ struct CompressInspectorView: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel(Text("Clear Password"))
+                                .help("Clear Password")
                             }
 
                             Button {
@@ -76,6 +77,8 @@ struct CompressInspectorView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(Text(showPassword ? "Hide Password" : "Show Password"))
+                            .help(showPassword ? "Hide Password" : "Show Password")
                         }
                     }
                 }
@@ -126,8 +129,7 @@ struct CompressInspectorView: View {
                         Task {
                             await appState.coordinator.compress(
                                 appState: appState,
-                                progressState: progressState,
-                                openWindow: openWindow
+                                progressState: progressState
                             )
                         }
                     } label: {
@@ -136,7 +138,7 @@ struct CompressInspectorView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
-                    .disabled(appState.fileEntries.isEmpty || appState.isLoading)
+                    .disabled(appState.rootNodes.isEmpty || appState.isLoading)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)

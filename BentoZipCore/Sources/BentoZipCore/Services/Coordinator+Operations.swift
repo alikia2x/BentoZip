@@ -1,4 +1,4 @@
-import SwiftUI
+import AppKit
 
 extension CompressionCoordinator {
 
@@ -6,33 +6,23 @@ extension CompressionCoordinator {
 
     public func compress(
         appState: AppState,
-        progressState: ProgressState,
-        openWindow: OpenWindowAction
-    ) async {
-        await compress(appState: appState, progressState: progressState, onOpenProgressWindow: { openWindow(id: "progress") })
-    }
-
-    public func compress(
-        appState: AppState,
-        progressState: ProgressState,
-        onOpenProgressWindow: (() -> Void)? = nil
+        progressState: ProgressState
     ) async {
         guard activeTask == nil,
               appState.mode == .compress,
-              !appState.fileEntries.isEmpty else { return }
+              !appState.rootNodes.isEmpty else { return }
 
         let settings = appState.compressionSettings
-        let sourceURLs = appState.fileEntries.map(\.url)
+        let sourceURLs = appState.rootNodes.map(\.url)
         guard let saveURL = resolveCompressSaveURL(sourceURLs: sourceURLs, settings: settings) else { return }
 
         let operationID = prepareProgress(
             progressState,
-            description: String(localized: "Compressing…", bundle: .module),
-            openProgressWindow: onOpenProgressWindow
+            description: String(localized: "Compressing…", bundle: .module)
         )
         let progressHandler = makeProgressHandler(operationID: operationID, progressState: progressState)
 
-        await runManagedTask(operationID: operationID) {
+        await runManagedTask(operationID: operationID, progressState: progressState) {
             do {
                 try await self.engine.create(
                     from: sourceURLs,
@@ -42,7 +32,7 @@ extension CompressionCoordinator {
                 )
                 try Task.checkCancellation()
 
-                await self.completeProgress(progressState) {
+                await self.completeProgress(progressState, operationID: operationID) {
                     appState.lastError = nil
                     appState.preferencesManager?.recordArchive(saveURL.path)
                 }
@@ -67,31 +57,13 @@ extension CompressionCoordinator {
         appState: AppState,
         progressState: ProgressState,
         entries: [FileEntry]? = nil,
-        chooseDestination: Bool = false,
-        openWindow: OpenWindowAction
-    ) async {
-        await extract(
-            appState: appState,
-            progressState: progressState,
-            entries: entries,
-            chooseDestination: chooseDestination,
-            onOpenProgressWindow: { openWindow(id: "progress") }
-        )
-    }
-
-    public func extract(
-        appState: AppState,
-        progressState: ProgressState,
-        entries: [FileEntry]? = nil,
-        chooseDestination: Bool = false,
-        onOpenProgressWindow: (() -> Void)? = nil
+        chooseDestination: Bool = false
     ) async {
         guard activeTask == nil,
               appState.mode == .browseArchive,
               let archiveURL = appState.sourceArchiveURL else { return }
 
         lastExtractProgressState = progressState
-        lastExtractOpenWindow = onOpenProgressWindow
 
         let destinationURL: URL
         if chooseDestination,
@@ -112,12 +84,11 @@ extension CompressionCoordinator {
 
         let operationID = prepareProgress(
             progressState,
-            description: String(localized: "Extracting…", bundle: .module),
-            openProgressWindow: onOpenProgressWindow
+            description: String(localized: "Extracting…", bundle: .module)
         )
         let progressHandler = makeProgressHandler(operationID: operationID, progressState: progressState)
 
-        await runManagedTask(operationID: operationID) {
+        await runManagedTask(operationID: operationID, progressState: progressState) {
             do {
                 try await self.engine.extract(
                     archiveURL: archiveURL,
@@ -133,7 +104,7 @@ extension CompressionCoordinator {
                 }
                 try Task.checkCancellation()
 
-                await self.completeProgress(progressState) {
+                await self.completeProgress(progressState, operationID: operationID) {
                     appState.lastError = nil
                     appState.cancelPasswordPrompt()
                     self.pendingExtractDestinationURL = nil
@@ -171,38 +142,25 @@ extension CompressionCoordinator {
     public func addEntries(
         appState: AppState,
         urls: [URL],
-        progressState: ProgressState,
-        openWindow: OpenWindowAction
+        progressState: ProgressState
     ) async {
-        await addEntries(appState: appState, urls: urls, progressState: progressState, onOpenProgressWindow: { openWindow(id: "progress") })
-    }
-
-    public func addEntries(
-        appState: AppState,
-        urls: [URL],
-        progressState: ProgressState,
-        onOpenProgressWindow: (() -> Void)? = nil
-    ) async {
-        guard activeTask == nil,
-              appState.mode == .browseArchive,
-              let archiveURL = appState.sourceArchiveURL,
-              !urls.isEmpty else { return }
+        guard activeTask == nil, appState.mode == .browseArchive, let archiveURL = appState.sourceArchiveURL, !urls.isEmpty else { return }
 
         let password = appState.archivePassword
         let operationID = prepareProgress(
             progressState,
-            description: String(localized: "Adding to archive…", bundle: .module),
-            openProgressWindow: onOpenProgressWindow
+            description: String(localized: "Adding to archive…", bundle: .module)
         )
         let progressHandler = makeProgressHandler(operationID: operationID, progressState: progressState)
 
-        await runManagedTask(operationID: operationID) {
+        await runManagedTask(operationID: operationID, progressState: progressState) {
             do {
                 try await self.engine.addEntries(to: archiveURL, from: urls, password: password, onProgress: progressHandler)
+                DragDropManager.shared.invalidateCache(for: archiveURL)
                 try Task.checkCancellation()
                 try await self.refreshArchiveContents(at: archiveURL, password: password, into: appState)
                 appState.lastError = nil
-                await self.completeProgress(progressState)
+                await self.completeProgress(progressState, operationID: operationID)
             } catch is CancellationError {
                 self.abortProgress(progressState)
             } catch {
@@ -215,42 +173,28 @@ extension CompressionCoordinator {
     public func removeEntries(
         appState: AppState,
         entries: [FileEntry],
-        progressState: ProgressState,
-        openWindow: OpenWindowAction
+        progressState: ProgressState
     ) async {
-        await removeEntries(appState: appState, entries: entries, progressState: progressState, onOpenProgressWindow: { openWindow(id: "progress") })
-    }
-
-    public func removeEntries(
-        appState: AppState,
-        entries: [FileEntry],
-        progressState: ProgressState,
-        onOpenProgressWindow: (() -> Void)? = nil
-    ) async {
-        guard activeTask == nil,
-              appState.mode == .browseArchive,
-              let archiveURL = appState.sourceArchiveURL,
-              !entries.isEmpty else { return }
+        guard activeTask == nil, appState.mode == .browseArchive, let archiveURL = appState.sourceArchiveURL, !entries.isEmpty else { return }
 
         let password = appState.archivePassword
         let operationID = prepareProgress(
             progressState,
-            description: String(localized: "Removing items…", bundle: .module),
-            openProgressWindow: onOpenProgressWindow
+            description: String(localized: "Removing items…", bundle: .module)
         )
 
-        await runManagedTask(operationID: operationID) {
+        await runManagedTask(operationID: operationID, progressState: progressState) {
             do {
                 try await self.engine.removeEntries(from: archiveURL, entries: entries, password: password)
+                DragDropManager.shared.invalidateCache(for: archiveURL)
                 try Task.checkCancellation()
-
                 if !FileManager.default.fileExists(atPath: archiveURL.path) {
                     appState.reset()
                 } else {
                     try await self.refreshArchiveContents(at: archiveURL, password: password, into: appState)
                 }
                 appState.lastError = nil
-                await self.completeProgress(progressState)
+                await self.completeProgress(progressState, operationID: operationID)
             } catch is CancellationError {
                 self.abortProgress(progressState)
             } catch {

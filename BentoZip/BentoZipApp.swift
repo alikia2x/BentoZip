@@ -6,27 +6,19 @@ import BentoZipCore
 @main
 struct BentoZipApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var appState: AppState
-    @State private var progressState = ProgressState()
     private let preferencesManager: PreferencesManager
     private let sharedModelContainer: ModelContainer
 
     init() {
         let manager = PreferencesManager()
         let container = Self.createModelContainer(configuring: manager)
-        let initialAppState = AppState()
-        initialAppState.preferencesManager = manager
         self.preferencesManager = manager
         self.sharedModelContainer = container
-        _appState = State(initialValue: initialAppState)
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(appState)
-                .environment(progressState)
-                .frame(minWidth: 700, minHeight: 440)
+            WindowRootView(preferencesManager: preferencesManager)
         }
         .defaultSize(width: 860, height: 540)
         .windowStyle(.titleBar)
@@ -36,13 +28,6 @@ struct BentoZipApp: App {
             InspectorCommands()
         }
         .modelContainer(sharedModelContainer)
-
-        Window("Progress", id: "progress") {
-            ProgressWindowView()
-                .environment(progressState)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
 
         Settings {
             SettingsView(preferencesManager: preferencesManager)
@@ -65,6 +50,27 @@ struct BentoZipApp: App {
             preferencesManager.configure(with: container.mainContext)
             return container
         }
+    }
+}
+
+private struct WindowRootView: View {
+    let preferencesManager: PreferencesManager
+    @State private var appState = AppState()
+    @State private var progressState = ProgressState()
+
+    var body: some View {
+        ContentView()
+            .environment(appState)
+            .environment(progressState)
+            .frame(minWidth: 700, minHeight: 440)
+            .onAppear {
+                if appState.preferencesManager == nil {
+                    appState.preferencesManager = preferencesManager
+                }
+            }
+            .onDisappear {
+                appState.cancelBackgroundTasks()
+            }
     }
 }
 

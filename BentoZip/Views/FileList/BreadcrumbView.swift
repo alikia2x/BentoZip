@@ -40,16 +40,16 @@ struct BreadcrumbView: View {
                                     appState.navigateBack(to: 0)
                                 }
 
-                                ForEach(Array(appState.navigationPath.enumerated()), id: \.element.id) { index, entry in
+                                ForEach(Array(appState.navigationNodes.enumerated()), id: \.element.id) { index, node in
                                     Image(systemName: "chevron.right")
                                         .font(.system(size: 9, weight: .semibold))
                                         .foregroundStyle(.tertiary)
                                         .padding(.horizontal, 2)
 
-                                    let isLast = index == appState.navigationPath.count - 1
+                                    let isLast = index == appState.navigationNodes.count - 1
                                     pathSegment(
-                                        title: entry.name,
-                                        icon: FileIconCache.icon(for: entry),
+                                        title: node.name,
+                                        icon: FileIconCache.icon(for: node),
                                         index: index + 1,
                                         isCurrent: isLast
                                     ) {

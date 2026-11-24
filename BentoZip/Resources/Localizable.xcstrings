@@ -86,6 +86,22 @@
         }
       }
     },
+    "%lld selected, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld selected, %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选择 %lld 项，%@"
+          }
+        }
+      }
+    },
     "%lld%%" : {
 
     },
@@ -182,6 +198,16 @@
         }
       }
     },
+    "Clear Password" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除密码"
+          }
+        }
+      }
+    },
     "Compress" : {
       "localizations" : {
         "zh-Hans" : {
@@ -264,6 +290,24 @@
     },
     "Delete %lld selected items from archive?" : {
       "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Delete 1 selected item from archive?"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Delete %lld selected items from archive?"
+                }
+              }
+            }
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -308,17 +352,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "空文件夹"
-          }
-        }
-      }
-    },
-    "Enclosing Folder (⌘↑)" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返回上一级 (⌘↑)"
           }
         }
       }
@@ -439,6 +472,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隐藏右侧检查器"
+          }
+        }
+      }
+    },
+    "Hide Password" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏密码"
           }
         }
       }
@@ -593,17 +636,6 @@
         }
       }
     },
-    "Output Name" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "输出名称"
-          }
-        }
-      }
-    },
     "Packed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -670,16 +702,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在处理…"
-          }
-        }
-      }
-    },
-    "Progress" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "进度"
           }
         }
       }
@@ -774,17 +796,6 @@
         }
       }
     },
-    "Saved" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已保存"
-          }
-        }
-      }
-    },
     "Saved Ratio" : {
       "localizations" : {
         "zh-Hans" : {
@@ -811,6 +822,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示右侧检查器"
+          }
+        }
+      }
+    },
+    "Show Password" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示密码"
           }
         }
       }

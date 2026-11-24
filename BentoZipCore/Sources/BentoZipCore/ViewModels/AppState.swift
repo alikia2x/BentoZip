@@ -9,98 +9,39 @@ private final class NotificationObserverToken: @unchecked Sendable {
         self.token = NotificationCenter.default.addObserver(forName: name, object: nil, queue: queue, using: block)
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(token)
-    }
-}
-
-/// Lightweight validated recent archive metadata loaded off the main actor.
-public struct RecentArchiveItem: Identifiable, Hashable, Sendable {
-    public var id: String { url.path }
-    public let url: URL
-    public let fileSize: Int64?
-
-    public init(url: URL, fileSize: Int64? = nil) {
-        self.url = url
-        self.fileSize = fileSize
-    }
-}
-
-/// Represents an operation interrupted by a password prompt so it can be retried once unlocked.
-public enum PendingPasswordAction: Sendable, Equatable {
-    case browse(URL)
-    case extract(URL, entries: [FileEntry]?, chooseDestination: Bool)
+    deinit { NotificationCenter.default.removeObserver(token) }
 }
 
 @Observable
 @MainActor
 public class AppState {
     public var mode: ArchiveMode = .empty
-    public var fileEntries: [FileEntry] = [] {
-        didSet { recomputeEntryMetrics() }
-    }
-    public var navigationPath: [FileEntry] = []
+    public private(set) var rootNodes: [FileNode] = []
+    public private(set) var navigationNodeIDs: [UUID] = []
+    private var nodesByID: [UUID: FileNode] = [:]
     public var selectedEntryIDs: Set<UUID> = []
     public var isLoading: Bool = false
 
-    public var displayedEntries: [FileEntry] {
-        if let last = navigationPath.last {
-            return last.children ?? []
-        }
-        return fileEntries
+    // Incremental reload counters for AppKit NSOutlineView without full-table churn
+    public struct NodeUpdateEvent: Sendable {
+        public let revision: UInt64
+        public let nodeID: UUID
+        public let reloadChildren: Bool
     }
 
-    public var selectedEntries: [FileEntry] {
-        Self.collectMatchingEntries(ids: selectedEntryIDs, in: displayedEntries)
-    }
-
-    public var canNavigateUp: Bool { !navigationPath.isEmpty }
+    public private(set) var treeStructureRevision: UInt64 = 0
+    public private(set) var lastUpdatedNodeID: UUID?
+    public private(set) var lastUpdatedNodeReloadChildren: Bool = false
+    public private(set) var nodeUpdateRevision: UInt64 = 0
+    private var nodeUpdateLog: [NodeUpdateEvent] = []
+    private static let maxNodeUpdateLogCount = 256
 
     public internal(set) var totalSize: Int64 = 0
     /// Archive-level packed size reported by the backend (accurate for solid 7z and compound tar streams).
     public var archivePackedSize: Int64?
     var cachedEntryPackedSize: Int64?
     var cachedContainsEncryptedEntry: Bool = false
-
-    public var totalPackedSize: Int64? {
-        if let archivePackedSize, archivePackedSize > 0 {
-            return archivePackedSize
-        }
-        return cachedEntryPackedSize
-    }
-
     public internal(set) var totalEntryCount: Int = 0
-
-    public var isArchiveEncrypted: Bool {
-        archivePassword != nil || cachedContainsEncryptedEntry
-    }
-
-    public var archiveFormatName: String? {
-        guard let url = sourceArchiveURL else { return nil }
-        return FormatDetector.detectReadableFormat(of: url)?.displayName
-    }
-
-    public var isWritableArchive: Bool {
-        guard mode == .browseArchive, let archiveURL = sourceArchiveURL else { return false }
-        return FormatDetector.detectFormat(of: archiveURL) != nil
-    }
-
-    public var isReadOnlyArchive: Bool {
-        guard mode == .browseArchive, let archiveURL = sourceArchiveURL else { return false }
-        return FormatDetector.detectReadableFormat(of: archiveURL)?.isReadOnly == true
-    }
-
-    public var suggestedArchiveName: String {
-        let ext = compressionSettings.format.fileExtension
-        if fileEntries.count == 1, let first = fileEntries.first {
-            let stem = first.isDirectory
-                ? first.url.lastPathComponent
-                : first.url.deletingPathExtension().lastPathComponent
-            let safeStem = stem.isEmpty ? "archive" : stem
-            return "\(safeStem).\(ext)"
-        }
-        return "archive.\(ext)"
-    }
 
     public var compressionSettings = CompressionSettings()
     public var showInspector: Bool = false
@@ -118,10 +59,6 @@ public class AppState {
     // Validated recent archives (populated asynchronously off the main actor)
     public internal(set) var recentArchiveItems: [RecentArchiveItem] = []
 
-    public var recentArchiveURLs: [URL] {
-        recentArchiveItems.map(\.url)
-    }
-
     // User preferences synced with PreferencesManager when available
     public var revealInFinderAfterExtract: Bool = true
     public var unwrapSingleTopDirectory: Bool = true
@@ -134,9 +71,12 @@ public class AppState {
         }
     }
 
+    var loadGeneration: UInt64 = 0
     var loadTask: Task<Void, Never>?
+    var pendingAddedURLs: [URL] = []
     var sizeCalculationTask: Task<Void, Never>?
-    var loadingChildIDs: Set<UUID> = []
+    var pendingSizeTargets: [(id: UUID, url: URL)] = []
+    var loadingChildTasks: [UUID: Task<Void, Never>] = [:]
     var recentValidationTask: Task<Void, Never>?
     private var preferencesObserver: NotificationObserverToken?
 
@@ -146,105 +86,194 @@ public class AppState {
             queue: nil
         ) { [weak self] _ in
             if Thread.isMainThread {
-                MainActor.assumeIsolated {
-                    self?.handlePreferencesDidChange()
-                }
+                MainActor.assumeIsolated { self?.handlePreferencesDidChange() }
             } else {
-                Task { @MainActor [weak self] in
-                    self?.handlePreferencesDidChange()
-                }
+                Task { @MainActor [weak self] in self?.handlePreferencesDidChange() }
             }
         }
     }
 
-    // MARK: - Navigation & Selection
+    // MARK: - Single-Source-of-Truth Node Accessors
 
-    public func loadArchive(from url: URL) {
-        mode = .browseArchive
-        sourceArchiveURL = url
-    }
+    public var navigationNodes: [FileNode] { navigationNodeIDs.compactMap { nodesByID[$0] } }
 
-    public func navigateInto(_ entry: FileEntry) {
-        guard entry.isDirectory else { return }
-        var target = entry
-        if !target.isFromArchive && !target.hasLoadedChildren {
-            let children = FileUtils.loadImmediateChildrenSync(of: target.url)
-            target.children = children
-            target.hasLoadedChildren = true
-            updateEntry(id: target.id) { node in
-                node.children = children
-                node.hasLoadedChildren = true
-            }
+    public var displayedNodes: [FileNode] {
+        _ = treeStructureRevision
+        if let currentID = navigationNodeIDs.last, let current = nodesByID[currentID] {
+            _ = nodeUpdateRevision
+            return current.children ?? []
         }
-        navigationPath.append(target)
-        selectedEntryIDs.removeAll()
+        return rootNodes
     }
 
-    public func navigateUp() {
-        guard !navigationPath.isEmpty else { return }
-        navigationPath.removeLast()
-        selectedEntryIDs.removeAll()
+    public var selectedNodes: [FileNode] { selectedEntryIDs.compactMap { nodesByID[$0] } }
+    public func node(for id: UUID) -> FileNode? { nodesByID[id] }
+    public var canNavigateUp: Bool { !navigationNodeIDs.isEmpty }
+
+    // MARK: - Value-Type Compatibility Bridges
+
+    /// Replace the root tree from value-type `FileEntry` snapshots (e.g. engine listings or tests).
+    public func setEntries(_ entries: [FileEntry]) {
+        replaceRootNodes(entries.map { FileNode(entry: $0) })
     }
 
-    public func navigateBack(to level: Int = 0) {
+    public var fileEntries: [FileEntry] {
+        get {
+            _ = (treeStructureRevision, nodeUpdateRevision)
+            return rootNodes.map { $0.toFileEntry(includeChildren: true) }
+        }
+        set { setEntries(newValue) }
+    }
+
+    public var displayedEntries: [FileEntry] {
+        _ = (treeStructureRevision, nodeUpdateRevision)
+        return displayedNodes.map { $0.toFileEntry(includeChildren: true) }
+    }
+
+    public var navigationPath: [FileEntry] {
+        get {
+            _ = (treeStructureRevision, nodeUpdateRevision)
+            return navigationNodes.map { $0.toFileEntry(includeChildren: true) }
+        }
+        set {
+            navigationNodeIDs = newValue.map { resolveOrRegisterNode(nodesByID[$0.id] ?? FileNode(entry: $0)).id }
+            bumpTreeStructureRevision()
+        }
+    }
+
+    public var selectedEntries: [FileEntry] {
+        _ = nodeUpdateRevision
+        return selectedNodes.map { $0.toFileEntry(includeChildren: true) }
+    }
+
+    // MARK: - Internal Single-Source-of-Truth Tree Primitives
+
+    func replaceRootNodes(_ nodes: [FileNode]) {
+        rootNodes = nodes
+        nodesByID.removeAll(keepingCapacity: true)
+        registerSubtrees(nodes)
+        navigationNodeIDs.removeAll { nodesByID[$0] == nil }
+        selectedEntryIDs = selectedEntryIDs.filter { nodesByID[$0] != nil }
+        recomputeEntryMetrics()
+        bumpTreeStructureRevision()
+    }
+
+    func appendRootNodes(_ newNodes: [FileNode]) {
+        rootNodes = Self.sortedNodes(rootNodes + newNodes)
+        registerSubtrees(newNodes)
+        recomputeEntryMetrics()
+        bumpTreeStructureRevision()
+    }
+
+    func updateNodeSize(id: UUID, bytes: Int64) {
+        guard let node = nodesByID[id] else { return }
+        let delta = bytes - node.size
+        node.size = bytes
+        if !node.isFromArchive && node.parent == nil { totalSize += delta }
+        recordNodeUpdate(id: id, reloadChildren: false)
+    }
+
+    func attachLoadedChildren(_ children: [FileNode], to id: UUID, recordUpdate: Bool = true) {
+        guard let node = nodesByID[id] else { return }
+        node.children?.forEach(unregisterSubtree)
+        children.forEach { $0.parent = node }
+        node.children = children
+        node.hasLoadedChildren = true
+        registerSubtrees(children)
+        if recordUpdate { recordNodeUpdate(id: id, reloadChildren: true) }
+    }
+
+    func removeRootNodes(matching ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        var removedAny = false
+        rootNodes.removeAll { node in
+            guard ids.contains(node.id) else { return false }
+            unregisterSubtree(node)
+            removedAny = true
+            return true
+        }
+        guard removedAny else { return }
+        navigationNodeIDs.removeAll { nodesByID[$0] == nil }
+        selectedEntryIDs = selectedEntryIDs.filter { nodesByID[$0] != nil }
+        recomputeEntryMetrics()
+        bumpTreeStructureRevision()
+    }
+
+    func resolveOrRegisterNode(_ node: FileNode) -> FileNode {
+        if let existing = nodesByID[node.id] { return existing }
+        registerSubtrees([node])
+        return node
+    }
+
+    func pushNavigationNode(id: UUID) {
+        navigationNodeIDs.append(id)
+        selectedEntryIDs.removeAll()
+        bumpTreeStructureRevision()
+    }
+
+    func popNavigationNode() {
+        guard !navigationNodeIDs.isEmpty else { return }
+        navigationNodeIDs.removeLast()
+        selectedEntryIDs.removeAll()
+        bumpTreeStructureRevision()
+    }
+
+    func truncateNavigation(to level: Int) {
         if level <= 0 {
-            navigationPath.removeAll()
+            navigationNodeIDs.removeAll()
         } else {
-            let safeLevel = min(level, navigationPath.count)
-            navigationPath.removeLast(navigationPath.count - safeLevel)
+            navigationNodeIDs.removeLast(navigationNodeIDs.count - min(level, navigationNodeIDs.count))
         }
         selectedEntryIDs.removeAll()
+        bumpTreeStructureRevision()
     }
 
-    public func selectAll() {
-        selectedEntryIDs = Set(displayedEntries.map(\.id))
-    }
-
-    public func clearSelection() {
+    func clearNavigationAndSelection() {
+        navigationNodeIDs.removeAll()
         selectedEntryIDs.removeAll()
+        bumpTreeStructureRevision()
     }
 
-    public func removeEntries(at offsets: IndexSet) {
-        if mode == .browseArchive { return }
-        fileEntries.remove(atOffsets: offsets)
+    /// Returns all incremental node updates after `revision`, or `nil` if the buffer overflowed
+    /// (in which case the caller should fall back to `reloadData()`).
+    public func nodeUpdates(since revision: UInt64) -> [NodeUpdateEvent]? {
+        guard revision < nodeUpdateRevision else { return [] }
+        guard let oldest = nodeUpdateLog.first, revision >= oldest.revision - 1 else {
+            return nil
+        }
+        return nodeUpdateLog.filter { $0.revision > revision }
     }
 
-    public func removeSelectedEntries() {
-        if mode == .browseArchive { return }
-        fileEntries.removeAll { selectedEntryIDs.contains($0.id) }
-        selectedEntryIDs.removeAll()
+    private func bumpTreeStructureRevision() {
+        lastUpdatedNodeID = nil
+        lastUpdatedNodeReloadChildren = false
+        nodeUpdateLog.removeAll(keepingCapacity: true)
+        treeStructureRevision &+= 1
     }
 
-    // MARK: - Reset & Password Prompt
-
-    public func reset() {
-        loadTask?.cancel()
-        loadTask = nil
-        sizeCalculationTask?.cancel()
-        sizeCalculationTask = nil
-        loadingChildIDs.removeAll()
-        isLoading = false
-        mode = .empty
-        fileEntries = []
-        navigationPath = []
-        selectedEntryIDs = []
-        compressionSettings = CompressionSettings()
-        showInspector = false
-        sourceArchiveURL = nil
-        archivePackedSize = nil
-        lastError = nil
-        archivePassword = nil
-        cancelPasswordPrompt()
-        DragDropManager.shared.cleanup()
-        applyPreferences()
+    private func recordNodeUpdate(id: UUID, reloadChildren: Bool) {
+        lastUpdatedNodeID = id
+        lastUpdatedNodeReloadChildren = reloadChildren
+        nodeUpdateRevision &+= 1
+        nodeUpdateLog.append(NodeUpdateEvent(
+            revision: nodeUpdateRevision,
+            nodeID: id,
+            reloadChildren: reloadChildren
+        ))
+        if nodeUpdateLog.count > Self.maxNodeUpdateLogCount {
+            nodeUpdateLog.removeFirst(nodeUpdateLog.count - Self.maxNodeUpdateLogCount)
+        }
     }
 
-    /// Clear active password prompt state when dismissed/cancelled by the user.
-    public func cancelPasswordPrompt() {
-        needsPasswordPrompt = false
-        passwordPromptReason = nil
-        isPasswordRetryError = false
-        pendingPasswordArchiveURL = nil
-        pendingPasswordAction = nil
+    private func registerSubtrees(_ nodes: [FileNode]) {
+        for node in nodes {
+            nodesByID[node.id] = node
+            if let children = node.children { registerSubtrees(children) }
+        }
+    }
+
+    private func unregisterSubtree(_ node: FileNode) {
+        nodesByID.removeValue(forKey: node.id)
+        node.children?.forEach(unregisterSubtree)
     }
 }

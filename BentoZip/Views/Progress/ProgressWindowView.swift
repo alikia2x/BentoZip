@@ -1,11 +1,9 @@
 import AppKit
-import SwiftUI
 import BentoZipCore
+import SwiftUI
 
 struct ProgressWindowView: View {
     @Environment(ProgressState.self) private var progressState
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.dismissWindow) private var dismissWindow
 
     private var clampedProgress: Double {
         min(max(progressState.operationProgress, 0.0), 1.0)
@@ -22,7 +20,7 @@ struct ProgressWindowView: View {
                 .interpolation(.high)
                 .frame(width: 28, height: 28)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(progressState.operationDescription.isEmpty ? String(localized: "Processing…") : progressState.operationDescription)
                         .font(.system(size: 12, weight: .semibold))
@@ -56,11 +54,13 @@ struct ProgressWindowView: View {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
-                                .frame(width: 16, height: 16)
+                                .frame(width: 22, height: 22)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .focusEffectDisabled()
+                        .keyboardShortcut(.cancelAction)
+                        .accessibilityLabel(Text("Cancel"))
                         .help("Cancel")
                     }
                 }
@@ -73,36 +73,8 @@ struct ProgressWindowView: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
-        .frame(width: 340)
+        .padding(.vertical, 14)
+        .frame(width: 360)
         .fixedSize(horizontal: true, vertical: true)
-        .onAppear {
-            scheduleDismissIfNeeded()
-        }
-        .task(id: progressState.shouldDismiss) {
-            await performDismissIfNeeded()
-        }
-        .onDisappear {
-            if progressState.isOperationInProgress {
-                progressState.cancel()
-            }
-        }
-    }
-
-    private func scheduleDismissIfNeeded() {
-        guard progressState.shouldDismiss else { return }
-        Task { @MainActor in
-            await performDismissIfNeeded()
-        }
-    }
-
-    private func performDismissIfNeeded() async {
-        guard progressState.shouldDismiss else { return }
-        await Task.yield()
-        guard !Task.isCancelled, progressState.shouldDismiss else { return }
-        dismissWindow(id: "progress")
-        dismiss()
-        progressState.shouldDismiss = false
     }
 }

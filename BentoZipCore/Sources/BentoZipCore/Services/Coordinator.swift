@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 import Observation
 
 @Observable
@@ -8,7 +8,6 @@ public class CompressionCoordinator {
     var activeTask: Task<Void, Never>?
     var activeOperationID: UUID?
     weak var lastExtractProgressState: ProgressState?
-    var lastExtractOpenWindow: (() -> Void)?
     var pendingExtractDestinationURL: URL?
 
     public init(engine: any ArchiveEngine = Bento7zEngine()) {
@@ -43,14 +42,9 @@ public class CompressionCoordinator {
             appState.sourceArchiveURL = url
             appState.archivePassword = password
             appState.archivePackedSize = result.archivePackedSize
-            appState.navigationPath = []
-            appState.selectedEntryIDs = []
-            appState.needsPasswordPrompt = false
-            appState.passwordPromptReason = nil
-            appState.isPasswordRetryError = false
-            appState.pendingPasswordArchiveURL = nil
-            appState.pendingPasswordAction = nil
-            appState.fileEntries = result.entries
+            appState.clearNavigationAndSelection()
+            appState.cancelPasswordPrompt()
+            appState.setEntries(result.entries)
             appState.isLoading = false
             appState.preferencesManager?.recordArchive(url.path)
         } catch let error as Bento7zError where error == .passwordRequired || error == .wrongPassword {
@@ -67,23 +61,7 @@ public class CompressionCoordinator {
     public func submitPassword(
         _ password: String,
         appState: AppState,
-        progressState: ProgressState? = nil,
-        openWindow: OpenWindowAction
-    ) async {
-        await submitPassword(
-            password,
-            appState: appState,
-            progressState: progressState,
-            onOpenProgressWindow: { openWindow(id: "progress") }
-        )
-    }
-
-    /// Retry browsing or extracting the pending encrypted archive with a user-supplied password.
-    public func submitPassword(
-        _ password: String,
-        appState: AppState,
-        progressState: ProgressState? = nil,
-        onOpenProgressWindow: (() -> Void)? = nil
+        progressState: ProgressState? = nil
     ) async {
         let fallbackURL = appState.pendingPasswordArchiveURL ?? appState.sourceArchiveURL
         let action = appState.pendingPasswordAction ?? fallbackURL.map { .browse($0) }
@@ -99,13 +77,11 @@ public class CompressionCoordinator {
             appState.archivePassword = password
             appState.needsPasswordPrompt = false
             let effectiveProgressState = progressState ?? lastExtractProgressState ?? ProgressState()
-            let effectiveOpenWindow = onOpenProgressWindow ?? lastExtractOpenWindow
             await extract(
                 appState: appState,
                 progressState: effectiveProgressState,
                 entries: entries,
-                chooseDestination: chooseDestination,
-                onOpenProgressWindow: effectiveOpenWindow
+                chooseDestination: chooseDestination
             )
         }
     }
@@ -115,8 +91,7 @@ public class CompressionCoordinator {
     @discardableResult
     func prepareProgress(
         _ progressState: ProgressState,
-        description: String,
-        openProgressWindow: (() -> Void)?
+        description: String
     ) -> UUID {
         let operationID = UUID()
         activeOperationID = operationID
@@ -126,7 +101,6 @@ public class CompressionCoordinator {
             guard let self, let progressState else { return }
             self.cancelOperation(progressState: progressState)
         }
-        openProgressWindow?()
         return operationID
     }
 
@@ -149,12 +123,16 @@ public class CompressionCoordinator {
 
     func runManagedTask(
         operationID: UUID,
+        progressState: ProgressState,
         _ work: @escaping @MainActor () async -> Void
     ) async {
         let task = Task { @MainActor in
             defer {
                 if self.activeOperationID == operationID {
                     self.activeOperationID = nil
+                }
+                if progressState.isOperationInProgress {
+                    self.abortProgress(progressState)
                 }
             }
             await work()
@@ -166,19 +144,26 @@ public class CompressionCoordinator {
 
     func completeProgress(
         _ progressState: ProgressState,
+        operationID: UUID,
         afterCompletion: () -> Void = {}
     ) async {
+        if activeOperationID == operationID {
+            activeOperationID = nil
+        }
         progressState.operationProgress = 1.0
-        progressState.isOperationInProgress = false
+        progressState.isCancellable = false
+        progressState.onCancel = nil
         afterCompletion()
-        try? await Task.sleep(for: .milliseconds(250))
-        progressState.shouldDismiss = true
+        if !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        progressState.isOperationInProgress = false
     }
 
     func abortProgress(_ progressState: ProgressState) {
         progressState.isOperationInProgress = false
         progressState.currentFileName = ""
-        progressState.shouldDismiss = true
+        progressState.onCancel = nil
     }
 
     func refreshArchiveContents(
@@ -187,10 +172,9 @@ public class CompressionCoordinator {
         into appState: AppState
     ) async throws {
         let refreshed = try await engine.listArchive(in: archiveURL, password: password)
-        appState.fileEntries = refreshed.entries
+        appState.clearNavigationAndSelection()
+        appState.setEntries(refreshed.entries)
         appState.archivePackedSize = refreshed.archivePackedSize
-        appState.navigationPath = []
-        appState.selectedEntryIDs = []
     }
 
     func presentPasswordPrompt(

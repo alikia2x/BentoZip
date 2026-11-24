@@ -42,7 +42,7 @@ struct AppStateTests {
         #expect(projectEntry.isDirectory)
         #expect(projectEntry.size == 350)
 
-        appState.navigateInto(projectEntry)
+        await appState.navigateIntoAsync(projectEntry)
         #expect(appState.canNavigateUp)
         #expect(appState.displayedEntries.count == 1)
 
@@ -285,5 +285,268 @@ struct AppStateTests {
         #expect(appState.fileEntries[0].hasLoadedChildren)
         #expect(appState.fileEntries[0].children?.count == 1)
         #expect(appState.fileEntries[0].children?[0].name == "track.wav")
+    }
+
+    @Test func singleSourceOfTruth_preservesFileNodeIdentityAcrossLazyLoadNavigationAndSizeUpdates() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let parentDir = dir.appendingPathComponent("Workspace")
+        let childDir = parentDir.appendingPathComponent("Modules")
+        try fm.createDirectory(at: childDir, withIntermediateDirectories: true)
+        try Data(repeating: 0x11, count: 200).write(to: childDir.appendingPathComponent("core.swift"))
+
+        let appState = AppState()
+        await appState.loadFilesAsync(from: [parentDir])
+
+        let rootNode = try #require(appState.rootNodes.first)
+        #expect(appState.node(for: rootNode.id) === rootNode)
+        #expect(rootNode.size == 200)
+        #expect(rootNode.isExpandable)
+        #expect(!rootNode.hasLoadedChildren)
+        #expect(appState.lastUpdatedNodeID == rootNode.id)
+        #expect(!appState.lastUpdatedNodeReloadChildren)
+
+        // Lazily load immediate children in-place: same FileNode reference, nodeUpdateRevision bumps, structure revision unchanged
+        let structureBeforeLazy = appState.treeStructureRevision
+        let updateBeforeLazy = appState.nodeUpdateRevision
+        await appState.loadChildrenIfNeededAsync(for: rootNode)
+
+        #expect(appState.rootNodes.first === rootNode)
+        #expect(rootNode.hasLoadedChildren)
+        #expect(appState.treeStructureRevision == structureBeforeLazy)
+        #expect(appState.nodeUpdateRevision == updateBeforeLazy + 1)
+        #expect(appState.lastUpdatedNodeID == rootNode.id)
+        #expect(appState.lastUpdatedNodeReloadChildren)
+
+        let modulesNode = try #require(rootNode.children?.first)
+        #expect(modulesNode.name == "Modules")
+        #expect(modulesNode.parent === rootNode)
+        #expect(appState.node(for: modulesNode.id) === modulesNode)
+
+        // Navigate into rootNode and mutate size in-place: navigationNodes reflects live node without stale copies
+        appState.navigateInto(rootNode)
+        #expect(appState.navigationNodeIDs == [rootNode.id])
+        #expect(appState.navigationNodes.first === rootNode)
+        #expect(appState.displayedNodes.first === modulesNode)
+
+        rootNode.size = 999
+        #expect(appState.navigationNodes.first?.size == 999)
+        #expect(appState.rootNodes.first === appState.navigationNodes.first)
+
+        // Removing root node cleans up both root and descendant IDs from O(1) lookup table
+        appState.navigateBack(to: 0)
+        appState.selectedEntryIDs = [rootNode.id]
+        appState.removeSelectedEntries()
+        #expect(appState.rootNodes.isEmpty)
+        #expect(appState.node(for: rootNode.id) == nil)
+        #expect(appState.node(for: modulesNode.id) == nil)
+        #expect(appState.totalSize == 0)
+    }
+
+    @Test func selectedNodes_resolvesDeeplyNestedExpandedChildrenInO1() throws {
+        let leaf = FileEntry(
+            url: URL(fileURLWithPath: "/archive-root/a/b/c/d/deep.txt"),
+            name: "deep.txt",
+            size: 420,
+            isFromArchive: true,
+            archiveRelativePath: "a/b/c/d/deep.txt"
+        )
+        let sibling = FileEntry(
+            url: URL(fileURLWithPath: "/archive-root/a/b/mid.txt"),
+            name: "mid.txt",
+            size: 80,
+            isFromArchive: true,
+            archiveRelativePath: "a/b/mid.txt"
+        )
+        let levelD = FileEntry(url: URL(fileURLWithPath: "/archive-root/a/b/c/d"), name: "d", isDirectory: true, isFromArchive: true, archiveRelativePath: "a/b/c/d", children: [leaf])
+        let levelC = FileEntry(url: URL(fileURLWithPath: "/archive-root/a/b/c"), name: "c", isDirectory: true, isFromArchive: true, archiveRelativePath: "a/b/c", children: [levelD])
+        let levelB = FileEntry(url: URL(fileURLWithPath: "/archive-root/a/b"), name: "b", isDirectory: true, isFromArchive: true, archiveRelativePath: "a/b", children: [levelC, sibling])
+        let levelA = FileEntry(url: URL(fileURLWithPath: "/archive-root/a"), name: "a", isDirectory: true, isFromArchive: true, archiveRelativePath: "a", children: [levelB])
+
+        let appState = AppState()
+        appState.mode = .browseArchive
+        appState.setEntries([levelA])
+
+        let rootNode = try #require(appState.rootNodes.first)
+        #expect(rootNode.size == 0)
+        #expect(rootNode.archiveTotalSize == 500)
+        #expect(rootNode.toFileEntry().children == nil)
+
+        let leafNode = try #require(appState.node(for: leaf.id))
+        let siblingNode = try #require(appState.node(for: sibling.id))
+        let levelCNode = try #require(appState.node(for: levelC.id))
+        #expect(leafNode.parent?.parent === levelCNode)
+
+        // Cached archiveTotalSize stays consistent if a descendant's size changes
+        leafNode.size = 500
+        #expect(rootNode.archiveTotalSize == 580)
+        #expect(rootNode.size == 0)
+
+        // Select nodes across depths 0, 2, and 4 while remaining at root level
+        appState.selectedEntryIDs = [rootNode.id, siblingNode.id, leafNode.id]
+        let selected = appState.selectedNodes
+        #expect(selected.count == 3)
+        #expect(selected.contains(where: { $0 === rootNode }))
+        #expect(selected.contains(where: { $0 === siblingNode }))
+        #expect(selected.contains(where: { $0 === leafNode }))
+    }
+
+    @Test func multiWindowIsolation_independentAppStatesSharingPreferencesManager() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let folderA = dir.appendingPathComponent("Alpha")
+        try fm.createDirectory(at: folderA, withIntermediateDirectories: true)
+        let fileA = folderA.appendingPathComponent("alpha.txt")
+        try Data(repeating: 0x61, count: 64).write(to: fileA)
+
+        let schema = Schema([AppPreferences.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+
+        let sharedPreferences = PreferencesManager()
+        sharedPreferences.configure(with: container.mainContext)
+
+        let windowA = AppState()
+        let windowB = AppState()
+        windowA.preferencesManager = sharedPreferences
+        windowB.preferencesManager = sharedPreferences
+
+        // Window A enters compress mode, navigates into Alpha, and selects alpha.txt
+        await windowA.loadFilesAsync(from: [folderA])
+        let alphaNode = try #require(windowA.rootNodes.first)
+        await windowA.navigateIntoAsync(alphaNode)
+        windowA.selectAll()
+
+        // Window B independently enters browseArchive mode with different entries & selection
+        let archiveEntry = FileEntry(
+            url: URL(fileURLWithPath: "/archive-root/beta.bin"),
+            name: "beta.bin",
+            size: 1024,
+            isFromArchive: true,
+            archiveRelativePath: "beta.bin"
+        )
+        windowB.mode = .browseArchive
+        windowB.sourceArchiveURL = URL(fileURLWithPath: "/tmp/beta.zip")
+        windowB.setEntries([archiveEntry])
+        windowB.selectedEntryIDs = [archiveEntry.id]
+
+        // Verify strict per-window isolation
+        #expect(windowA.mode == .compress)
+        #expect(windowB.mode == .browseArchive)
+        #expect(windowA.rootNodes.map(\.name) == ["Alpha"])
+        #expect(windowB.rootNodes.map(\.name) == ["beta.bin"])
+        #expect(windowA.navigationNodeIDs == [alphaNode.id])
+        #expect(windowB.navigationNodeIDs.isEmpty)
+        #expect(windowA.selectedNodes.map(\.name) == ["alpha.txt"])
+        #expect(windowB.selectedNodes.map(\.name) == ["beta.bin"])
+        #expect(windowA.node(for: archiveEntry.id) == nil)
+        #expect(windowB.node(for: alphaNode.id) == nil)
+
+        // Updating shared preferences does not disturb either active window's tree or selection
+        sharedPreferences.updatePreferences { prefs in
+            prefs.revealInFinderAfterExtract = false
+        }
+        #expect(!windowA.revealInFinderAfterExtract)
+        #expect(!windowB.revealInFinderAfterExtract)
+        #expect(windowA.mode == .compress)
+        #expect(windowB.mode == .browseArchive)
+        #expect(windowA.navigationNodeIDs == [alphaNode.id])
+        #expect(windowB.selectedNodes.count == 1)
+    }
+
+    @Test func navigateInto_returnsImmediatelyWithoutBlockingAndPopulatesChildrenAsync() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let folder = dir.appendingPathComponent("LazyFolder")
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "alpha".write(to: folder.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try "beta".write(to: folder.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+
+        let appState = AppState()
+        await appState.loadFilesAsync(from: [folder])
+
+        let folderNode = try #require(appState.rootNodes.first)
+        #expect(!folderNode.hasLoadedChildren)
+
+        // Synchronous navigateInto pushes navigation immediately without blocking on disk I/O
+        let revisionBefore = appState.nodeUpdateRevision
+        appState.navigateInto(folderNode)
+        #expect(appState.canNavigateUp)
+        #expect(appState.navigationNodeIDs == [folderNode.id])
+        #expect(!folderNode.hasLoadedChildren)
+
+        // Children populate asynchronously and emit a reloadChildren node update for the navigated node
+        for _ in 0..<100 {
+            if folderNode.hasLoadedChildren { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(folderNode.hasLoadedChildren)
+        #expect(appState.displayedNodes.map(\.name) == ["a.txt", "b.txt"])
+        #expect(appState.nodeUpdateRevision > revisionBefore)
+        #expect(appState.lastUpdatedNodeID == folderNode.id)
+        #expect(appState.lastUpdatedNodeReloadChildren)
+    }
+
+    @Test func addEntries_rapidSequentialDropsNeverDropURLsAndCoordinateSizing() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let folder1 = dir.appendingPathComponent("Folder1")
+        let folder2 = dir.appendingPathComponent("Folder2")
+        let folder3 = dir.appendingPathComponent("Folder3")
+        try fm.createDirectory(at: folder1, withIntermediateDirectories: true)
+        try fm.createDirectory(at: folder2, withIntermediateDirectories: true)
+        try fm.createDirectory(at: folder3, withIntermediateDirectories: true)
+
+        try Data(repeating: 0x01, count: 100).write(to: folder1.appendingPathComponent("f1.bin"))
+        try Data(repeating: 0x02, count: 200).write(to: folder2.appendingPathComponent("f2.bin"))
+        try Data(repeating: 0x03, count: 300).write(to: folder3.appendingPathComponent("f3.bin"))
+
+        let fileA = dir.appendingPathComponent("a.txt")
+        let fileB = dir.appendingPathComponent("b.txt")
+        let fileC = dir.appendingPathComponent("c.txt")
+        try Data(repeating: 0x41, count: 10).write(to: fileA)
+        try Data(repeating: 0x42, count: 20).write(to: fileB)
+        try Data(repeating: 0x43, count: 30).write(to: fileC)
+
+        let appState = AppState()
+        await appState.loadFilesAsync(from: [folder1])
+
+        // Rapid sequential fire-and-forget drops (including a duplicate) must not cancel each other
+        appState.addEntries(from: [fileA])
+        appState.addEntries(from: [folder2])
+        appState.addEntries(from: [fileB, folder3])
+        appState.addEntries(from: [fileA])
+        await appState.addEntriesAsync(from: [fileC])
+
+        #expect(!appState.isLoading)
+        #expect(Set(appState.rootNodes.map(\.name)) == ["Folder1", "Folder2", "Folder3", "a.txt", "b.txt", "c.txt"])
+        #expect(appState.rootNodes.count == 6)
+        #expect(appState.totalSize == 660)
+
+        let folderSizes = Dictionary(uniqueKeysWithValues: appState.rootNodes.filter(\.isDirectory).map { ($0.name, $0.size) })
+        #expect(folderSizes == ["Folder1": 100, "Folder2": 200, "Folder3": 300])
+    }
+
+    @Test func cancelBackgroundTasks_stopsInFlightWorkAndClearsLoadingState() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let folder = dir.appendingPathComponent("Pending")
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(repeating: 0x33, count: 64).write(to: folder.appendingPathComponent("item.bin"))
+
+        let appState = AppState()
+        appState.loadFiles(from: [folder])
+        appState.cancelBackgroundTasks()
+
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!appState.isLoading)
+        #expect(appState.rootNodes.isEmpty)
+        #expect(appState.mode == .empty)
     }
 }

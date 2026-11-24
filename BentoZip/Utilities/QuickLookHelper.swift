@@ -6,9 +6,11 @@ import QuickLookUI
 final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     static let shared = QuickLookHelper()
 
+    private weak var activeOutlineView: FinderOutlineView?
     private var previewURLs: [URL] = []
     private var requestID: UInt64 = 0
     private var activeTask: Task<Void, Never>?
+    private var isPresentingPanel = false
 
     private override init() {
         super.init()
@@ -18,32 +20,148 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         QLPreviewPanel.sharedPreviewPanelExists() && (QLPreviewPanel.shared()?.isVisible == true)
     }
 
+    // MARK: - Responder Chain Control
+
+    func beginControl(panel: QLPreviewPanel, owner: FinderOutlineView) {
+        let ownerChanged = (activeOutlineView !== owner)
+        activeOutlineView = owner
+        panel.dataSource = self
+        panel.delegate = self
+        if ownerChanged && panel.isVisible && !isPresentingPanel {
+            owner.onBecameQuickLookOwner?()
+        }
+    }
+
+    func endControl(panel: QLPreviewPanel, owner: FinderOutlineView) {
+        if activeOutlineView === owner {
+            activeOutlineView = nil
+        }
+        panel.dataSource = nil
+        panel.delegate = nil
+    }
+
+    func detachOwner(_ owner: FinderOutlineView) {
+        guard activeOutlineView === owner else { return }
+        activeTask?.cancel()
+        activeTask = nil
+        requestID &+= 1
+        activeOutlineView = nil
+        previewURLs = []
+        if isVisible {
+            QLPreviewPanel.shared()?.orderOut(nil)
+        }
+    }
+
     func closeIfVisible() {
         guard isVisible, let panel = QLPreviewPanel.shared() else { return }
         requestID &+= 1
         activeTask?.cancel()
+        activeTask = nil
         panel.orderOut(nil)
     }
 
+    func closeIfVisible(for owner: FinderOutlineView) {
+        guard activeOutlineView === owner || activeOutlineView == nil else { return }
+        closeIfVisible()
+    }
+
+    // MARK: - Preview Presentation
+
     func preview(
-        entries: [FileEntry],
+        nodes: [FileNode],
         sourceArchiveURL: URL?,
         password: String?,
         onError: ((Error) -> Void)? = nil
     ) {
-        // Local folders can be previewed natively by Quick Look just like Finder;
-        // archive folders cannot be previewed without extracting their entire subtree.
-        let previewable = entries.filter { !$0.isDirectory || !$0.isFromArchive }
+        let previewable = nodes.filter { !$0.isDirectory || !$0.isFromArchive }
         guard !previewable.isEmpty else { return }
 
         requestID &+= 1
         let currentRequestID = requestID
         activeTask?.cancel()
 
+        // Fast path: local items open synchronously without async hops.
+        if previewable.allSatisfy({ !$0.isFromArchive }) {
+            presentPanel(with: previewable.map(\.url), makeKeyIfHidden: true)
+            return
+        }
+
+        let snapshots = previewable.map { $0.toFileEntry() }
+        extractAndDisplay(
+            snapshots: snapshots,
+            sourceArchiveURL: sourceArchiveURL,
+            password: password,
+            requestID: currentRequestID,
+            makeKeyIfHidden: true,
+            onError: onError
+        )
+    }
+
+    func togglePreview(
+        nodes: [FileNode],
+        sourceArchiveURL: URL?,
+        password: String?,
+        onError: ((Error) -> Void)? = nil
+    ) {
+        if isVisible {
+            closeIfVisible()
+            return
+        }
+        preview(
+            nodes: nodes,
+            sourceArchiveURL: sourceArchiveURL,
+            password: password,
+            onError: onError
+        )
+    }
+
+    func updateSelectionIfVisible(
+        nodes: [FileNode],
+        sourceArchiveURL: URL?,
+        password: String?,
+        onError: ((Error) -> Void)? = nil
+    ) {
+        guard isVisible else { return }
+
+        let previewable = nodes.filter { !$0.isDirectory || !$0.isFromArchive }
+        requestID &+= 1
+        let currentRequestID = requestID
+        activeTask?.cancel()
+
+        guard !previewable.isEmpty else {
+            previewURLs = []
+            QLPreviewPanel.shared()?.reloadData()
+            return
+        }
+
+        if previewable.allSatisfy({ !$0.isFromArchive }) {
+            presentPanel(with: previewable.map(\.url), makeKeyIfHidden: false)
+            return
+        }
+
+        let snapshots = previewable.map { $0.toFileEntry() }
+        extractAndDisplay(
+            snapshots: snapshots,
+            sourceArchiveURL: sourceArchiveURL,
+            password: password,
+            requestID: currentRequestID,
+            makeKeyIfHidden: false,
+            onError: onError
+        )
+    }
+
+    private func extractAndDisplay(
+        snapshots: [FileEntry],
+        sourceArchiveURL: URL?,
+        password: String?,
+        requestID currentRequestID: UInt64,
+        makeKeyIfHidden: Bool,
+        onError: ((Error) -> Void)?
+    ) {
         activeTask = Task { @MainActor [weak self] in
             guard let self else { return }
             var resolvedURLs: [URL] = []
-            for entry in previewable {
+            for entry in snapshots {
                 guard !Task.isCancelled, self.requestID == currentRequestID else { return }
                 do {
                     if let url = try await DragDropManager.shared.prepareForDragThrowing(
@@ -62,38 +180,35 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
                 }
             }
 
-            guard !Task.isCancelled, self.requestID == currentRequestID, !resolvedURLs.isEmpty else {
+            guard !Task.isCancelled,
+                  self.requestID == currentRequestID,
+                  !resolvedURLs.isEmpty else {
                 return
             }
-            self.presentPanel(with: resolvedURLs)
+
+            if !makeKeyIfHidden && !self.isVisible {
+                return
+            }
+            self.presentPanel(with: resolvedURLs, makeKeyIfHidden: makeKeyIfHidden)
         }
     }
 
-    func togglePreview(
-        entries: [FileEntry],
-        sourceArchiveURL: URL?,
-        password: String?,
-        onError: ((Error) -> Void)? = nil
-    ) {
-        if isVisible {
-            closeIfVisible()
-            return
-        }
-        preview(
-            entries: entries,
-            sourceArchiveURL: sourceArchiveURL,
-            password: password,
-            onError: onError
-        )
-    }
-
-    private func presentPanel(with urls: [URL]) {
-        self.previewURLs = urls
+    private func presentPanel(with urls: [URL], makeKeyIfHidden: Bool) {
+        previewURLs = urls
         guard let panel = QLPreviewPanel.shared() else { return }
-        panel.dataSource = self
-        panel.delegate = self
+        isPresentingPanel = true
+        panel.updateController()
+        isPresentingPanel = false
+        if panel.dataSource !== self {
+            panel.dataSource = self
+        }
+        if panel.delegate !== self {
+            panel.delegate = self
+        }
         panel.reloadData()
-        panel.makeKeyAndOrderFront(nil)
+        if makeKeyIfHidden && !panel.isVisible {
+            panel.makeKeyAndOrderFront(nil)
+        }
     }
 
     // MARK: - QLPreviewPanelDataSource
@@ -106,7 +221,39 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
 
     nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
         MainActor.assumeIsolated {
-            previewURLs[index] as NSURL
+            guard previewURLs.indices.contains(index) else { return nil }
+            return previewURLs[index] as NSURL
+        }
+    }
+
+    // MARK: - QLPreviewPanelDelegate
+
+    nonisolated func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+        MainActor.assumeIsolated {
+            guard let event,
+                  event.type == .keyDown,
+                  let activeOutlineView else {
+                return false
+            }
+
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+
+            switch event.keyCode {
+            case 125, 126: // Down, Up arrows
+                guard modifiers.isEmpty || modifiers == .command || modifiers == .shift else {
+                    return false
+                }
+                activeOutlineView.keyDown(with: event)
+                return true
+            case 123, 124: // Left, Right arrows
+                guard modifiers.isEmpty, previewURLs.count <= 1 else {
+                    return false
+                }
+                activeOutlineView.keyDown(with: event)
+                return true
+            default:
+                return false
+            }
         }
     }
 }

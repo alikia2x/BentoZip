@@ -7,11 +7,19 @@ import UniformTypeIdentifiers
 enum FileKindCache {
     private static var cache: [String: String] = [:]
 
+    static func localizedKind(for node: FileNode) -> String {
+        localizedKind(isDirectory: node.isDirectory, pathExtension: node.url.pathExtension)
+    }
+
     static func localizedKind(for entry: FileEntry) -> String {
-        if entry.isDirectory {
+        localizedKind(isDirectory: entry.isDirectory, pathExtension: entry.url.pathExtension)
+    }
+
+    private static func localizedKind(isDirectory: Bool, pathExtension: String) -> String {
+        if isDirectory {
             return String(localized: "Folder")
         }
-        let ext = entry.url.pathExtension.lowercased()
+        let ext = pathExtension.lowercased()
         if ext.isEmpty {
             return String(localized: "Document")
         }
@@ -24,44 +32,70 @@ enum FileKindCache {
     }
 }
 
-extension FileEntry {
-    var sortableSize: Int64 {
-        isDirectory ? -1 : size
-    }
+@MainActor
+enum FileListFormatters {
+    static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.doesRelativeDateFormatting = true
+        return formatter
+    }()
 
-    var sortablePackedSize: Int64 {
-        packedSize ?? -1
-    }
-
-    var sortableModificationDate: Date {
-        modificationDate ?? .distantPast
-    }
+    static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter
+    }()
 }
 
+@MainActor
 enum FileListTreeSupport {
-    static func sorted(_ base: [FileEntry], using sortOrder: [KeyPathComparator<FileEntry>]) -> [FileEntry] {
-        if let firstComparator = sortOrder.first, firstComparator.keyPath == \FileEntry.name {
-            let folders = base.filter(\.isDirectory).sorted(using: sortOrder)
-            let files = base.filter { !$0.isDirectory }.sorted(using: sortOrder)
+    static func sortNodes(_ nodes: [FileNode], using descriptor: NSSortDescriptor?) -> [FileNode] {
+        guard nodes.count > 1 else { return nodes }
+        let key = descriptor?.key ?? "name"
+        let ascending = descriptor?.ascending ?? true
+
+        if key == "name" {
+            let folders = nodes.filter(\.isDirectory).sorted { lhs, rhs in
+                compareNames(lhs, rhs, ascending: ascending)
+            }
+            let files = nodes.filter { !$0.isDirectory }.sorted { lhs, rhs in
+                compareNames(lhs, rhs, ascending: ascending)
+            }
             return folders + files
         }
-        return base.sorted(using: sortOrder)
-    }
 
-    static func findEntries(matching ids: Set<UUID>, in list: [FileEntry]) -> [FileEntry] {
-        var result: [FileEntry] = []
-        for entry in list {
-            if ids.contains(entry.id) {
-                result.append(entry)
+        return nodes.sorted { lhs, rhs in
+            let comparison: ComparisonResult
+            switch key {
+            case "date":
+                let lDate = lhs.modificationDate ?? .distantPast
+                let rDate = rhs.modificationDate ?? .distantPast
+                comparison = lDate.compare(rDate)
+            case "size":
+                let lSize = lhs.isDirectory && lhs.size <= 0 ? -1 : lhs.size
+                let rSize = rhs.isDirectory && rhs.size <= 0 ? -1 : rhs.size
+                comparison = compareInt64(lSize, rSize)
+            case "packed":
+                let lPacked = lhs.isDirectory ? -1 : (lhs.packedSize ?? -1)
+                let rPacked = rhs.isDirectory ? -1 : (rhs.packedSize ?? -1)
+                comparison = compareInt64(lPacked, rPacked)
+            case "kind":
+                let lKind = FileKindCache.localizedKind(for: lhs)
+                let rKind = FileKindCache.localizedKind(for: rhs)
+                comparison = lKind.localizedStandardCompare(rKind)
+            default:
+                comparison = lhs.name.localizedStandardCompare(rhs.name)
             }
-            if let children = entry.children, !children.isEmpty {
-                result.append(contentsOf: findEntries(matching: ids, in: children))
+
+            if comparison == .orderedSame {
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
+            return ascending ? (comparison == .orderedAscending) : (comparison == .orderedDescending)
         }
-        return result
     }
 
-    @MainActor
     static func handleExtractionError(_ error: Error, appState: AppState) {
         if let bentoError = error as? Bento7zError,
            bentoError == .passwordRequired || bentoError == .wrongPassword {
@@ -69,6 +103,7 @@ enum FileListTreeSupport {
                 appState.archivePassword = nil
             }
             appState.pendingPasswordArchiveURL = appState.sourceArchiveURL
+            appState.pendingPasswordAction = appState.sourceArchiveURL.map { .browse($0) }
             appState.isPasswordRetryError = (bentoError == .wrongPassword)
             appState.passwordPromptReason = bentoError.localizedDescription
             appState.needsPasswordPrompt = true
@@ -77,35 +112,14 @@ enum FileListTreeSupport {
         }
     }
 
-    @MainActor
-    static func makeItemProvider(for entry: FileEntry, appState: AppState) -> NSItemProvider {
-        let provider = NSItemProvider()
-        provider.suggestedName = entry.name
+    private static func compareNames(_ lhs: FileNode, _ rhs: FileNode, ascending: Bool) -> Bool {
+        let result = lhs.name.localizedStandardCompare(rhs.name)
+        return ascending ? (result == .orderedAscending) : (result == .orderedDescending)
+    }
 
-        let sourceArchiveURL = appState.sourceArchiveURL
-        let password = appState.archivePassword
-
-        provider.registerFileRepresentation(
-            forTypeIdentifier: UTType.item.identifier,
-            fileOptions: [],
-            visibility: .all
-        ) { completion in
-            Task { @MainActor in
-                do {
-                    let localURL = try await DragDropManager.shared.prepareForDragThrowing(
-                        entry,
-                        sourceArchiveURL: sourceArchiveURL,
-                        password: password
-                    )
-                    completion(localURL, false, nil)
-                } catch {
-                    handleExtractionError(error, appState: appState)
-                    completion(nil, false, error)
-                }
-            }
-            return nil
-        }
-
-        return provider
+    private static func compareInt64(_ lhs: Int64, _ rhs: Int64) -> ComparisonResult {
+        if lhs < rhs { return .orderedAscending }
+        if lhs > rhs { return .orderedDescending }
+        return .orderedSame
     }
 }

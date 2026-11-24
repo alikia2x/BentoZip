@@ -58,6 +58,8 @@ struct PasswordPromptSheet: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(Text(showPassword ? "Hide Password" : "Show Password"))
+                .help(showPassword ? "Hide Password" : "Show Password")
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)

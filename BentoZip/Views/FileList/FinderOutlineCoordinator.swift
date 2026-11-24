@@ -1,0 +1,309 @@
+import AppKit
+import BentoZipCore
+
+struct FilePromisePayload: Sendable {
+    let entry: FileEntry
+    let sourceArchiveURL: URL?
+    let password: String?
+}
+
+@MainActor
+final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+    weak var outlineView: FinderOutlineView?
+    weak var packedColumn: NSTableColumn?
+
+    var appState: AppState
+    var progressState: ProgressState
+    var onRequestArchiveDelete: ([FileEntry]) -> Void
+
+    private var lastTreeStructureRevision: UInt64 = .max
+    private var lastNodeUpdateRevision: UInt64 = 0
+    private var lastMode: ArchiveMode?
+    private var lastArchiveURL: URL?
+    private var lastShowInspector: Bool?
+    private var isUpdatingSelectionFromModel = false
+    private var needsInitialWindowFocus = true
+    private var hasScheduledDeferredFocusCheck = false
+    private var sortedRoots: [FileNode] = []
+    private var sortedChildrenCache: [UUID: [FileNode]] = [:]
+    private var currentSortDescriptor: NSSortDescriptor? = NSSortDescriptor(key: "name", ascending: true)
+
+    nonisolated let filePromiseQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "com.bentozip.file-promise"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 2
+        return queue
+    }()
+
+    init(
+        appState: AppState,
+        progressState: ProgressState,
+        onRequestArchiveDelete: @escaping ([FileEntry]) -> Void
+    ) {
+        self.appState = appState
+        self.progressState = progressState
+        self.onRequestArchiveDelete = onRequestArchiveDelete
+        super.init()
+    }
+
+    func tearDown() {
+        needsInitialWindowFocus = false
+        hasScheduledDeferredFocusCheck = false
+        if let outlineView {
+            outlineView.dataSource = nil
+            outlineView.delegate = nil
+            outlineView.target = nil
+            QuickLookHelper.shared.detachOwner(outlineView)
+        }
+    }
+
+    func handleMovedToWindow() {
+        claimFirstResponderIfAppropriate()
+    }
+
+    func handleBecameQuickLookOwner() {
+        let nodes = selectedNodes()
+        QuickLookHelper.shared.updateSelectionIfVisible(
+            nodes: nodes,
+            sourceArchiveURL: appState.sourceArchiveURL,
+            password: appState.archivePassword
+        ) { [weak self] error in
+            guard let self else { return }
+            FileListTreeSupport.handleExtractionError(error, appState: self.appState)
+        }
+    }
+
+    // MARK: - Model -> OutlineView Synchronization
+
+    func syncFromModel() {
+        guard let outlineView else { return }
+
+        packedColumn?.isHidden = (appState.mode != .browseArchive)
+
+        let modeOrArchiveChanged = (lastMode != appState.mode || lastArchiveURL != appState.sourceArchiveURL)
+        lastMode = appState.mode
+        lastArchiveURL = appState.sourceArchiveURL
+
+        let inspectorOpenedInCompress = (lastShowInspector == false && appState.showInspector && appState.mode == .compress)
+        lastShowInspector = appState.showInspector
+
+        if modeOrArchiveChanged {
+            needsInitialWindowFocus = true
+            QuickLookHelper.shared.closeIfVisible(for: outlineView)
+        } else if inspectorOpenedInCompress {
+            needsInitialWindowFocus = true
+        }
+
+        if lastTreeStructureRevision != appState.treeStructureRevision {
+            lastTreeStructureRevision = appState.treeStructureRevision
+            lastNodeUpdateRevision = appState.nodeUpdateRevision
+            rebuildRootsAndReload(in: outlineView)
+            syncSelectionFromModel(in: outlineView)
+            claimFirstResponderIfAppropriate()
+            return
+        }
+
+        if lastNodeUpdateRevision != appState.nodeUpdateRevision {
+            let previousRevision = lastNodeUpdateRevision
+            lastNodeUpdateRevision = appState.nodeUpdateRevision
+            applyIncrementalUpdates(since: previousRevision, in: outlineView)
+        }
+
+        syncSelectionFromModel(in: outlineView)
+
+        if inspectorOpenedInCompress {
+            claimFirstResponderIfAppropriate()
+        }
+    }
+
+    private func rebuildRootsAndReload(in outlineView: NSOutlineView) {
+        sortedRoots = FileListTreeSupport.sortNodes(appState.displayedNodes, using: currentSortDescriptor)
+        sortedChildrenCache.removeAll(keepingCapacity: true)
+        let previousGuard = isUpdatingSelectionFromModel
+        isUpdatingSelectionFromModel = true
+        defer { isUpdatingSelectionFromModel = previousGuard }
+        outlineView.reloadData()
+    }
+
+    private func applyIncrementalUpdates(since revision: UInt64, in outlineView: NSOutlineView) {
+        guard let events = appState.nodeUpdates(since: revision) else {
+            rebuildRootsAndReload(in: outlineView)
+            syncSelectionFromModel(in: outlineView)
+            return
+        }
+
+        let currentNavID = appState.navigationNodes.last?.id
+        if let currentNavID,
+           events.contains(where: { $0.nodeID == currentNavID && $0.reloadChildren }) {
+            rebuildRootsAndReload(in: outlineView)
+            syncSelectionFromModel(in: outlineView)
+            return
+        }
+
+        let previousGuard = isUpdatingSelectionFromModel
+        isUpdatingSelectionFromModel = true
+        defer { isUpdatingSelectionFromModel = previousGuard }
+        for event in events {
+            if event.reloadChildren {
+                sortedChildrenCache.removeValue(forKey: event.nodeID)
+            }
+            guard let node = appState.node(for: event.nodeID) else { continue }
+            if outlineView.row(forItem: node) >= 0 {
+                outlineView.reloadItem(node, reloadChildren: event.reloadChildren)
+            }
+        }
+    }
+
+    private func syncSelectionFromModel(in outlineView: NSOutlineView) {
+        let modelIDs = appState.selectedEntryIDs
+        let currentIDs = Set(selectedNodes(in: outlineView).map(\.id))
+        guard modelIDs != currentIDs else { return }
+
+        let targetIndexes = NSMutableIndexSet()
+        for id in modelIDs {
+            if let node = appState.node(for: id) {
+                let row = outlineView.row(forItem: node)
+                if row >= 0 {
+                    targetIndexes.add(row)
+                }
+            }
+        }
+
+        let previousGuard = isUpdatingSelectionFromModel
+        isUpdatingSelectionFromModel = true
+        defer { isUpdatingSelectionFromModel = previousGuard }
+        outlineView.selectRowIndexes(targetIndexes as IndexSet, byExtendingSelection: false)
+    }
+
+    private func claimFirstResponderIfAppropriate() {
+        guard let outlineView,
+              let window = outlineView.window,
+              window.attachedSheet == nil else {
+            return
+        }
+
+        if needsInitialWindowFocus || !(window.firstResponder is NSTextView) {
+            if window.firstResponder !== outlineView {
+                window.makeFirstResponder(outlineView)
+            }
+        }
+
+        // One next-runloop re-check handles SwiftUI Form TextFields claiming focus
+        // right after initial mount or inspector opening, without arbitrary timers.
+        guard needsInitialWindowFocus, !hasScheduledDeferredFocusCheck else { return }
+        hasScheduledDeferredFocusCheck = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.hasScheduledDeferredFocusCheck = false
+            guard self.needsInitialWindowFocus,
+                  let outlineView = self.outlineView,
+                  let window = outlineView.window,
+                  window.attachedSheet == nil else {
+                return
+            }
+            self.needsInitialWindowFocus = false
+            if window.firstResponder !== outlineView {
+                window.makeFirstResponder(outlineView)
+            }
+        }
+    }
+
+    func selectedNodes(in outlineView: NSOutlineView? = nil) -> [FileNode] {
+        guard let view = outlineView ?? self.outlineView else { return [] }
+        return view.selectedRowIndexes.compactMap { view.item(atRow: $0) as? FileNode }
+    }
+
+    private func sortedChildren(of node: FileNode) -> [FileNode] {
+        if let cached = sortedChildrenCache[node.id] {
+            return cached
+        }
+        let sorted = FileListTreeSupport.sortNodes(node.children ?? [], using: currentSortDescriptor)
+        sortedChildrenCache[node.id] = sorted
+        return sorted
+    }
+
+    // MARK: - NSOutlineViewDataSource
+
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+        if item == nil {
+            return sortedRoots.count
+        }
+        guard let node = item as? FileNode else { return 0 }
+        return sortedChildren(of: node).count
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
+        (item as? FileNode)?.isExpandable ?? false
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+        if item == nil {
+            return sortedRoots[index]
+        }
+        if let node = item as? FileNode {
+            return sortedChildren(of: node)[index]
+        }
+        return NSNull()
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
+        var expandedNodes: [FileNode] = []
+        for row in 0..<outlineView.numberOfRows {
+            if let node = outlineView.item(atRow: row) as? FileNode,
+               outlineView.isItemExpanded(node) {
+                expandedNodes.append(node)
+            }
+        }
+
+        currentSortDescriptor = outlineView.sortDescriptors.first
+        do {
+            let previousGuard = isUpdatingSelectionFromModel
+            isUpdatingSelectionFromModel = true
+            defer { isUpdatingSelectionFromModel = previousGuard }
+
+            rebuildRootsAndReload(in: outlineView)
+
+            for node in expandedNodes {
+                if outlineView.row(forItem: node) >= 0 {
+                    outlineView.expandItem(node)
+                }
+            }
+        }
+        syncSelectionFromModel(in: outlineView)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> (any NSPasteboardWriting)? {
+        makePasteboardWriter(for: item)
+    }
+
+    // MARK: - NSOutlineViewDelegate
+
+    func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        guard let columnID = tableColumn?.identifier,
+              let node = item as? FileNode else {
+            return nil
+        }
+        return FinderOutlineCellFactory.makeView(for: columnID, node: node, in: outlineView)
+    }
+
+    func outlineViewItemWillExpand(_ notification: Notification) {
+        guard let node = notification.userInfo?["NSObject"] as? FileNode else { return }
+        appState.loadChildrenIfNeeded(for: node)
+    }
+
+    func outlineViewSelectionDidChange(_ notification: Notification) {
+        guard !isUpdatingSelectionFromModel, let outlineView else { return }
+        let nodes = selectedNodes(in: outlineView)
+        appState.selectedEntryIDs = Set(nodes.map(\.id))
+
+        QuickLookHelper.shared.updateSelectionIfVisible(
+            nodes: nodes,
+            sourceArchiveURL: appState.sourceArchiveURL,
+            password: appState.archivePassword
+        ) { [weak self] error in
+            guard let self else { return }
+            FileListTreeSupport.handleExtractionError(error, appState: self.appState)
+        }
+    }
+}

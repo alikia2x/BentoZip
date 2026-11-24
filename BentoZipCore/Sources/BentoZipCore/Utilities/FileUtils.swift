@@ -76,17 +76,6 @@ enum FileUtils {
         return values?.localizedName ?? url.lastPathComponent
     }
 
-    /// List the immediate contents of a directory (non-recursive).
-    static func enumerateDirectory(at url: URL) -> [URL] {
-        guard isDirectory(at: url) else { return [] }
-        let contents = (try? FileManager.default.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .localizedNameKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        return contents.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-    }
-
     /// Build lightweight top-level entries off the main actor without recursive disk traversal.
     static func buildShallowEntriesAsync(from urls: [URL]) async -> [FileEntry] {
         await Task.detached(priority: .userInitiated) {
@@ -103,13 +92,18 @@ enum FileUtils {
     /// Load only the immediate (1-level) children of a local directory off the main actor.
     static func loadImmediateChildrenAsync(of directoryURL: URL) async -> [FileEntry] {
         await Task.detached(priority: .userInitiated) {
-            loadImmediateChildrenSync(of: directoryURL)
+            readImmediateChildren(of: directoryURL)
         }.value
     }
 
-    /// Load only the immediate (1-level) children of a local directory synchronously.
-    static func loadImmediateChildrenSync(of directoryURL: URL) -> [FileEntry] {
-        enumerateDirectory(at: directoryURL)
+    private static func readImmediateChildren(of directoryURL: URL) -> [FileEntry] {
+        guard isDirectory(at: directoryURL) else { return [] }
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .localizedNameKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        return contents
             .map { makeShallowEntry(for: $0) }
             .sorted(by: entrySort)
     }

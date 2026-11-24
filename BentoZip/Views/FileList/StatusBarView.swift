@@ -1,7 +1,7 @@
-import SwiftUI
 import BentoZipCore
+import SwiftUI
 
-/// Finder-style bottom Status Bar with zero middle dots.
+/// Finder-style bottom Status Bar.
 struct StatusBarView: View {
     @Environment(AppState.self) private var appState
 
@@ -15,19 +15,35 @@ struct StatusBarView: View {
         Self.byteFormatter.string(fromByteCount: appState.totalSize)
     }
 
-    private var selectedEntriesSize: Int64 {
-        appState.selectedEntries.reduce(0) { partial, entry in
-            partial + entryTotalSize(entry)
+    private var selectedNodesSize: Int64 {
+        _ = appState.nodeUpdateRevision
+        let selectedIDs = appState.selectedEntryIDs
+        return appState.selectedNodes.reduce(Int64(0)) { total, node in
+            var ancestor = node.parent
+            while let current = ancestor {
+                if selectedIDs.contains(current.id) {
+                    return total
+                }
+                ancestor = current.parent
+            }
+            return total + node.archiveTotalSize
         }
     }
 
     private var summaryText: String {
-        let count = appState.displayedEntries.count
-        if !appState.selectedEntryIDs.isEmpty {
-            let selectedSize = Self.byteFormatter.string(fromByteCount: selectedEntriesSize)
-            return String(localized: "\(appState.selectedEntryIDs.count) of \(count) selected, \(selectedSize)")
+        let displayedNodes = appState.displayedNodes
+        let displayedCount = displayedNodes.count
+        let selectedNodes = appState.selectedNodes
+        if !selectedNodes.isEmpty {
+            let selectedSize = Self.byteFormatter.string(fromByteCount: selectedNodesSize)
+            let displayedIDs = Set(displayedNodes.map(\.id))
+            let allSelectedAreTopLevel = selectedNodes.allSatisfy { displayedIDs.contains($0.id) }
+            if allSelectedAreTopLevel {
+                return String(localized: "\(selectedNodes.count) of \(displayedCount) selected, \(selectedSize)")
+            }
+            return String(localized: "\(selectedNodes.count) selected, \(selectedSize)")
         }
-        return String(localized: "\(count) items, \(formattedTotalSize)")
+        return String(localized: "\(displayedCount) items, \(formattedTotalSize)")
     }
 
     private var packedSummaryText: String? {
@@ -72,12 +88,5 @@ struct StatusBarView: View {
             .frame(height: 23)
             .background(.bar)
         }
-    }
-
-    private func entryTotalSize(_ entry: FileEntry) -> Int64 {
-        if entry.isFromArchive, entry.isDirectory, let children = entry.children {
-            return children.reduce(0) { $0 + entryTotalSize($1) }
-        }
-        return entry.size
     }
 }

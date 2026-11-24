@@ -18,9 +18,9 @@ The app has three modes (`ArchiveMode`) controlled by `AppState.mode`:
 
 ### State Management
 
-- `AppState` (`@Observable`, `@MainActor`) is the single source of truth for window state. Passed via `.environment()` through the SwiftUI view hierarchy.
-- `ProgressState` (`@Observable`, `@MainActor`) tracks operation progress, active filename, and cancellation state for the singleton progress window.
-- `AppPreferences` uses SwiftData (`@Model`) managed by `PreferencesManager` for persistent user preferences.
+- `AppState` (`@Observable`, `@MainActor`) is owned per window (`WindowRootView` inside `WindowGroup`) and passed via `.environment()` through that window's SwiftUI hierarchy.
+- `ProgressState` (`@Observable`, `@MainActor`) is owned per window and drives the window-attached progress sheet (unified with `PasswordPromptSheet` via a single `.sheet(item:)` in `ContentView`).
+- `AppPreferences` uses SwiftData (`@Model`) managed by a shared `PreferencesManager` for persistent user preferences.
 
 ### Compression/Extraction Engine Chain
 
@@ -34,16 +34,17 @@ All engines conform to ArchiveEngine protocol:
 
 ### Key Design Decisions
 
-1. **FileEntry is a tree**: `FileEntry.children` allows directory navigation. `ArchiveTreeBuilder` converts flat archive entries into hierarchical trees while rejecting path traversal segments.
-2. **Single top-directory unwrapping**: Archives with a single top-level directory can automatically unwrap it when configured (`AppPreferences.unwrapSingleTopDirectory`).
-3. **Atomic archive mutations**: `removeEntries` and `addEntries` use extract-then-rebuild with atomic file replacement and rollback on failure.
-4. **Bundled `bento7z` helper**: `bento7z` and `7z.so` from the sibling `../bento7z/build/` project are copied and code-signed into `BentoZip.app/Contents/Helpers/` during the Xcode build phase.
-5. **Progress window is a singleton `Window`**: Declared as `Window("进度", id: "progress")` and opened via `openWindow(id: "progress")` during operations.
+1. **Single-source-of-truth `FileNode` tree**: `FileNode` (`@MainActor final class`) holds `parent`/`children` references for O(1) incremental updates (background folder sizing and lazy 1-level directory expansion) and directly backs `NSOutlineView`. `ArchiveTreeBuilder` converts flat archive listings into hierarchical `FileEntry` trees while rejecting path traversal segments, which `AppState` materializes into `FileNode`s.
+2. **Native Finder `NSOutlineView` file list**: `FinderOutlineView` + `FinderOutlineCoordinator` render both `.compress` and `.browseArchive` modes in a single unified outline view (toggling only `Packed` column visibility), with native blue selection, arrow/type-ahead navigation, responder-chain `QLPreviewPanelController` Quick Look, native drag-in, and `NSFilePromiseProvider` drag-out.
+3. **Single top-directory unwrapping**: Archives with a single top-level directory can automatically unwrap it when configured (`AppPreferences.unwrapSingleTopDirectory`).
+4. **Atomic archive mutations**: `removeEntries` and `addEntries` use extract-then-rebuild with atomic file replacement, rollback on failure, and `DragDropManager` cache invalidation.
+5. **Bundled `bento7z` helper**: `bento7z` and `7z.so` from the sibling `../bento7z/build/` project are copied and code-signed into `BentoZip.app/Contents/Helpers/` during the Xcode build phase.
+6. **Per-window progress sheet**: Operations present `ProgressWindowView` as a compact window-attached sheet bound to that window's `ProgressState`, keeping multiple windows completely independent.
 
 ### Drag and Drop & Quick Look
 
-- **Drop-in**: `EmptyStateView` and `ContentView` route dropped URLs via `AppState.isArchiveDrop(_:)` / `AppState.handleDroppedURLs(_:)` (browse archive or add to compress list / writable archive).
-- **Drag-out & Quick Look**: `DragDropManager` performs selective single-entry extraction into a session temp folder on drag-out or Quick Look preview, propagating password/error states when needed.
+- **Drop-in**: `EmptyStateView`, `FinderOutlineView` (native `.fileURL` drop validation/acceptance), and `ContentView` route dropped URLs via `AppState.isArchiveDrop(_:)` / `AppState.handleDroppedURLs(_:)` (browse archive or add to compress list / writable archive).
+- **Drag-out & Quick Look**: `FinderOutlineCoordinator` drags local items directly as `NSURL` and archive items lazily via `NSFilePromiseProvider`. `DragDropManager` extracts single entries into unique per-extraction temp subdirectories with metadata-keyed caching, and `QuickLookHelper` integrates with `FinderOutlineView`'s responder chain for live arrow-key preview switching.
 
 ## Setup & Build
 
@@ -74,7 +75,7 @@ cd BentoZipCore && swift build
 
 ### General
 
-- **Swift 5.9+** with SwiftUI (no AppKit unless unavoidable, e.g., `NSSavePanel`, `NSOpenPanel`, `QLPreviewPanel`)
+- **Swift 5.9+** with SwiftUI (AppKit where needed for native macOS fidelity, e.g., `NSOutlineView`, `NSSavePanel`, `NSOpenPanel`, `QLPreviewPanel`)
 - macOS 14+ deployment target
 - All UI state must be `@MainActor`
 - Use `@Observable` (Observation framework) over `@ObservableObject` / `@StateObject`
@@ -112,9 +113,11 @@ cd BentoZipCore && swift build
 
 | File | Purpose |
 |---|---|
-| `BentoZipApp.swift` | App entry point, SwiftData container, singleton progress window & Settings scene |
-| `ContentView.swift` | Root view, mode switching, drop handling, password sheet |
-| `AppState.swift` | Central state: entries, navigation, mode, settings, password prompt & recent archives |
+| `BentoZipApp.swift` | App entry point, SwiftData container, per-window `WindowRootView` & Settings scene |
+| `ContentView.swift` | Root view, mode switching, drop handling, unified progress/password sheet |
+| `FinderOutlineView.swift` / `FinderOutlineCoordinator.swift` | Native AppKit Finder-style `NSOutlineView`, responder-chain Quick Look, sorting & drag-and-drop |
+| `FileNode.swift` | Single-source-of-truth `@MainActor` reference tree node backing `AppState` and `NSOutlineView` |
+| `AppState.swift` | Per-window central state: `FileNode` tree, incremental update log, navigation, mode, settings & recent archives |
 | `Coordinator.swift` | `CompressionCoordinator`: orchestrates compress/extract/browse/mutate workflows & cancellation |
 | `ArchiveEngine.swift` | Protocol all compression engines implement |
 | `Bento7zEngine.swift` | `bento7z` JSONL subprocess engine with cancellation and path validation |

@@ -5,7 +5,6 @@ import SwiftUI
 struct ArchiveInfoInspectorView: View {
     @Environment(AppState.self) private var appState
     @Environment(ProgressState.self) private var progressState
-    @Environment(\.openWindow) private var openWindow
 
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -83,8 +82,7 @@ struct ArchiveInfoInspectorView: View {
                             await appState.coordinator.extract(
                                 appState: appState,
                                 progressState: progressState,
-                                chooseDestination: true,
-                                openWindow: openWindow
+                                chooseDestination: true
                             )
                         }
                     }
@@ -98,8 +96,7 @@ struct ArchiveInfoInspectorView: View {
                             await appState.coordinator.extract(
                                 appState: appState,
                                 progressState: progressState,
-                                chooseDestination: false,
-                                openWindow: openWindow
+                                chooseDestination: false
                             )
                         }
                     } label: {

@@ -5,9 +5,12 @@ import SwiftUI
 struct ToolbarCommands: ToolbarContent {
     @Environment(AppState.self) private var appState
     @Environment(ProgressState.self) private var progressState
-    @Environment(\.openWindow) private var openWindow
 
     @Binding var showDeleteConfirmation: Bool
+
+    private var hasRemovableCompressSelection: Bool {
+        appState.selectedNodes.contains { $0.parent == nil }
+    }
 
     var body: some ToolbarContent {
         if appState.mode != .empty {
@@ -36,21 +39,20 @@ struct ToolbarCommands: ToolbarContent {
                     } label: {
                         Label("Remove", systemImage: "trash")
                     }
-                    .disabled(appState.selectedEntryIDs.isEmpty || appState.isLoading)
+                    .disabled(!hasRemovableCompressSelection || appState.isLoading)
                     .help("Remove Selected")
 
                     Button {
                         Task {
                             await appState.coordinator.compress(
                                 appState: appState,
-                                progressState: progressState,
-                                openWindow: openWindow
+                                progressState: progressState
                             )
                         }
                     } label: {
                         Label("Compress", systemImage: "archivebox")
                     }
-                    .disabled(appState.fileEntries.isEmpty || appState.isLoading)
+                    .disabled(appState.rootNodes.isEmpty || appState.isLoading)
                     .help("Create Archive")
                 } else if appState.mode == .browseArchive {
                     if appState.isWritableArchive {
@@ -77,8 +79,7 @@ struct ToolbarCommands: ToolbarContent {
                                 await appState.coordinator.extract(
                                     appState: appState,
                                     progressState: progressState,
-                                    chooseDestination: false,
-                                    openWindow: openWindow
+                                    chooseDestination: false
                                 )
                             }
                         } label: {
@@ -90,29 +91,28 @@ struct ToolbarCommands: ToolbarContent {
                                 await appState.coordinator.extract(
                                     appState: appState,
                                     progressState: progressState,
-                                    chooseDestination: true,
-                                    openWindow: openWindow
+                                    chooseDestination: true
                                 )
                             }
                         } label: {
                             Label("Extract To…", systemImage: "folder.badge.plus")
                         }
 
-                        if !appState.selectedEntries.isEmpty {
+                        if !appState.selectedNodes.isEmpty {
                             Divider()
                             Button {
+                                let entries = appState.selectedNodes.map { $0.toFileEntry() }
                                 Task {
                                     await appState.coordinator.extract(
                                         appState: appState,
                                         progressState: progressState,
-                                        entries: appState.selectedEntries,
-                                        chooseDestination: true,
-                                        openWindow: openWindow
+                                        entries: entries,
+                                        chooseDestination: true
                                     )
                                 }
                             } label: {
                                 Label(
-                                    String(localized: "Extract Selected (\(appState.selectedEntries.count))…"),
+                                    String(localized: "Extract Selected (\(appState.selectedNodes.count))…"),
                                     systemImage: "checkmark.rectangle.stack"
                                 )
                             }
@@ -124,8 +124,7 @@ struct ToolbarCommands: ToolbarContent {
                             await appState.coordinator.extract(
                                 appState: appState,
                                 progressState: progressState,
-                                chooseDestination: false,
-                                openWindow: openWindow
+                                chooseDestination: false
                             )
                         }
                     }
@@ -162,8 +161,7 @@ struct ToolbarCommands: ToolbarContent {
                     await appState.coordinator.addEntries(
                         appState: appState,
                         urls: urls,
-                        progressState: progressState,
-                        openWindow: openWindow
+                        progressState: progressState
                     )
                 }
             }

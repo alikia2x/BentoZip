@@ -5,8 +5,26 @@ import Foundation
 public final class DragDropManager {
     public static let shared = DragDropManager()
 
+    private struct CacheKey: Hashable {
+        let archivePath: String
+        let modificationTimestamp: TimeInterval?
+        let fileSize: Int64?
+        let entryPath: String
+    }
+
+    private struct InFlightKey: Hashable {
+        let cacheKey: CacheKey
+        let password: String?
+    }
+
+    private struct InFlightEntry {
+        let id: UUID
+        let task: Task<URL, Error>
+    }
+
     private let sessionTempDir: URL
-    private var extractedFiles: [String: URL] = [:]
+    private var extractedFiles: [CacheKey: URL] = [:]
+    private var inFlightExtractions: [InFlightKey: InFlightEntry] = [:]
     private let engine = Bento7zEngine()
 
     private init() {
@@ -16,7 +34,8 @@ public final class DragDropManager {
     }
 
     /// Prepare a local URL for dragging an entry out of the window, propagating backend or path errors.
-    /// For archive entries, extracts only the requested entry to a session temp folder.
+    /// For archive entries, extracts only the requested entry into an isolated per-extraction subdirectory
+    /// so concurrent requests (including entries sharing the same filename) never collide.
     public func prepareForDragThrowing(
         _ entry: FileEntry,
         sourceArchiveURL: URL?,
@@ -32,31 +51,61 @@ public final class DragDropManager {
 
         let safeName = try sanitizedEntryFileName(entry.name)
         let archivePath = entry.archiveRelativePath ?? extractArchivePath(from: entry)
-        let cacheKey = "\(archiveURL.path)|\(archivePath)"
+        let cacheKey = makeCacheKey(for: archiveURL, entryPath: archivePath)
+
         if let cached = extractedFiles[cacheKey],
            FileManager.default.fileExists(atPath: cached.path) {
             return cached
         }
 
-        let proposedURL = sessionTempDir.appendingPathComponent(safeName)
+        let inFlightKey = InFlightKey(cacheKey: cacheKey, password: password)
+        if let existing = inFlightExtractions[inFlightKey] {
+            return try await existing.task.value
+        }
+
+        let extractionDir = sessionTempDir.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tempURL = extractionDir.appendingPathComponent(safeName)
         let basePath = sessionTempDir.standardizedFileURL.path
         let basePrefix = basePath.hasSuffix("/") ? basePath : basePath + "/"
-        guard proposedURL.standardizedFileURL.path.hasPrefix(basePrefix) else {
+        guard tempURL.standardizedFileURL.path.hasPrefix(basePrefix) else {
             throw Bento7zError.operationFailed(
                 String(localized: "Drag destination escapes temporary directory: \(entry.name)", bundle: .module),
                 "INVALID_PATH"
             )
         }
 
-        let tempURL = PathUtils.uniqueFileURL(for: proposedURL)
-        try await engine.extractEntry(
-            from: archiveURL,
-            entryPath: archivePath,
-            to: tempURL,
-            password: password
-        )
-        extractedFiles[cacheKey] = tempURL
-        return tempURL
+        let engine = self.engine
+        let tokenID = UUID()
+        let task = Task.detached(priority: .userInitiated) { () throws -> URL in
+            try FileManager.default.createDirectory(at: extractionDir, withIntermediateDirectories: true)
+            do {
+                try await engine.extractEntry(
+                    from: archiveURL,
+                    entryPath: archivePath,
+                    to: tempURL,
+                    password: password
+                )
+                return tempURL
+            } catch {
+                try? FileManager.default.removeItem(at: extractionDir)
+                throw error
+            }
+        }
+        inFlightExtractions[inFlightKey] = InFlightEntry(id: tokenID, task: task)
+
+        do {
+            let extractedURL = try await task.value
+            if inFlightExtractions[inFlightKey]?.id == tokenID {
+                inFlightExtractions.removeValue(forKey: inFlightKey)
+                extractedFiles[cacheKey] = extractedURL
+            }
+            return extractedURL
+        } catch {
+            if inFlightExtractions[inFlightKey]?.id == tokenID {
+                inFlightExtractions.removeValue(forKey: inFlightKey)
+            }
+            throw error
+        }
     }
 
     /// Prepare a local URL for dragging an entry out of the window.
@@ -73,11 +122,40 @@ public final class DragDropManager {
         )
     }
 
-    /// Remove temporary files extracted during drag-out operations.
+    /// Invalidate cached drag-out entries for `archiveURL` without deleting already-extracted files on disk
+    /// so active Quick Look previews or drag operations in other windows remain intact.
+    public func invalidateCache(for archiveURL: URL) {
+        let targetPath = archiveURL.standardizedFileURL.path
+        extractedFiles = extractedFiles.filter { key, _ in
+            key.archivePath != targetPath
+        }
+        inFlightExtractions = inFlightExtractions.filter { key, _ in
+            key.cacheKey.archivePath != targetPath
+        }
+    }
+
+    /// Remove all temporary files extracted during drag-out operations (intended for app termination).
     public func cleanup() {
-        try? FileManager.default.removeItem(at: sessionTempDir)
+        for entry in inFlightExtractions.values {
+            entry.task.cancel()
+        }
+        inFlightExtractions.removeAll()
         extractedFiles.removeAll()
+        try? FileManager.default.removeItem(at: sessionTempDir)
         try? FileManager.default.createDirectory(at: sessionTempDir, withIntermediateDirectories: true)
+    }
+
+    private func makeCacheKey(for archiveURL: URL, entryPath: String) -> CacheKey {
+        let standardizedPath = archiveURL.standardizedFileURL.path
+        let attrs = try? FileManager.default.attributesOfItem(atPath: standardizedPath)
+        let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate
+        let fileSize = (attrs?[.size] as? NSNumber)?.int64Value
+        return CacheKey(
+            archivePath: standardizedPath,
+            modificationTimestamp: mtime,
+            fileSize: fileSize,
+            entryPath: entryPath
+        )
     }
 
     private func sanitizedEntryFileName(_ name: String) throws -> String {

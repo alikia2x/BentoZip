@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 import Observation
 
 @Observable
@@ -8,7 +8,6 @@ public class ProgressState {
     public var operationProgress: Double = 0.0
     public var operationDescription: String = ""
     public var currentFileName: String = ""
-    public var shouldDismiss: Bool = false
     public var isCancellable: Bool = true
     public var onCancel: (() -> Void)?
 
@@ -25,7 +24,6 @@ public class ProgressState {
         operationProgress = 0.0
         operationDescription = description
         currentFileName = ""
-        shouldDismiss = false
         isCancellable = true
         onCancel = nil
     }

@@ -147,7 +147,7 @@ struct CompressionCoordinatorTests {
 
     // MARK: - Compress & Progress
 
-    @Test func compress_resetsShouldDismissAndUpdatesCurrentFileName() async throws {
+    @Test func compress_resetsProgressStateAndUpdatesCurrentFileName() async throws {
         let tmp = try makeTempDir()
         defer { try? fm.removeItem(at: tmp) }
 
@@ -167,18 +167,15 @@ struct CompressionCoordinatorTests {
         await appState.loadFilesAsync(from: [fileURL])
 
         let progressState = ProgressState()
-        progressState.shouldDismiss = true // stale state from an earlier operation
+        progressState.operationProgress = 0.75
+        progressState.currentFileName = "stale.txt"
 
-        var openedWindowCount = 0
-        await coordinator.compress(appState: appState, progressState: progressState) {
-            openedWindowCount += 1
-        }
+        await coordinator.compress(appState: appState, progressState: progressState)
 
-        #expect(openedWindowCount == 1)
         #expect(progressState.operationProgress == 1.0)
         #expect(progressState.currentFileName == "hello.txt")
-        #expect(progressState.shouldDismiss)
         #expect(!progressState.isOperationInProgress)
+        #expect(progressState.onCancel == nil)
         #expect(appState.lastError == nil)
     }
 
@@ -280,7 +277,7 @@ struct CompressionCoordinatorTests {
         await opTask.value
 
         #expect(!progressState.isOperationInProgress)
-        #expect(progressState.shouldDismiss)
+        #expect(progressState.onCancel == nil)
         #expect(appState.lastError == nil)
         #expect(!fm.fileExists(atPath: tmp.appendingPathComponent("data.zip").path))
     }
@@ -479,5 +476,130 @@ struct CompressionCoordinatorTests {
         #expect(progressState.operationProgress == 1.0)
         #expect(progressState.currentFileName != "stale.txt")
         #expect(!progressState.isOperationInProgress)
+    }
+
+    @Test func perWindowSheetProgress_alwaysResetsIsOperationInProgressOnError() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let fileURL = tmp.appendingPathComponent("fail.txt")
+        try "boom".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let mock = MockArchiveEngine()
+        mock.createHandler = { _, _, _, _ in
+            throw Bento7zError.operationFailed("Disk full", "IO_ERROR")
+        }
+
+        let coordinator = CompressionCoordinator(engine: mock)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        await appState.loadFilesAsync(from: [fileURL])
+
+        let progressState = ProgressState()
+        await coordinator.compress(appState: appState, progressState: progressState)
+
+        #expect(!progressState.isOperationInProgress)
+        #expect(progressState.onCancel == nil)
+        #expect(appState.lastError != nil)
+    }
+
+    @Test func dragDropManager_concurrentSameBasenameExtractionsDoNotCollide() async throws {
+        let tmp = try makeTempDir()
+        defer {
+            try? fm.removeItem(at: tmp)
+            DragDropManager.shared.cleanup()
+        }
+
+        let dirA = tmp.appendingPathComponent("a")
+        let dirB = tmp.appendingPathComponent("b")
+        try fm.createDirectory(at: dirA, withIntermediateDirectories: true)
+        try fm.createDirectory(at: dirB, withIntermediateDirectories: true)
+        try "alpha-readme".write(to: dirA.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try "beta-readme".write(to: dirB.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let archiveURL = tmp.appendingPathComponent("collision.zip")
+        try await engine.create(
+            from: [dirA, dirB],
+            to: archiveURL,
+            settings: CompressionSettings(format: .zip)
+        ) { _ in }
+
+        let entries = try await engine.listEntries(in: archiveURL)
+        func findEntry(_ targetPath: String, in list: [FileEntry]) -> FileEntry? {
+            for item in list {
+                if item.archiveRelativePath == targetPath { return item }
+                if let children = item.children, let match = findEntry(targetPath, in: children) { return match }
+            }
+            return nil
+        }
+
+        let entryA = try #require(findEntry("a/README.md", in: entries))
+        let entryB = try #require(findEntry("b/README.md", in: entries))
+
+        async let extractedA1 = DragDropManager.shared.prepareForDragThrowing(entryA, sourceArchiveURL: archiveURL)
+        async let extractedB = DragDropManager.shared.prepareForDragThrowing(entryB, sourceArchiveURL: archiveURL)
+        async let extractedA2 = DragDropManager.shared.prepareForDragThrowing(entryA, sourceArchiveURL: archiveURL)
+
+        let urlA1 = try #require(await extractedA1)
+        let urlB = try #require(await extractedB)
+        let urlA2 = try #require(await extractedA2)
+
+        #expect(urlA1 != urlB)
+        #expect(urlA1 == urlA2)
+        #expect(urlA1.lastPathComponent == "README.md")
+        #expect(urlB.lastPathComponent == "README.md")
+        #expect(try String(contentsOf: urlA1, encoding: .utf8) == "alpha-readme")
+        #expect(try String(contentsOf: urlB, encoding: .utf8) == "beta-readme")
+    }
+
+    @Test func dragDropManager_windowResetPreservesTempFilesAndMutationInvalidatesCache() async throws {
+        let tmp = try makeTempDir()
+        defer {
+            try? fm.removeItem(at: tmp)
+            DragDropManager.shared.cleanup()
+        }
+
+        let itemV1 = tmp.appendingPathComponent("item.txt")
+        let extraFile = tmp.appendingPathComponent("extra.txt")
+        try "version-1".write(to: itemV1, atomically: true, encoding: .utf8)
+        try "extra".write(to: extraFile, atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let archiveURL = tmp.appendingPathComponent("mutable.zip")
+        try await engine.create(from: [itemV1], to: archiveURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: engine)
+        let windowA = AppState()
+        let windowB = AppState()
+        await coordinator.browseArchive(at: archiveURL, appState: windowA)
+
+        let entryV1 = try #require(windowA.fileEntries.first(where: { $0.name == "item.txt" }))
+        let firstExtracted = try #require(await DragDropManager.shared.prepareForDragThrowing(entryV1, sourceArchiveURL: archiveURL))
+        #expect(try String(contentsOf: firstExtracted, encoding: .utf8) == "version-1")
+
+        // Resetting another window must NOT wipe temp files belonging to Window A
+        windowB.reset()
+        #expect(fm.fileExists(atPath: firstExtracted.path))
+        #expect(try String(contentsOf: firstExtracted, encoding: .utf8) == "version-1")
+
+        // Mutating the archive via coordinator invalidates the drag cache without deleting existing temp files
+        let progressState = ProgressState()
+        await coordinator.addEntries(appState: windowA, urls: [extraFile], progressState: progressState)
+        #expect(fm.fileExists(atPath: firstExtracted.path))
+
+        let entryAfterAdd = try #require(windowA.fileEntries.first(where: { $0.name == "item.txt" }))
+        let secondExtracted = try #require(await DragDropManager.shared.prepareForDragThrowing(entryAfterAdd, sourceArchiveURL: archiveURL))
+        #expect(secondExtracted != firstExtracted)
+        #expect(try String(contentsOf: secondExtracted, encoding: .utf8) == "version-1")
+
+        // Overwriting the archive on disk directly (changing size/mtime) also bypasses stale cache entries
+        try "version-2-longer-payload".write(to: itemV1, atomically: true, encoding: .utf8)
+        try fm.removeItem(at: archiveURL)
+        try await engine.create(from: [itemV1], to: archiveURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let thirdExtracted = try #require(await DragDropManager.shared.prepareForDragThrowing(entryAfterAdd, sourceArchiveURL: archiveURL))
+        #expect(thirdExtracted != secondExtracted)
+        #expect(try String(contentsOf: thirdExtracted, encoding: .utf8) == "version-2-longer-payload")
     }
 }
