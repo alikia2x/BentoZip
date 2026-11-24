@@ -11,6 +11,9 @@ struct FileListView: View {
         KeyPathComparator(\.name, comparator: .localizedStandard, order: .forward)
     ]
     @State private var sortedEntries: [FileEntry] = []
+    @State private var expandedIDs: Set<UUID> = []
+    @State private var focusTrigger: Int = 0
+    @State private var selectionTrigger: Int = 0
     @State private var showDeleteConfirmation = false
     @State private var pendingDeleteEntries: [FileEntry] = []
 
@@ -31,39 +34,63 @@ struct FileListView: View {
     private var selectionBinding: Binding<Set<UUID>> {
         Binding(
             get: { appState.selectedEntryIDs },
-            set: { appState.selectedEntryIDs = $0 }
+            set: { newValue in
+                appState.selectedEntryIDs = newValue
+                if !newValue.isEmpty {
+                    selectionTrigger &+= 1
+                }
+            }
         )
     }
 
     var body: some View {
         tableView
             .tableStyle(.inset(alternatesRowBackgrounds: true))
-            .onAppear { rebuildSortedEntries() }
-            .onChange(of: appState.displayedEntries) { _, _ in rebuildSortedEntries() }
-            .onChange(of: sortOrder) { _, _ in rebuildSortedEntries() }
+            .background(
+                FileListFocusBridge(
+                    focusTrigger: focusTrigger,
+                    selectionTrigger: selectionTrigger,
+                    onSpace: { toggleQuickLook() },
+                    onOpen: { handleOpenSelection() },
+                    onNavigateUp: {
+                        if appState.canNavigateUp {
+                            appState.navigateUp()
+                        }
+                    },
+                    onDelete: { handleDeleteSelection() },
+                    onEscape: { handleEscape() }
+                )
+            )
+            .onAppear {
+                rebuildSortedEntries()
+                focusTrigger &+= 1
+            }
+            .onChange(of: appState.mode) { _, _ in
+                expandedIDs.removeAll()
+                rebuildSortedEntries()
+                focusTrigger &+= 1
+            }
+            .onChange(of: appState.sourceArchiveURL) { _, _ in
+                expandedIDs.removeAll()
+                focusTrigger &+= 1
+            }
+            .onChange(of: appState.navigationPath) { _, _ in
+                expandedIDs.removeAll()
+                rebuildSortedEntries()
+                focusTrigger &+= 1
+            }
+            .onChange(of: appState.displayedEntries) { _, _ in
+                rebuildSortedEntries()
+            }
+            .onChange(of: sortOrder) { _, _ in
+                rebuildSortedEntries()
+            }
             .overlay {
                 if sortedEntries.isEmpty && !appState.isLoading {
                     Text("Empty Folder")
                         .font(.system(size: 13))
                         .foregroundStyle(.tertiary)
                 }
-            }
-            .onKeyPress(.return) { handleOpenSelection(); return .handled }
-            .onKeyPress(.space) { toggleQuickLook(); return .handled }
-            .onKeyPress(.delete) { handleDeleteSelection(); return .handled }
-            .onKeyPress(.escape) {
-                if appState.canNavigateUp { appState.navigateUp() } else { appState.clearSelection() }
-                return .handled
-            }
-            .onKeyPress(keys: [.upArrow]) { press in
-                guard press.modifiers.contains(.command), appState.canNavigateUp else { return .ignored }
-                appState.navigateUp()
-                return .handled
-            }
-            .onKeyPress(keys: [.downArrow]) { press in
-                guard press.modifiers.contains(.command) else { return .ignored }
-                handleOpenSelection()
-                return .handled
             }
             .contextMenu(forSelectionType: UUID.self) { selection in
                 contextMenuItems(for: selection)
@@ -199,7 +226,29 @@ struct FileListView: View {
             .truncationMode(.tail)
     }
 
-    // MARK: - Finder Outline Disclosure Rows
+    // MARK: - Lazy Finder Outline Disclosure Rows
+
+    private func isExpandable(_ entry: FileEntry) -> Bool {
+        guard entry.isDirectory else { return false }
+        if !entry.isFromArchive && !entry.hasLoadedChildren {
+            return true
+        }
+        return !(entry.children ?? []).isEmpty
+    }
+
+    private func expansionBinding(for entry: FileEntry) -> Binding<Bool> {
+        Binding(
+            get: { expandedIDs.contains(entry.id) },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedIDs.insert(entry.id)
+                    appState.loadChildrenIfNeeded(for: entry)
+                } else {
+                    expandedIDs.remove(entry.id)
+                }
+            }
+        )
+    }
 
     @TableRowBuilder<FileEntry>
     private var tableRows: some TableRowContent<FileEntry> {
@@ -210,10 +259,12 @@ struct FileListView: View {
 
     @TableRowBuilder<FileEntry>
     private func outlineRowLevel0(_ entry: FileEntry) -> some TableRowContent<FileEntry> {
-        if entry.isDirectory, let children = entry.children, !children.isEmpty {
-            DisclosureTableRow(entry) {
-                ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
-                    outlineRowLevel1(child)
+        if isExpandable(entry) {
+            DisclosureTableRow(entry, isExpanded: expansionBinding(for: entry)) {
+                if expandedIDs.contains(entry.id), let children = entry.children {
+                    ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
+                        outlineRowLevel1(child)
+                    }
                 }
             }
         } else {
@@ -224,10 +275,12 @@ struct FileListView: View {
 
     @TableRowBuilder<FileEntry>
     private func outlineRowLevel1(_ entry: FileEntry) -> some TableRowContent<FileEntry> {
-        if entry.isDirectory, let children = entry.children, !children.isEmpty {
-            DisclosureTableRow(entry) {
-                ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
-                    outlineRowLevel2(child)
+        if isExpandable(entry) {
+            DisclosureTableRow(entry, isExpanded: expansionBinding(for: entry)) {
+                if expandedIDs.contains(entry.id), let children = entry.children {
+                    ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
+                        outlineRowLevel2(child)
+                    }
                 }
             }
         } else {
@@ -238,11 +291,13 @@ struct FileListView: View {
 
     @TableRowBuilder<FileEntry>
     private func outlineRowLevel2(_ entry: FileEntry) -> some TableRowContent<FileEntry> {
-        if entry.isDirectory, let children = entry.children, !children.isEmpty {
-            DisclosureTableRow(entry) {
-                ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
-                    TableRow(child)
-                        .itemProvider { FileListTreeSupport.makeItemProvider(for: child, appState: appState) }
+        if isExpandable(entry) {
+            DisclosureTableRow(entry, isExpanded: expansionBinding(for: entry)) {
+                if expandedIDs.contains(entry.id), let children = entry.children {
+                    ForEach(FileListTreeSupport.sorted(children, using: sortOrder)) { child in
+                        TableRow(child)
+                            .itemProvider { FileListTreeSupport.makeItemProvider(for: child, appState: appState) }
+                    }
                 }
             }
         } else {
@@ -261,11 +316,14 @@ struct FileListView: View {
         if targets.count == 1, let entry = targets.first {
             if entry.isDirectory {
                 Button("Open") { appState.navigateInto(entry) }
+                if !entry.isFromArchive {
+                    Button("Quick Look") { previewEntries([entry]) }
+                }
             } else {
                 Button("Quick Look") { previewEntries([entry]) }
             }
             Divider()
-        } else if targets.contains(where: { !$0.isDirectory }) {
+        } else if targets.contains(where: { !$0.isDirectory || !$0.isFromArchive }) {
             Button("Quick Look") { previewEntries(targets) }
             Divider()
         }
@@ -329,6 +387,16 @@ struct FileListView: View {
         let selected = FileListTreeSupport.findEntries(matching: appState.selectedEntryIDs, in: sortedEntries)
         guard selected.count == 1, let entry = selected.first else { return }
         if entry.isDirectory { appState.navigateInto(entry) } else { previewEntries([entry]) }
+    }
+
+    private func handleEscape() {
+        if QuickLookHelper.shared.isVisible {
+            QuickLookHelper.shared.closeIfVisible()
+        } else if appState.canNavigateUp {
+            appState.navigateUp()
+        } else {
+            appState.clearSelection()
+        }
     }
 
     private func toggleQuickLook() {

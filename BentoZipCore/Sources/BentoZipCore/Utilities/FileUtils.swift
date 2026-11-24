@@ -16,16 +16,46 @@ enum FileUtils {
         var total: Int64 = 0
         guard let enumerator = FileManager.default.enumerator(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return 0 }
         for case let fileURL as URL in enumerator {
-            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey])
-            if values?.isDirectory != true {
+            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            if values?.isRegularFile == true {
                 total += Int64(values?.fileSize ?? 0)
             }
         }
         return total
+    }
+
+    /// Compute a directory's total byte size off the main actor without allocating `FileEntry` trees.
+    static func computeDirectorySizeAsync(at url: URL) async -> Int64? {
+        await Task.detached(priority: .utility) {
+            computeDirectorySizeSync(at: url)
+        }.value
+    }
+
+    private static func computeDirectorySizeSync(at url: URL) -> Int64? {
+        var total: Int64 = 0
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return Int64(0)
+        }
+        var visited = 0
+        for case let fileURL as URL in enumerator {
+            visited &+= 1
+            if (visited & 0xFF) == 0, Task.isCancelled {
+                return nil
+            }
+            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            if values?.isRegularFile == true {
+                total += Int64(values?.fileSize ?? 0)
+            }
+        }
+        return Task.isCancelled ? nil : total
     }
 
     /// Get the modification date of a file.
@@ -51,7 +81,7 @@ enum FileUtils {
         guard isDirectory(at: url) else { return [] }
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: url,
-            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey],
+            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .localizedNameKey],
             options: [.skipsHiddenFiles]
         )) ?? []
         return contents.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
@@ -65,76 +95,38 @@ enum FileUtils {
     }
 
     /// Build lightweight top-level entries immediately without recursive disk traversal.
+    /// Local directories start with `children = nil` and `hasLoadedChildren = false` so they load lazily on expansion.
     static func buildShallowEntries(from urls: [URL]) -> [FileEntry] {
-        urls.map { url in
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .localizedNameKey])
-            let isDir = values?.isDirectory == true
-            return FileEntry(
-                url: url,
-                name: values?.localizedName ?? url.lastPathComponent,
-                isDirectory: isDir,
-                size: isDir ? 0 : Int64(values?.fileSize ?? 0),
-                modificationDate: values?.contentModificationDate,
-                isFromArchive: false,
-                children: isDir ? [] : nil
-            )
-        }.sorted(by: entrySort)
+        urls.map { makeShallowEntry(for: $0) }.sorted(by: entrySort)
     }
 
-    /// Build full recursive FileEntry trees off the main actor with single-pass bottom-up size calculation.
-    static func buildFileEntries(from urls: [URL]) async -> [FileEntry] {
+    /// Load only the immediate (1-level) children of a local directory off the main actor.
+    static func loadImmediateChildrenAsync(of directoryURL: URL) async -> [FileEntry] {
         await Task.detached(priority: .userInitiated) {
-            var entries: [FileEntry] = []
-            entries.reserveCapacity(urls.count)
-            for url in urls {
-                if Task.isCancelled { break }
-                entries.append(buildEntrySync(for: url))
-            }
-            return entries.sorted(by: entrySort)
+            loadImmediateChildrenSync(of: directoryURL)
         }.value
     }
 
-    private static func buildEntrySync(for url: URL) -> FileEntry {
-        if Task.isCancelled {
-            return FileEntry(url: url, name: displayName(for: url))
-        }
+    /// Load only the immediate (1-level) children of a local directory synchronously.
+    static func loadImmediateChildrenSync(of directoryURL: URL) -> [FileEntry] {
+        enumerateDirectory(at: directoryURL)
+            .map { makeShallowEntry(for: $0) }
+            .sorted(by: entrySort)
+    }
+
+    private static func makeShallowEntry(for url: URL) -> FileEntry {
         let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .localizedNameKey])
         let isDir = values?.isDirectory == true
-        let name = values?.localizedName ?? url.lastPathComponent
-        let modDate = values?.contentModificationDate
-
-        if isDir {
-            let childURLs = enumerateDirectory(at: url)
-            var children: [FileEntry] = []
-            children.reserveCapacity(childURLs.count)
-            var totalSize: Int64 = 0
-            for childURL in childURLs {
-                if Task.isCancelled { break }
-                let child = buildEntrySync(for: childURL)
-                totalSize += child.size
-                children.append(child)
-            }
-            children.sort(by: entrySort)
-            return FileEntry(
-                url: url,
-                name: name,
-                isDirectory: true,
-                size: totalSize,
-                modificationDate: modDate,
-                isFromArchive: false,
-                children: children
-            )
-        } else {
-            return FileEntry(
-                url: url,
-                name: name,
-                isDirectory: false,
-                size: Int64(values?.fileSize ?? 0),
-                modificationDate: modDate,
-                isFromArchive: false,
-                children: nil
-            )
-        }
+        return FileEntry(
+            url: url,
+            name: values?.localizedName ?? url.lastPathComponent,
+            isDirectory: isDir,
+            size: isDir ? 0 : Int64(values?.fileSize ?? 0),
+            modificationDate: values?.contentModificationDate,
+            isFromArchive: false,
+            children: nil,
+            hasLoadedChildren: !isDir
+        )
     }
 
     private static func entrySort(_ lhs: FileEntry, _ rhs: FileEntry) -> Bool {

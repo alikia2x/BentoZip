@@ -75,7 +75,7 @@ struct StatusBarView: View {
     }
 
     private func entryTotalSize(_ entry: FileEntry) -> Int64 {
-        if entry.isDirectory, let children = entry.children {
+        if entry.isFromArchive, entry.isDirectory, let children = entry.children {
             return children.reduce(0) { $0 + entryTotalSize($1) }
         }
         return entry.size

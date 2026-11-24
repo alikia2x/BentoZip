@@ -272,5 +272,18 @@ struct AppStateTests {
         #expect(appState.fileEntries.count == 1)
         #expect(appState.fileEntries[0].name == "Album")
         #expect(appState.totalSize == 128)
+        #expect(!appState.fileEntries[0].hasLoadedChildren)
+
+        // Lazy expansion loads immediate children while preserving entry ID
+        let originalID = appState.fileEntries[0].id
+        appState.loadChildrenIfNeeded(for: appState.fileEntries[0])
+        for _ in 0..<50 {
+            if appState.fileEntries[0].hasLoadedChildren { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(appState.fileEntries[0].id == originalID)
+        #expect(appState.fileEntries[0].hasLoadedChildren)
+        #expect(appState.fileEntries[0].children?.count == 1)
+        #expect(appState.fileEntries[0].children?[0].name == "track.wav")
     }
 }

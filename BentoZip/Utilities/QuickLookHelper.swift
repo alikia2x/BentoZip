@@ -14,13 +14,26 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         super.init()
     }
 
+    var isVisible: Bool {
+        QLPreviewPanel.sharedPreviewPanelExists() && (QLPreviewPanel.shared()?.isVisible == true)
+    }
+
+    func closeIfVisible() {
+        guard isVisible, let panel = QLPreviewPanel.shared() else { return }
+        requestID &+= 1
+        activeTask?.cancel()
+        panel.orderOut(nil)
+    }
+
     func preview(
         entries: [FileEntry],
         sourceArchiveURL: URL?,
         password: String?,
         onError: ((Error) -> Void)? = nil
     ) {
-        let previewable = entries.filter { !$0.isDirectory }
+        // Local folders can be previewed natively by Quick Look just like Finder;
+        // archive folders cannot be previewed without extracting their entire subtree.
+        let previewable = entries.filter { !$0.isDirectory || !$0.isFromArchive }
         guard !previewable.isEmpty else { return }
 
         requestID &+= 1
@@ -62,12 +75,8 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         password: String?,
         onError: ((Error) -> Void)? = nil
     ) {
-        if let panel = QLPreviewPanel.shared(),
-           QLPreviewPanel.sharedPreviewPanelExists(),
-           panel.isVisible {
-            requestID &+= 1
-            activeTask?.cancel()
-            panel.orderOut(nil)
+        if isVisible {
+            closeIfVisible()
             return
         }
         preview(

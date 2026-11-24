@@ -51,7 +51,7 @@ public class AppState {
     }
 
     public var selectedEntries: [FileEntry] {
-        displayedEntries.filter { selectedEntryIDs.contains($0.id) }
+        Self.collectMatchingEntries(ids: selectedEntryIDs, in: displayedEntries)
     }
 
     public var canNavigateUp: Bool { !navigationPath.isEmpty }
@@ -135,6 +135,8 @@ public class AppState {
     }
 
     var loadTask: Task<Void, Never>?
+    var sizeCalculationTask: Task<Void, Never>?
+    var loadingChildIDs: Set<UUID> = []
     var recentValidationTask: Task<Void, Never>?
     private var preferencesObserver: NotificationObserverToken?
 
@@ -164,7 +166,17 @@ public class AppState {
 
     public func navigateInto(_ entry: FileEntry) {
         guard entry.isDirectory else { return }
-        navigationPath.append(entry)
+        var target = entry
+        if !target.isFromArchive && !target.hasLoadedChildren {
+            let children = FileUtils.loadImmediateChildrenSync(of: target.url)
+            target.children = children
+            target.hasLoadedChildren = true
+            updateEntry(id: target.id) { node in
+                node.children = children
+                node.hasLoadedChildren = true
+            }
+        }
+        navigationPath.append(target)
         selectedEntryIDs.removeAll()
     }
 
@@ -208,6 +220,9 @@ public class AppState {
     public func reset() {
         loadTask?.cancel()
         loadTask = nil
+        sizeCalculationTask?.cancel()
+        sizeCalculationTask = nil
+        loadingChildIDs.removeAll()
         isLoading = false
         mode = .empty
         fileEntries = []
