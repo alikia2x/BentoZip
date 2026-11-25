@@ -789,4 +789,217 @@ struct Bento7zEngineTests {
         #expect(task.processedBytes == 512)
         #expect(task.bytesPerSecond > 400 && task.bytesPerSecond < 600)
     }
+
+    @Test func zstd_rawAndCompoundTarZstListAndExtract() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        // Create a valid uncompressed .tar with one file, then inspect raw Zstd magic frame via engine.
+        // Valid Zstd single-segment raw frame decoding to "zstd-ok\n":
+        let zstURL = dir.appendingPathComponent("note.txt.zst")
+        let zstFrame = Data([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x08, 0x41, 0x00, 0x00]) + Data("zstd-ok\n".utf8)
+        try zstFrame.write(to: zstURL)
+
+        let entries = try await engine.listEntries(in: zstURL)
+        #expect(entries.count == 1)
+        #expect(entries[0].name == "note.txt")
+
+        let outDir = dir.appendingPathComponent("zst_out")
+        try await engine.extract(archiveURL: zstURL, entries: nil, to: outDir, password: nil) { _ in }
+        let extractedText = try String(contentsOf: outDir.appendingPathComponent("note.txt"), encoding: .utf8)
+        #expect(extractedText == "zstd-ok\n")
+    }
+
+    @Test func splitVolumes_createListExtractAndReportMissingVolume() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let payload = dir.appendingPathComponent("large.bin")
+        var bytes = Data(capacity: 260_000)
+        for i in 0..<260_000 {
+            bytes.append(UInt8((i &* 73 ^ (i >> 5)) & 0xFF))
+        }
+        try bytes.write(to: payload)
+
+        for format in [ArchiveFormat.sevenZip, ArchiveFormat.zip] {
+            let baseURL = dir.appendingPathComponent("split_\(format.fileExtension).\(format.fileExtension)")
+            try await engine.create(
+                from: [payload],
+                to: baseURL,
+                settings: CompressionSettings(
+                    format: format,
+                    compressionLevel: .none,
+                    volumeSizeBytes: 100_000
+                )
+            ) { _ in }
+
+            let vol1 = URL(fileURLWithPath: baseURL.path + ".001")
+            let vol2 = URL(fileURLWithPath: baseURL.path + ".002")
+            #expect(fm.fileExists(atPath: vol1.path))
+            #expect(fm.fileExists(atPath: vol2.path))
+
+            let listed = try await engine.listEntries(in: vol1)
+            #expect(listed.map(\.name) == ["large.bin"])
+
+            let outDir = dir.appendingPathComponent("out_\(format.fileExtension)")
+            try await engine.extract(archiveURL: vol1, entries: nil, to: outDir, password: nil) { _ in }
+            let roundTrip = try Data(contentsOf: outDir.appendingPathComponent("large.bin"))
+            #expect(roundTrip == bytes)
+
+            // Deleting second volume produces explicit missingVolume error
+            try fm.removeItem(at: vol2)
+            do {
+                _ = try await engine.listEntries(in: vol1)
+                Issue.record("Expected missingVolume error when .002 is removed")
+            } catch let error as Bento7zError {
+                if case .missingVolume(let msg) = error {
+                    #expect(msg.contains(".002"))
+                } else {
+                    Issue.record("Unexpected error: \(error)")
+                }
+            }
+        }
+    }
+
+    @Test func zipAES256_encryptsAndDecryptsArchive() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let secretFile = dir.appendingPathComponent("secret.txt")
+        try "top-secret-aes256".write(to: secretFile, atomically: true, encoding: .utf8)
+
+        let zipURL = dir.appendingPathComponent("aes256.zip")
+        try await engine.create(
+            from: [secretFile],
+            to: zipURL,
+            settings: CompressionSettings(
+                format: .zip,
+                compressionLevel: .fast,
+                password: "pass-aes-256",
+                zipEncryptionMethod: .aes256
+            )
+        ) { _ in }
+
+        let listed = try await engine.listEntries(in: zipURL)
+        #expect(listed.first?.isEncrypted == true)
+
+        let badOut = dir.appendingPathComponent("bad_out")
+        do {
+            try await engine.extract(archiveURL: zipURL, entries: nil, to: badOut, password: "wrong") { _ in }
+            Issue.record("Expected wrongPassword error")
+        } catch let error as Bento7zError {
+            #expect(error == .wrongPassword)
+        }
+
+        let goodOut = dir.appendingPathComponent("good_out")
+        try await engine.extract(archiveURL: zipURL, entries: nil, to: goodOut, password: "pass-aes-256") { _ in }
+        #expect(try String(contentsOf: goodOut.appendingPathComponent("secret.txt"), encoding: .utf8) == "top-secret-aes256")
+    }
+
+    @Test func legacyZipEncoding_repairsGBKAndShiftJISFilenames() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        func writeRawZip(at url: URL, pathData: Data, payload: Data) throws {
+            var crc: UInt32 = 0xFFFF_FFFF
+            for b in payload {
+                var c = crc ^ UInt32(b)
+                for _ in 0..<8 {
+                    c = (c & 1) != 0 ? ((c >> 1) ^ 0xEDB8_8320) : (c >> 1)
+                }
+                crc = c
+            }
+            crc ^= 0xFFFF_FFFF
+
+            var lh = Data()
+            func appendU16(_ d: inout Data, _ v: UInt16) { var le = v.littleEndian; Swift.withUnsafeBytes(of: &le) { d.append(contentsOf: $0) } }
+            func appendU32(_ d: inout Data, _ v: UInt32) { var le = v.littleEndian; Swift.withUnsafeBytes(of: &le) { d.append(contentsOf: $0) } }
+            appendU32(&lh, 0x04034B50); appendU16(&lh, 20); appendU16(&lh, 0); appendU16(&lh, 0)
+            appendU16(&lh, 0); appendU16(&lh, 0); appendU32(&lh, crc)
+            appendU32(&lh, UInt32(payload.count)); appendU32(&lh, UInt32(payload.count))
+            appendU16(&lh, UInt16(pathData.count)); appendU16(&lh, 0)
+            lh.append(pathData); lh.append(payload)
+
+            var cd = Data()
+            appendU32(&cd, 0x02014B50); appendU16(&cd, 20); appendU16(&cd, 20); appendU16(&cd, 0); appendU16(&cd, 0)
+            appendU16(&cd, 0); appendU16(&cd, 0); appendU32(&cd, crc)
+            appendU32(&cd, UInt32(payload.count)); appendU32(&cd, UInt32(payload.count))
+            appendU16(&cd, UInt16(pathData.count)); appendU16(&cd, 0); appendU16(&cd, 0)
+            appendU16(&cd, 0); appendU16(&cd, 0); appendU32(&cd, 0); appendU32(&cd, 0)
+            cd.append(pathData)
+
+            var eocd = Data()
+            appendU32(&eocd, 0x06054B50); appendU16(&eocd, 0); appendU16(&eocd, 0)
+            appendU16(&eocd, 1); appendU16(&eocd, 1)
+            appendU32(&eocd, UInt32(cd.count)); appendU32(&eocd, UInt32(lh.count)); appendU16(&eocd, 0)
+
+            var zipBytes = Data()
+            zipBytes.append(lh); zipBytes.append(cd); zipBytes.append(eocd)
+            try zipBytes.write(to: url)
+        }
+
+        // GBK bytes for "目录/测试.txt": C4 BF C2 BC 2F B2 E2 CA D4 2E 74 78 74
+        let gbkURL = dir.appendingPathComponent("gbk_legacy.zip")
+        let gbkBytes = Data([0xC4, 0xBF, 0xC2, 0xBC, 0x2F, 0xB2, 0xE2, 0xCA, 0xD4, 0x2E, 0x74, 0x78, 0x74])
+        try writeRawZip(at: gbkURL, pathData: gbkBytes, payload: Data("gbk-ok".utf8))
+
+        let gbkEntries = try await engine.listEntries(in: gbkURL)
+        #expect(gbkEntries.first?.name == "测试.txt")
+        #expect(gbkEntries.first?.archiveRelativePath == "目录/测试.txt")
+
+        let gbkOut = dir.appendingPathComponent("gbk_out")
+        try await engine.extract(archiveURL: gbkURL, entries: nil, to: gbkOut, password: nil) { _ in }
+        #expect(fm.fileExists(atPath: gbkOut.appendingPathComponent("目录/测试.txt").path))
+
+        // Selective single-entry extraction using the repaired UTF-8 path
+        let singleOut = dir.appendingPathComponent("single_测试.txt")
+        try await engine.extractEntry(from: gbkURL, entryPath: "目录/测试.txt", to: singleOut)
+        #expect(try String(contentsOf: singleOut, encoding: .utf8) == "gbk-ok")
+
+        // Shift-JIS bytes for "テスト.txt": 83 65 83 58 83 67 2E 74 78 74
+        let sjisURL = dir.appendingPathComponent("sjis_legacy.zip")
+        let sjisBytes = Data([0x83, 0x65, 0x83, 0x58, 0x83, 0x67, 0x2E, 0x74, 0x78, 0x74])
+        try writeRawZip(at: sjisURL, pathData: sjisBytes, payload: Data("sjis-ok".utf8))
+
+        let sjisEntries = try await engine.listEntries(in: sjisURL)
+        #expect(sjisEntries.first?.name == "テスト.txt")
+    }
+
+    @Test func appleArchive_roundTripCreateListExtract() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let srcDir = dir.appendingPathComponent("Bundle")
+        try fm.createDirectory(at: srcDir.appendingPathComponent("Nested"), withIntermediateDirectories: true)
+        try "hello aar".write(to: srcDir.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+        try "ignored".write(to: srcDir.appendingPathComponent(".DS_Store"), atomically: true, encoding: .utf8)
+        try "deep content".write(to: srcDir.appendingPathComponent("Nested/deep.txt"), atomically: true, encoding: .utf8)
+
+        let aarURL = dir.appendingPathComponent("sample.aar")
+        try await engine.create(
+            from: [srcDir],
+            to: aarURL,
+            settings: CompressionSettings(
+                format: .aar,
+                compressionLevel: .normal,
+                preserveDirectoryStructure: true,
+                exclusionPatterns: [".DS_Store"]
+            )
+        ) { _ in }
+
+        let listed = try await engine.listArchive(in: aarURL)
+        // Single top directory "Bundle" unwrapped -> ["Nested", "readme.txt"], without .DS_Store
+        let names = Set(listed.entries.map(\.name))
+        #expect(names == ["Nested", "readme.txt"])
+        #expect(!names.contains(".DS_Store"))
+
+        let outDir = dir.appendingPathComponent("aar_out")
+        try await engine.extract(archiveURL: aarURL, entries: nil, to: outDir, password: nil) { _ in }
+        #expect(try String(contentsOf: outDir.appendingPathComponent("Bundle/readme.txt"), encoding: .utf8) == "hello aar")
+        #expect(try String(contentsOf: outDir.appendingPathComponent("Bundle/Nested/deep.txt"), encoding: .utf8) == "deep content")
+
+        let quickFile = dir.appendingPathComponent("quick_deep.txt")
+        try await engine.extractEntry(from: aarURL, entryPath: "Bundle/Nested/deep.txt", to: quickFile)
+        #expect(try String(contentsOf: quickFile, encoding: .utf8) == "deep content")
+    }
 }

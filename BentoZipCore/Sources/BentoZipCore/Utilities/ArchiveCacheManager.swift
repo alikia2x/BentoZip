@@ -220,7 +220,7 @@ public final class ArchiveCacheManager: @unchecked Sendable {
     private static func isCompoundTarArchive(_ url: URL) -> Bool {
         guard let format = FormatDetector.detectReadableFormat(of: url) else { return false }
         switch format {
-        case .tarGz, .tarBz2, .tarXz, .gz, .bz2, .xz:
+        case .tarGz, .tarBz2, .tarXz, .tarZst, .gz, .bz2, .xz, .zst:
             return true
         default:
             return false

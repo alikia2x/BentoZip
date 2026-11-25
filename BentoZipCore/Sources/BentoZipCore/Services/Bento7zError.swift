@@ -7,6 +7,8 @@ public enum Bento7zError: LocalizedError, Equatable {
     case invalidResponse(String)
     case operationFailed(String, String)
     case fileNotFound(String)
+    case missingVolume(String)
+    case splitNotFirstVolume(String)
     case passwordRequired
     case wrongPassword
 
@@ -22,6 +24,10 @@ public enum Bento7zError: LocalizedError, Equatable {
             return String(localized: "Operation failed [\(code)]: \(message)", bundle: .module)
         case .fileNotFound(let path):
             return String(localized: "File not found: \(path)", bundle: .module)
+        case .missingVolume(let detail):
+            return detail
+        case .splitNotFirstVolume(let detail):
+            return detail
         case .passwordRequired:
             return String(localized: "This archive is password protected.", bundle: .module)
         case .wrongPassword:
@@ -35,6 +41,14 @@ public enum Bento7zError: LocalizedError, Equatable {
         }
         if code == "WRONG_PASSWORD" {
             return .wrongPassword
+        }
+        if code == "MISSING_VOLUME" {
+            let prefix = "Missing archive volume: "
+            let volumeName = message.hasPrefix(prefix) ? String(message.dropFirst(prefix.count)) : message
+            return .missingVolume(String(localized: "Missing archive volume: \(volumeName). Keep all split parts in the same folder.", bundle: .module))
+        }
+        if code == "SPLIT_NOT_FIRST_VOLUME" {
+            return .splitNotFirstVolume(String(localized: "Open the first volume (.001 or .part1.rar) of a split archive.", bundle: .module))
         }
 
         let lower = message.lowercased()

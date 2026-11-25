@@ -106,7 +106,9 @@ enum Bento7zBinaryProtocol {
         password: String?,
         preservePaths: Bool,
         paths: [String],
-        exclude: [String]
+        exclude: [String],
+        volumeSizeBytes: Int64 = 0,
+        encryptionMethod: String? = nil
     ) -> Data {
         var payload = Data()
         appendString(archivePath, to: &payload)
@@ -116,6 +118,8 @@ enum Bento7zBinaryProtocol {
         payload.append(preservePaths ? 1 : 0)
         appendStringArray(paths, to: &payload)
         appendStringArray(exclude, to: &payload)
+        appendUInt64(UInt64(max(0, volumeSizeBytes)), to: &payload)
+        appendString(encryptionMethod ?? "", to: &payload)
         return payload
     }
 

@@ -2,7 +2,8 @@ import Foundation
 
 enum PathUtils {
     private static let compoundArchiveExtensions = [
-        "tar.gz", "tar.bz2", "tar.xz"
+        "tar.gz", "tar.bz2", "tar.xz", "tar.zst",
+        "7z.001", "zip.001", "tar.001"
     ]
 
     /// Compute the common parent directory of a set of URLs.
@@ -45,6 +46,19 @@ enum PathUtils {
                 let stem = String(fileName[..<stemEnd])
                 let extStart = fileName.index(after: stemEnd)
                 let ext = String(fileName[extStart...])
+                return (stem, ext)
+            }
+        }
+
+        if lowercased.hasSuffix(".rar"),
+           let dotPart = lowercased.range(of: ".part", options: [.backwards]),
+           dotPart.lowerBound > lowercased.startIndex {
+            let digits = lowercased[dotPart.upperBound..<lowercased.index(lowercased.endIndex, offsetBy: -4)]
+            if !digits.isEmpty && digits.allSatisfy({ $0.isASCII && $0.isNumber }) {
+                let offset = lowercased.distance(from: lowercased.startIndex, to: dotPart.lowerBound)
+                let stemEnd = fileName.index(fileName.startIndex, offsetBy: offset)
+                let stem = String(fileName[..<stemEnd])
+                let ext = String(fileName[fileName.index(after: stemEnd)...])
                 return (stem, ext)
             }
         }

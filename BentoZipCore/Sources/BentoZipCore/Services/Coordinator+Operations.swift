@@ -41,19 +41,30 @@ extension CompressionCoordinator {
                 )
                 try Task.checkCancellation()
 
-                await self.completeOperation(context.id, finalOutputURL: saveURL) {
+                let splitVolumes = (settings.volumeSizeBytes > 0)
+                    ? Bento7zEngine.splitVolumeURLs(for: saveURL)
+                    : []
+                let primaryURL = splitVolumes.first ?? saveURL
+
+                await self.completeOperation(context.id, finalOutputURL: primaryURL) {
                     appState.lastError = nil
-                    preferencesManager?.recordArchive(saveURL.path)
+                    preferencesManager?.recordArchive(primaryURL.path)
                 }
 
                 if shouldReveal {
-                    NSWorkspace.shared.activateFileViewerSelecting([saveURL])
+                    NSWorkspace.shared.activateFileViewerSelecting([primaryURL])
                 }
             } catch is CancellationError {
                 try? FileManager.default.removeItem(at: saveURL)
+                if settings.volumeSizeBytes > 0 {
+                    Bento7zEngine.cleanupSplitVolumes(baseArchiveURL: saveURL)
+                }
                 self.abortOperation(context.id)
             } catch {
                 try? FileManager.default.removeItem(at: saveURL)
+                if settings.volumeSizeBytes > 0 {
+                    Bento7zEngine.cleanupSplitVolumes(baseArchiveURL: saveURL)
+                }
                 self.abortOperation(context.id)
                 appState.lastError = String(localized: "Compression failed: \(error.localizedDescription)", bundle: .module)
             }

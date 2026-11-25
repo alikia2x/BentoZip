@@ -48,6 +48,10 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             throw Bento7zError.fileNotFound(archiveURL.path)
         }
 
+        if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
+            return try await AppleArchiveEngine().listArchive(in: archiveURL, onProgress: onProgress)
+        }
+
         if prefersBinaryServer {
             return try await listArchiveBinary(in: archiveURL, password: password, onProgress: onProgress)
         }
@@ -66,6 +70,16 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         }
 
         try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+
+        if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
+            try await AppleArchiveEngine().extract(
+                archiveURL: archiveURL,
+                entries: entries,
+                to: destinationURL,
+                onProgress: onProgress
+            )
+            return
+        }
 
         if prefersBinaryServer {
             try await extractBinary(
@@ -122,6 +136,24 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         if fm.fileExists(atPath: archiveURL.path) {
             try fm.removeItem(at: archiveURL)
         }
+        if settings.volumeSizeBytes > 0 {
+            Self.cleanupSplitVolumes(baseArchiveURL: archiveURL)
+        }
+
+        if settings.format == .aar {
+            do {
+                try await AppleArchiveEngine().create(
+                    from: sourceURLs,
+                    to: archiveURL,
+                    settings: settings,
+                    onProgress: onProgress
+                )
+                return
+            } catch {
+                try? fm.removeItem(at: archiveURL)
+                throw error
+            }
+        }
 
         do {
             if prefersBinaryServer {
@@ -144,6 +176,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             onProgress(ArchiveProgress(fractionCompleted: 1.0))
         } catch {
             try? fm.removeItem(at: archiveURL)
+            if settings.volumeSizeBytes > 0 {
+                Self.cleanupSplitVolumes(baseArchiveURL: archiveURL)
+            }
             throw error
         }
     }
@@ -156,6 +191,14 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         to destinationURL: URL,
         password: String? = nil
     ) async throws {
+        if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
+            try await AppleArchiveEngine().extractEntry(
+                from: archiveURL,
+                entryPath: entryPath,
+                to: destinationURL
+            )
+            return
+        }
         let safeRelPath = try Bento7zPathSafety.sanitizedRelativePath(entryPath)
 
         let fm = FileManager.default
@@ -376,6 +419,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         )
         defer { worker.shutdown(terminateProcess: true) }
 
+        let encryptionMethod = (settings.format == .zip && !(settings.password ?? "").isEmpty)
+            ? settings.zipEncryptionMethod.bento7zValue
+            : nil
         let payload = Bento7zBinaryProtocol.encodeCompressRequest(
             archivePath: archiveURL.path,
             format: formatName,
@@ -383,7 +429,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             password: settings.password,
             preservePaths: settings.preserveDirectoryStructure,
             paths: sourceURLs.map(\.path),
-            exclude: settings.exclusionPatterns
+            exclude: settings.exclusionPatterns,
+            volumeSizeBytes: settings.volumeSizeBytes,
+            encryptionMethod: encryptionMethod
         )
 
         let mapper = ProgressStageMapper(context: .compress)
@@ -492,6 +540,12 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         ]
         if let password = settings.password, !password.isEmpty {
             params["password"] = password
+            if settings.format == .zip {
+                params["encryption_method"] = settings.zipEncryptionMethod.bento7zValue
+            }
+        }
+        if settings.volumeSizeBytes > 0 {
+            params["volume_size_bytes"] = settings.volumeSizeBytes
         }
         if !settings.exclusionPatterns.isEmpty {
             params["exclude"] = settings.exclusionPatterns
@@ -590,6 +644,31 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         case .fast: return "fast"
         case .normal: return "normal"
         case .best: return "ultra"
+        }
+    }
+
+    static func splitVolumeURLs(for baseArchiveURL: URL) -> [URL] {
+        let fm = FileManager.default
+        var urls: [URL] = []
+        for idx in 1...999 {
+            let suffix = String(format: ".%03d", idx)
+            let url = URL(fileURLWithPath: baseArchiveURL.path + suffix)
+            guard fm.fileExists(atPath: url.path) else { break }
+            urls.append(url)
+        }
+        return urls
+    }
+
+    static func cleanupSplitVolumes(baseArchiveURL: URL) {
+        let fm = FileManager.default
+        for idx in 1...999 {
+            let suffix = String(format: ".%03d", idx)
+            let path = baseArchiveURL.path + suffix
+            guard fm.fileExists(atPath: path) else {
+                if idx > 1 { break }
+                continue
+            }
+            try? fm.removeItem(atPath: path)
         }
     }
 

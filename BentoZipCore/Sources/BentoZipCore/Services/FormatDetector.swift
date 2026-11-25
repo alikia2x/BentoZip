@@ -46,6 +46,44 @@ public struct FormatDetector {
         if fileName.hasSuffix(".tar.xz") || fileName.hasSuffix(".txz") {
             return .tarXz
         }
+        if fileName.hasSuffix(".tar.zst") || fileName.hasSuffix(".tzst") {
+            return .tarZst
+        }
+        if let split = detectSplitVolumeExtension(fileName: fileName) {
+            return split
+        }
+        return nil
+    }
+
+    private static func detectSplitVolumeExtension(fileName: String) -> ReadableArchiveFormat? {
+        // Multi-part RAR: .part1.rar, .part01.rar, .part2.rar, etc.
+        if fileName.hasSuffix(".rar"),
+           let dotPart = fileName.range(of: ".part", options: [.backwards]) {
+            let digitsStart = dotPart.upperBound
+            let digitsEnd = fileName.index(fileName.endIndex, offsetBy: -4)
+            if digitsStart < digitsEnd {
+                let digits = fileName[digitsStart..<digitsEnd]
+                if digits.allSatisfy(\.isASCII) && digits.allSatisfy(\.isNumber) {
+                    return .splitRar
+                }
+            }
+        }
+
+        // Numbered split volumes: .7z.001, .zip.001, .tar.001, .001 (and secondary .002..999)
+        if let dot = fileName.lastIndex(of: ".") {
+            let ext = fileName[fileName.index(after: dot)...]
+            if ext.count >= 3 && ext.allSatisfy({ $0.isASCII && $0.isNumber }) {
+                let stem = String(fileName[..<dot])
+                if stem.hasSuffix(".7z") { return .split7z }
+                if stem.hasSuffix(".zip") { return .splitZip }
+                if stem.hasSuffix(".tar") { return .splitTar }
+                return .splitGeneric
+            }
+            if ext.count == 3 && ext.first == "r" && ext.dropFirst().allSatisfy({ $0.isASCII && $0.isNumber }) {
+                return .splitRar
+            }
+        }
+
         return nil
     }
 
@@ -57,7 +95,19 @@ public struct FormatDetector {
         case "gz", "gzip": return .gz
         case "bz2", "bzip2": return .bz2
         case "xz": return .xz
+        case "zst", "zstd": return .zst
         case "rar": return .rar
+        case "dmg": return .dmg
+        case "iso": return .iso
+        case "xar", "pkg": return .xar
+        case "cab": return .cab
+        case "wim": return .wim
+        case "cpio": return .cpio
+        case "lzma": return .lzma
+        case "deb": return .deb
+        case "rpm": return .rpm
+        case "lzh", "lha": return .lzh
+        case "aar", "yaa": return .aar
         default: return nil
         }
     }
@@ -93,6 +143,11 @@ public struct FormatDetector {
             return .xz
         }
 
+        // Zstandard: 28 B5 2F FD
+        if bytes.starts(with: [0x28, 0xB5, 0x2F, 0xFD]) {
+            return .zst
+        }
+
         // BZ2: BZh
         if bytes.starts(with: [0x42, 0x5A, 0x68]) {
             return .bz2
@@ -103,12 +158,53 @@ public struct FormatDetector {
             return .gz
         }
 
+        // Apple Archive: "YAA1", "AA01", or compressed AA stream ("pbz4"/"pbze"/"pbzl"/"pbzx")
+        if bytes.starts(with: [0x59, 0x41, 0x41, 0x31])
+            || bytes.starts(with: [0x41, 0x41, 0x30, 0x31])
+            || (bytes.count >= 4 && bytes[0] == 0x70 && bytes[1] == 0x62 && bytes[2] == 0x7A
+                && (bytes[3] == 0x34 || bytes[3] == 0x65 || bytes[3] == 0x6C || bytes[3] == 0x78)) {
+            return .aar
+        }
+
+        // XAR: "xar!"
+        if bytes.starts(with: [0x78, 0x61, 0x72, 0x21]) {
+            return .xar
+        }
+
+        // CAB: "MSCF"
+        if bytes.starts(with: [0x4D, 0x53, 0x43, 0x46]) {
+            return .cab
+        }
+
+        // WIM: "MSWIM\0\0\0"
+        if bytes.starts(with: [0x4D, 0x53, 0x57, 0x49, 0x4D, 0x00, 0x00, 0x00]) {
+            return .wim
+        }
+
+        // RPM: ED AB EE DB
+        if bytes.starts(with: [0xED, 0xAB, 0xEE, 0xDB]) {
+            return .rpm
+        }
+
+        // DEB / ar: "!<arch>\n"
+        if bytes.starts(with: [0x21, 0x3C, 0x61, 0x72, 0x63, 0x68, 0x3E, 0x0A]) {
+            return .deb
+        }
+
         // TAR: "ustar" at offset 257
         if bytes.count >= 262 {
             let tarMagic = Array(bytes[257..<262])
             if tarMagic == [0x75, 0x73, 0x74, 0x61, 0x72] {
                 return .tar
             }
+        }
+
+        // ISO 9660: "CD001" at byte offset 0x8001 (32769)
+        if (try? handle.seek(toOffset: 0x8001)) != nil,
+           let isoMagic = try? handle.read(upToCount: 5),
+           isoMagic.count == 5,
+           [UInt8](isoMagic) == [0x43, 0x44, 0x30, 0x30, 0x31] {
+            return .iso
         }
 
         return nil

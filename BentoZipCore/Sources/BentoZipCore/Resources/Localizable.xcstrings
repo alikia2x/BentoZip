@@ -221,6 +221,22 @@
         }
       }
     },
+    "Missing archive volume: %@. Keep all split parts in the same folder." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Missing archive volume: %@. Keep all split parts in the same folder."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缺少压缩包分卷：%@。请确保所有分卷位于同一文件夹内。"
+          }
+        }
+      }
+    },
     "Missing items field in list response" : {
       "localizations" : {
         "zh-Hans" : {
@@ -257,6 +273,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "标准"
+          }
+        }
+      }
+    },
+    "Open the first volume (.001 or .part1.rar) of a split archive." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the first volume (.001 or .part1.rar) of a split archive."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请打开分卷压缩包的首个分卷（.001 或 .part1.rar）。"
           }
         }
       }

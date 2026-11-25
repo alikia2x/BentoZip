@@ -40,11 +40,38 @@ struct FormatDetectorTests {
         #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.tbz")) == .tarBz2)
         #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.tar.xz")) == .tarXz)
         #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.txz")) == .tarXz)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.tar.zst")) == .tarZst)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.tzst")) == .tarZst)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.zst")) == .zst)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.zstd")) == .zst)
         #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.gz")) == .gz)
         #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.rar")) == .rar)
         #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "a.rar"))?.isReadOnly == true)
         #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "a.rar")) == nil)
         #expect(FormatDetector.isArchiveFile(URL(fileURLWithPath: "a.rar")))
+
+        // Split multi-volume archives & read-only disk/package formats
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "big.7z.001")) == .split7z)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "big.zip.001")) == .splitZip)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "big.tar.001")) == .splitTar)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "movie.part1.rar")) == .splitRar)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "movie.part02.rar")) == .splitRar)
+        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "big.7z.001")) == nil)
+
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "app.dmg")) == .dmg)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "disk.iso")) == .iso)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "installer.pkg")) == .xar)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "bundle.xar")) == .xar)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "win.cab")) == .cab)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "win.wim")) == .wim)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "initrd.cpio")) == .cpio)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "raw.lzma")) == .lzma)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "pkg.deb")) == .deb)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "pkg.rpm")) == .rpm)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "old.lzh")) == .lzh)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "native.aar")) == .aar)
+        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "native.aar")) == .aar)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "native.yaa")) == .aar)
     }
 
     @Test func detectFormat_ignoresDirectoriesNamedLikeArchives() throws {
@@ -70,8 +97,15 @@ struct FormatDetectorTests {
             ("sevenz.bin", [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C], .sevenZip),
             ("rar.bin", [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00], .rar),
             ("xz.bin", [0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00], .xz),
+            ("zst.bin", [0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00], .zst),
             ("bz2.bin", [0x42, 0x5A, 0x68, 0x39], .bz2),
             ("gz.bin", [0x1F, 0x8B, 0x08, 0x00], .gz),
+            ("xar.bin", [0x78, 0x61, 0x72, 0x21, 0x00, 0x1C], .xar),
+            ("cab.bin", [0x4D, 0x53, 0x43, 0x46, 0x00, 0x00], .cab),
+            ("wim.bin", [0x4D, 0x53, 0x57, 0x49, 0x4D, 0x00, 0x00, 0x00], .wim),
+            ("rpm.bin", [0xED, 0xAB, 0xEE, 0xDB, 0x03, 0x00], .rpm),
+            ("deb.bin", [0x21, 0x3C, 0x61, 0x72, 0x63, 0x68, 0x3E, 0x0A], .deb),
+            ("aar.bin", [0x70, 0x62, 0x7A, 0x65, 0x00, 0x00], .aar),
         ]
 
         for (name, bytes, expected) in cases {

@@ -21,6 +21,7 @@ struct EmptyStateView: View {
                 RecentArchivesSidebar()
                     .frame(width: 296)
                     .frame(maxHeight: .infinity)
+                    .ignoresSafeArea(.container, edges: .top)
                     .background(VisualEffectBackground(material: .sidebar).ignoresSafeArea())
             }
 

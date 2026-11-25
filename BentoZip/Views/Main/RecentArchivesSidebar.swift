@@ -34,7 +34,7 @@ struct RecentArchivesSidebar: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 14)
+            .padding(.top, 18)
             .padding(.bottom, 8)
 
             if appState.recentArchiveItems.isEmpty {

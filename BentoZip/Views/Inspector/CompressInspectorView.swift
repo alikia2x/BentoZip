@@ -81,6 +81,26 @@ struct CompressInspectorView: View {
                             .help(showPassword ? "Hide Password" : "Show Password")
                         }
                     }
+
+                    if appState.compressionSettings.format == .zip && !(appState.compressionSettings.password ?? "").isEmpty {
+                        Picker("Encryption", selection: $appState.compressionSettings.zipEncryptionMethod) {
+                            ForEach(ZipEncryptionMethod.allCases) { method in
+                                Text(method.rawValue).tag(method)
+                            }
+                        }
+                    }
+                }
+
+                if appState.compressionSettings.format.supportsSplitVolumes {
+                    Picker("Split Volumes", selection: $appState.compressionSettings.volumeSizeBytes) {
+                        Text("Single File").tag(Int64(0))
+                        Text("10 MB").tag(Int64(10 * 1024 * 1024))
+                        Text("100 MB").tag(Int64(100 * 1024 * 1024))
+                        Text("500 MB").tag(Int64(500 * 1024 * 1024))
+                        Text("1 GB").tag(Int64(1024 * 1024 * 1024))
+                        Text("2 GB").tag(Int64(2 * 1024 * 1024 * 1024))
+                        Text("4 GB").tag(Int64(4 * 1024 * 1024 * 1024))
+                    }
                 }
             }
 
