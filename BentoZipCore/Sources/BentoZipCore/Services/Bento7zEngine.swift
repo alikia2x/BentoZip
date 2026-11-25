@@ -95,7 +95,10 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             }
         }
 
-        _ = try await runner.execute(command: "extract", params: params, onProgress: onProgress)
+        let mapper = ProgressStageMapper(context: .extract)
+        _ = try await runner.execute(command: "extract", params: params) { progress in
+            onProgress(mapper.map(progress))
+        }
         onProgress(ArchiveProgress(fractionCompleted: 1.0))
     }
 
@@ -275,8 +278,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
 
         let progressForwarder: (@Sendable (Bento7zBinaryProtocol.ProgressPayload) -> Void)?
         if let onProgress {
+            let mapper = ProgressStageMapper(context: .list)
             progressForwarder = { @Sendable progress in
-                onProgress(Self.archiveProgress(from: progress))
+                onProgress(mapper.map(Self.archiveProgress(from: progress)))
             }
         } else {
             progressForwarder = nil
@@ -342,12 +346,13 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             entries: entryPaths
         )
 
+        let mapper = ProgressStageMapper(context: .extract)
         _ = try await worker.sendRequest(
             type: .extract,
             payload: payload,
             hardKillOnCancel: true,
             onProgress: { progress in
-                onProgress(Self.archiveProgress(from: progress))
+                onProgress(mapper.map(Self.archiveProgress(from: progress)))
             }
         )
 
@@ -381,12 +386,13 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             exclude: settings.exclusionPatterns
         )
 
+        let mapper = ProgressStageMapper(context: .compress)
         _ = try await worker.sendRequest(
             type: .compress,
             payload: payload,
             hardKillOnCancel: true,
             onProgress: { progress in
-                onProgress(Self.archiveProgress(from: progress))
+                onProgress(mapper.map(Self.archiveProgress(from: progress)))
             }
         )
     }
@@ -406,7 +412,16 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             params["password"] = password
         }
 
-        let result = try await runner.execute(command: "list", params: params, onProgress: onProgress)
+        let wrappedProgress: (@Sendable (ArchiveProgress) -> Void)?
+        if let onProgress {
+            let mapper = ProgressStageMapper(context: .list)
+            wrappedProgress = { @Sendable progress in
+                onProgress(mapper.map(progress))
+            }
+        } else {
+            wrappedProgress = nil
+        }
+        let result = try await runner.execute(command: "list", params: params, onProgress: wrappedProgress)
         try Task.checkCancellation()
 
         struct UncheckedResultBox: @unchecked Sendable {
@@ -482,10 +497,74 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             params["exclude"] = settings.exclusionPatterns
         }
 
-        _ = try await runner.execute(command: "compress", params: params, onProgress: onProgress)
+        let mapper = ProgressStageMapper(context: .compress)
+        _ = try await runner.execute(command: "compress", params: params) { progress in
+            onProgress(mapper.map(progress))
+        }
     }
 
     // MARK: - Helpers
+
+    /// Maps per-stage raw progress (`0...1`) into a single continuous, monotonic overall fraction
+    /// for multi-stage compound `.tar.gz`/`.tar.bz2`/`.tar.xz` operations while preserving real
+    /// per-stage byte counts for telemetry.
+    final class ProgressStageMapper: @unchecked Sendable {
+        enum Context {
+            case list
+            case extract
+            case compress
+        }
+
+        private struct State {
+            var sawUnpackingOuter = false
+            var maxFraction: Double = 0.0
+        }
+
+        private let context: Context
+        private let lock = OSAllocatedUnfairLock(initialState: State())
+
+        init(context: Context) {
+            self.context = context
+        }
+
+        func map(_ progress: ArchiveProgress) -> ArchiveProgress {
+            let raw = min(max(progress.fractionCompleted, 0.0), 1.0)
+            let weighted: Double = lock.withLock { state in
+                let candidate: Double
+                switch (context, progress.stage) {
+                case (.list, .unpackingOuter):
+                    state.sawUnpackingOuter = true
+                    candidate = raw * 0.85
+                case (.list, .readingEntries):
+                    candidate = state.sawUnpackingOuter ? (0.85 + raw * 0.15) : raw
+                case (.extract, .unpackingOuter):
+                    state.sawUnpackingOuter = true
+                    candidate = raw * 0.65
+                case (.extract, .extractingInner):
+                    candidate = 0.65 + raw * 0.35
+                case (.compress, .packingTar):
+                    candidate = raw * 0.25
+                case (.compress, .compressingOuter):
+                    candidate = 0.25 + raw * 0.75
+                default:
+                    candidate = raw
+                }
+                let monotonic = max(state.maxFraction, min(max(candidate, 0.0), 1.0))
+                state.maxFraction = monotonic
+                return monotonic
+            }
+
+            return ArchiveProgress(
+                fractionCompleted: weighted,
+                currentFile: progress.currentFile,
+                processedBytes: progress.processedBytes,
+                totalBytes: progress.totalBytes,
+                isFileEvent: progress.isFileEvent,
+                fileCountDelta: progress.fileCountDelta,
+                stage: progress.stage
+            )
+        }
+    }
 
     static func archiveProgress(from payload: Bento7zBinaryProtocol.ProgressPayload) -> ArchiveProgress {
         let fraction: Double

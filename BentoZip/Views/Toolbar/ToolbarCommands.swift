@@ -145,6 +145,23 @@ struct ToolbarCommands: ToolbarContent {
                 }
                 .help(appState.showInspector ? "Hide Inspector" : "Show Inspector")
             }
+        } else {
+            // Keep an invisible placeholder item in `.empty` mode so macOS preserves the same
+            // unified toolbar height and traffic-light coordinates as the workspace window.
+            if #available(macOS 26.0, *) {
+                ToolbarItem(placement: .automatic) {
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityHidden(true)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .automatic) {
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityHidden(true)
+                }
+            }
         }
     }
 

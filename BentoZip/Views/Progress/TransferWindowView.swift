@@ -59,6 +59,23 @@ private struct TransferTaskRowView: View {
         "\(Int((clampedProgress * 100).rounded()))%"
     }
 
+    private var statusLineText: String {
+        switch task.stage {
+        case .unpackingOuter:
+            return String(localized: "Decompressing archive stream…")
+        case .compressingOuter:
+            return String(localized: "Compressing archive stream…")
+        case .packingTar:
+            return task.currentFileName.isEmpty
+                ? String(localized: "Packing tar archive…")
+                : task.currentFileName
+        case .normal, .readingEntries, .extractingInner:
+            return task.currentFileName.isEmpty
+                ? String(localized: "Preparing…")
+                : task.currentFileName
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
@@ -109,9 +126,9 @@ private struct TransferTaskRowView: View {
                     }
                     .frame(height: 16)
 
-                    // Row 3: Current filename + right-side details disclosure chevron (fixed 16pt height)
+                    // Row 3: Current filename or compound stage status + right-side details disclosure chevron (fixed 16pt height)
                     HStack(alignment: .center, spacing: 8) {
-                        Text(task.currentFileName.isEmpty ? String(localized: "Preparing…") : task.currentFileName)
+                        Text(statusLineText)
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

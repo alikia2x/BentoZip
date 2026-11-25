@@ -18,6 +18,7 @@ public final class TransferTask: Identifiable {
     public var title: String
     public var currentFileName: String = ""
     public var fractionCompleted: Double = 0.0
+    public var stage: ArchiveProgress.Stage = .normal
     public var isCancellable: Bool = true
     public var isCompleted: Bool = false
 
@@ -37,6 +38,7 @@ public final class TransferTask: Identifiable {
 
     private var lastSampleTime: Date
     private var lastSampleBytes: Int64 = 0
+    private var hasReceivedStageEvent = false
 
     public init(
         id: UUID = UUID(),
@@ -80,27 +82,58 @@ public final class TransferTask: Identifiable {
     }
 
     public func apply(_ update: ArchiveProgress, now: Date = Date()) {
-        fractionCompleted = min(max(update.fractionCompleted, 0.0), 1.0)
-        if let file = update.currentFile, !file.isEmpty {
-            currentFileName = (file as NSString).lastPathComponent
-        }
-        if update.fileCountDelta > 0 {
-            processedFiles += update.fileCountDelta
-        } else if update.isFileEvent {
-            processedFiles += 1
-        }
-        if let total = update.totalBytes, total > 0 {
-            totalBytes = total
-        }
-        if let processed = update.processedBytes, processed >= 0 {
-            let clamped = max(processedBytes, processed)
-            updateThroughput(newBytes: clamped, now: now)
-            processedBytes = clamped
-        } else if totalBytes > 0 {
-            let estimated = Int64((Double(totalBytes) * fractionCompleted).rounded())
-            if estimated > processedBytes {
-                updateThroughput(newBytes: estimated, now: now)
-                processedBytes = estimated
+        let clampedFraction = min(max(update.fractionCompleted, 0.0), 1.0)
+        fractionCompleted = max(fractionCompleted, clampedFraction)
+
+        let isSyntheticCompletion =
+            clampedFraction >= 1.0 &&
+            update.processedBytes == nil &&
+            update.totalBytes == nil &&
+            update.currentFile == nil &&
+            update.stage == .normal &&
+            hasReceivedStageEvent
+
+        if !isSyntheticCompletion {
+            let stageChanged = hasReceivedStageEvent && update.stage != stage
+            stage = update.stage
+            hasReceivedStageEvent = true
+
+            if let file = update.currentFile, !file.isEmpty {
+                currentFileName = (file as NSString).lastPathComponent
+            } else if stageChanged {
+                currentFileName = ""
+            }
+
+            if update.fileCountDelta > 0 {
+                processedFiles += update.fileCountDelta
+            } else if update.isFileEvent {
+                processedFiles += 1
+            }
+
+            if stageChanged {
+                if let total = update.totalBytes, total > 0 {
+                    totalBytes = total
+                }
+                let nextProcessed = max(0, update.processedBytes ?? 0)
+                processedBytes = nextProcessed
+                lastSampleTime = now
+                lastSampleBytes = nextProcessed
+                bytesPerSecond = 0
+            } else {
+                if let total = update.totalBytes, total > 0 {
+                    totalBytes = total
+                }
+                if let processed = update.processedBytes, processed >= 0 {
+                    let clamped = max(processedBytes, processed)
+                    updateThroughput(newBytes: clamped, now: now)
+                    processedBytes = clamped
+                } else if totalBytes > 0 {
+                    let estimated = Int64((Double(totalBytes) * fractionCompleted).rounded())
+                    if estimated > processedBytes {
+                        updateThroughput(newBytes: estimated, now: now)
+                        processedBytes = estimated
+                    }
+                }
             }
         }
         elapsedSeconds = max(0, now.timeIntervalSince(startedAt))

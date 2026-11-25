@@ -235,6 +235,13 @@ final class DocumentWindowRouter {
     }
 
     private func applyDocumentIdentity(to window: NSWindow, appState: AppState) {
+        if window.toolbarStyle != .unified {
+            window.toolbarStyle = .unified
+        }
+        let targetSeparator: NSTitlebarSeparatorStyle = (appState.mode == .empty) ? .none : .automatic
+        if window.titlebarSeparatorStyle != targetSeparator {
+            window.titlebarSeparatorStyle = targetSeparator
+        }
         if appState.mode == .browseArchive, let archiveURL = appState.sourceArchiveURL {
             if window.representedURL != archiveURL {
                 window.representedURL = archiveURL

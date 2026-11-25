@@ -7,6 +7,7 @@ import os
 private final class ProgressCoalescer: @unchecked Sendable {
     private struct Pending {
         var latest: ArchiveProgress?
+        var lastEmittedStage: ArchiveProgress.Stage?
         var accumulatedFileDelta: Int = 0
         var lastFlushTime: ContinuousClock.Instant?
         var isScheduled: Bool = false
@@ -29,17 +30,21 @@ private final class ProgressCoalescer: @unchecked Sendable {
             let delta = update.fileCountDelta > 0 ? update.fileCountDelta : (update.isFileEvent ? 1 : 0)
             state.accumulatedFileDelta += delta
 
+            let priorStage = state.latest?.stage ?? state.lastEmittedStage
+            let stageChanged = priorStage != nil && priorStage != update.stage
+
             let merged = ArchiveProgress(
                 fractionCompleted: update.fractionCompleted,
-                currentFile: update.currentFile ?? state.latest?.currentFile,
-                processedBytes: update.processedBytes ?? state.latest?.processedBytes,
-                totalBytes: update.totalBytes ?? state.latest?.totalBytes,
+                currentFile: stageChanged ? update.currentFile : (update.currentFile ?? state.latest?.currentFile),
+                processedBytes: stageChanged ? update.processedBytes : (update.processedBytes ?? state.latest?.processedBytes),
+                totalBytes: stageChanged ? update.totalBytes : (update.totalBytes ?? state.latest?.totalBytes),
                 isFileEvent: state.accumulatedFileDelta > 0,
-                fileCountDelta: state.accumulatedFileDelta
+                fileCountDelta: state.accumulatedFileDelta,
+                stage: update.stage
             )
 
             let shouldFlushNow: Bool
-            if update.fractionCompleted >= 1.0 {
+            if stageChanged || update.fractionCompleted >= 1.0 {
                 shouldFlushNow = true
             } else if let last = state.lastFlushTime {
                 shouldFlushNow = (now - last) >= minInterval
@@ -49,6 +54,7 @@ private final class ProgressCoalescer: @unchecked Sendable {
 
             if shouldFlushNow {
                 state.latest = nil
+                state.lastEmittedStage = merged.stage
                 state.accumulatedFileDelta = 0
                 state.lastFlushTime = now
                 return (merged, nil)
@@ -91,9 +97,11 @@ private final class ProgressCoalescer: @unchecked Sendable {
                 processedBytes: latest.processedBytes,
                 totalBytes: latest.totalBytes,
                 isFileEvent: state.accumulatedFileDelta > 0,
-                fileCountDelta: state.accumulatedFileDelta
+                fileCountDelta: state.accumulatedFileDelta,
+                stage: latest.stage
             )
             state.latest = nil
+            state.lastEmittedStage = merged.stage
             state.accumulatedFileDelta = 0
             state.lastFlushTime = ContinuousClock.now
             return merged
@@ -201,14 +209,24 @@ public class CompressionCoordinator {
         let browseCoalescer = ProgressCoalescer(minInterval: .milliseconds(50)) { [weak self, weak appState] update in
             guard let self, let appState, self.browseGeneration == generation, appState.isLoading else { return }
             appState.browseStage = update.stage
-            if let processed = update.processedBytes {
-                appState.browseProcessedBytes = processed
-            }
-            if let total = update.totalBytes, total > 0 {
-                appState.browseTotalBytes = total
-                appState.browseProgress = min(max(update.fractionCompleted, 0.0), 1.0)
-            } else if update.fractionCompleted > 0 {
-                appState.browseProgress = min(max(update.fractionCompleted, 0.0), 1.0)
+            let clampedFraction = min(max(update.fractionCompleted, 0.0), 1.0)
+            if update.stage == .readingEntries {
+                // `readingEntries` reports item counts rather than byte sizes.
+                appState.browseProcessedBytes = 0
+                appState.browseTotalBytes = 0
+                if (update.totalBytes ?? 0) > 0 || clampedFraction > 0 || appState.browseProgress != nil {
+                    appState.browseProgress = max(appState.browseProgress ?? 0.0, clampedFraction)
+                }
+            } else {
+                if let processed = update.processedBytes {
+                    appState.browseProcessedBytes = processed
+                }
+                if let total = update.totalBytes, total > 0 {
+                    appState.browseTotalBytes = total
+                    appState.browseProgress = max(appState.browseProgress ?? 0.0, clampedFraction)
+                } else if clampedFraction > 0 || appState.browseProgress != nil {
+                    appState.browseProgress = max(appState.browseProgress ?? 0.0, clampedFraction)
+                }
             }
         }
 

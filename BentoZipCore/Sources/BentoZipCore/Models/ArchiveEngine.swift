@@ -6,6 +6,9 @@ public struct ArchiveProgress: Sendable, Equatable {
         case normal = 0
         case unpackingOuter = 1
         case readingEntries = 2
+        case compressingOuter = 3
+        case packingTar = 4
+        case extractingInner = 5
     }
 
     public let fractionCompleted: Double

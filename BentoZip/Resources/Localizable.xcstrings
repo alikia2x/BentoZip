@@ -17,16 +17,6 @@
         }
       }
     },
-    "%@ / %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@ / %2$@"
-          }
-        }
-      }
-    },
     "%lld items" : {
       "localizations" : {
         "en" : {
@@ -285,6 +275,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "压缩后"
+          }
+        }
+      }
+    },
+    "Compressing archive stream…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compressing archive stream…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在压缩外层数据流…"
           }
         }
       }
@@ -957,6 +963,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "压缩后 %@（节省 %lld%%）"
+          }
+        }
+      }
+    },
+    "Packing tar archive…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Packing tar archive…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在打包 tar 归档…"
           }
         }
       }

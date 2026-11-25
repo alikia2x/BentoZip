@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 import BentoZipCore
 
@@ -666,5 +667,126 @@ struct Bento7zEngineTests {
             let afterDelete = try await testEngine.listEntries(in: archiveURL)
             #expect(Set(afterDelete.map(\.name)) == ["alpha.txt", "gamma.txt"])
         }
+    }
+
+    @Test func compoundTarGz_compressListExtractProgressIsMonotonicAndTyped() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let cacheRoot = dir.appendingPathComponent("tar_cache")
+        let cacheMgr = ArchiveCacheManager(directory: cacheRoot, maxCacheMB: 64)
+        let testEngine = Bento7zEngine(cacheManager: cacheMgr)
+
+        // ~4 MB of mildly compressible data so both tar & gzip stages emit progress reliably
+        let srcDir = dir.appendingPathComponent("payload")
+        try fm.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        let chunk = Data((0..<65_536).map { UInt8(($0 &* 31 ^ ($0 >> 3)) & 0xFF) })
+        for idx in 0..<4 {
+            var fileData = Data(capacity: 1_048_576)
+            for _ in 0..<16 { fileData.append(chunk) }
+            try fileData.write(to: srcDir.appendingPathComponent("part_\(idx).bin"))
+        }
+
+        let archiveURL = dir.appendingPathComponent("bundle.tar.gz")
+
+        // 1. Compress: packingTar (0..0.25) -> compressingOuter (0.25..1.0), strictly monotonic
+        let compressEvents = OSAllocatedUnfairLock(initialState: [ArchiveProgress]())
+        try await testEngine.create(
+            from: [srcDir],
+            to: archiveURL,
+            settings: CompressionSettings(format: .tarGz, compressionLevel: .fast)
+        ) { progress in
+            compressEvents.withLock { $0.append(progress) }
+        }
+        let cLog = compressEvents.withLock { $0 }
+        #expect(cLog.contains { $0.stage == .packingTar && ($0.totalBytes ?? 0) > 0 })
+        #expect(cLog.contains { $0.stage == .compressingOuter && ($0.totalBytes ?? 0) > 0 })
+        for pair in zip(cLog, cLog.dropFirst()) {
+            #expect(pair.1.fractionCompleted >= pair.0.fractionCompleted)
+        }
+
+        // 2. List (cache miss): unpackingOuter (non-zero totalBytes) -> readingEntries, monotonic
+        let listEvents = OSAllocatedUnfairLock(initialState: [ArchiveProgress]())
+        let listed = try await testEngine.listArchive(in: archiveURL, password: nil) { progress in
+            listEvents.withLock { $0.append(progress) }
+        }
+        #expect(!listed.entries.isEmpty)
+        let lLog = listEvents.withLock { $0 }
+        #expect(lLog.contains { $0.stage == .unpackingOuter && ($0.totalBytes ?? 0) > 0 })
+        #expect(lLog.contains { $0.stage == .readingEntries })
+        for pair in zip(lLog, lLog.dropFirst()) {
+            #expect(pair.1.fractionCompleted >= pair.0.fractionCompleted)
+        }
+
+        // 3. Extract (clear cache to force cache-miss two-phase extract): unpackingOuter -> extractingInner
+        cacheMgr.clearCache()
+        let extractDir = dir.appendingPathComponent("extracted")
+        let extractEvents = OSAllocatedUnfairLock(initialState: [ArchiveProgress]())
+        try await testEngine.extract(
+            archiveURL: archiveURL,
+            entries: nil,
+            to: extractDir,
+            password: nil
+        ) { progress in
+            extractEvents.withLock { $0.append(progress) }
+        }
+        let eLog = extractEvents.withLock { $0 }
+        #expect(eLog.contains { $0.stage == .unpackingOuter && ($0.totalBytes ?? 0) > 0 })
+        #expect(eLog.contains { $0.stage == .extractingInner && ($0.totalBytes ?? 0) > 0 })
+        for pair in zip(eLog, eLog.dropFirst()) {
+            #expect(pair.1.fractionCompleted >= pair.0.fractionCompleted)
+        }
+    }
+
+    @Test @MainActor func transferTask_resetsPerStageThroughputWithoutBackwardProgressJump() {
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        let task = TransferTask(kind: .compress, title: "Compressing…", totalBytes: 1000, startedAt: t0)
+
+        task.apply(
+            ArchiveProgress(
+                fractionCompleted: 0.25,
+                currentFile: "a.bin",
+                processedBytes: 1000,
+                totalBytes: 1000,
+                isFileEvent: true,
+                stage: .packingTar
+            ),
+            now: t0.addingTimeInterval(1.0)
+        )
+        #expect(task.stage == .packingTar)
+        #expect(task.fractionCompleted == 0.25)
+        #expect(task.processedBytes == 1000)
+        #expect(task.bytesPerSecond > 0)
+
+        // Transition into compressingOuter: processedBytes & speed reset cleanly while fraction stays monotonic
+        task.apply(
+            ArchiveProgress(
+                fractionCompleted: 0.25,
+                currentFile: "archive.tar",
+                processedBytes: 0,
+                totalBytes: 1024,
+                stage: .compressingOuter
+            ),
+            now: t0.addingTimeInterval(1.1)
+        )
+        #expect(task.stage == .compressingOuter)
+        #expect(task.fractionCompleted == 0.25)
+        #expect(task.processedBytes == 0)
+        #expect(task.totalBytes == 1024)
+        #expect(task.bytesPerSecond == 0)
+
+        task.apply(
+            ArchiveProgress(
+                fractionCompleted: 0.625,
+                currentFile: "archive.tar",
+                processedBytes: 512,
+                totalBytes: 1024,
+                stage: .compressingOuter
+            ),
+            now: t0.addingTimeInterval(2.1)
+        )
+        #expect(task.fractionCompleted == 0.625)
+        #expect(task.processedBytes == 512)
+        #expect(task.bytesPerSecond > 400 && task.bytesPerSecond < 600)
     }
 }
