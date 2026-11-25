@@ -88,6 +88,7 @@ struct ArchiveInfoInspectorView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
+                    .disabled(appState.isLoading || progressState.isOperationInProgress)
 
                     Spacer()
 
@@ -105,6 +106,7 @@ struct ArchiveInfoInspectorView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
+                    .disabled(appState.isLoading || progressState.isOperationInProgress)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)

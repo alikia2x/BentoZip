@@ -23,7 +23,10 @@ extension CompressionCoordinator {
 
         let operationID = prepareProgress(
             progressState,
-            description: String(localized: "Compressing…", bundle: .module)
+            description: String(localized: "Compressing…", bundle: .module),
+            kind: .compress,
+            totalBytes: appState.totalSize,
+            destinationURL: saveURL
         )
         let progressHandler = makeProgressHandler(operationID: operationID, progressState: progressState)
 
@@ -37,7 +40,7 @@ extension CompressionCoordinator {
                 )
                 try Task.checkCancellation()
 
-                await self.completeProgress(progressState, operationID: operationID) {
+                await self.completeProgress(progressState, operationID: operationID, finalOutputURL: saveURL) {
                     appState.lastError = nil
                     appState.preferencesManager?.recordArchive(saveURL.path)
                 }
@@ -87,9 +90,24 @@ extension CompressionCoordinator {
         let shouldReveal = appState.revealInFinderAfterExtract
         let destinationExistedBefore = FileManager.default.fileExists(atPath: destinationURL.path)
 
+        let estimatedBytes: Int64 = if let entries, !entries.isEmpty {
+            entries.reduce(0) { $0 + $1.size }
+        } else {
+            appState.totalSize
+        }
+        let estimatedFiles: Int? = if let entries, !entries.isEmpty {
+            entries.count
+        } else {
+            appState.totalEntryCount > 0 ? appState.totalEntryCount : nil
+        }
         let operationID = prepareProgress(
             progressState,
-            description: String(localized: "Extracting…", bundle: .module)
+            description: String(localized: "Extracting…", bundle: .module),
+            kind: .extract,
+            totalBytes: estimatedBytes,
+            totalFiles: estimatedFiles,
+            destinationURL: destinationURL,
+            sourceArchiveURL: archiveURL
         )
         let progressHandler = makeProgressHandler(operationID: operationID, progressState: progressState)
 
@@ -154,7 +172,11 @@ extension CompressionCoordinator {
         let password = appState.archivePassword
         let operationID = prepareProgress(
             progressState,
-            description: String(localized: "Adding to archive…", bundle: .module)
+            description: String(localized: "Adding to archive…", bundle: .module),
+            kind: .addEntries,
+            totalFiles: urls.count,
+            destinationURL: archiveURL,
+            sourceArchiveURL: archiveURL
         )
         let progressHandler = makeProgressHandler(operationID: operationID, progressState: progressState)
 
@@ -185,7 +207,11 @@ extension CompressionCoordinator {
         let password = appState.archivePassword
         let operationID = prepareProgress(
             progressState,
-            description: String(localized: "Removing items…", bundle: .module)
+            description: String(localized: "Removing items…", bundle: .module),
+            kind: .removeEntries,
+            totalFiles: entries.count,
+            destinationURL: archiveURL,
+            sourceArchiveURL: archiveURL
         )
 
         await runManagedTask(operationID: operationID, progressState: progressState) {

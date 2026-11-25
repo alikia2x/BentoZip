@@ -129,6 +129,8 @@ struct Bento7zProcessRunner: Sendable {
         var errorCode: String?
         var lastFraction: Double = 0.0
         var lastCurrentFile: String?
+        var lastProcessedBytes: Int64?
+        var lastTotalBytes: Int64?
         var malformedLines: [String] = []
     }
 
@@ -246,23 +248,32 @@ struct Bento7zProcessRunner: Sendable {
             guard let data = json["data"] as? [String: Any] else { return }
             let processed = (data["processed_bytes"] as? NSNumber)?.int64Value
             let total = (data["total_bytes"] as? NSNumber)?.int64Value
+            if let processed { state.lastProcessedBytes = processed }
+            if let total, total > 0 { state.lastTotalBytes = total }
             if let currentFile = data["current_file"] as? String, !currentFile.isEmpty {
                 state.lastCurrentFile = currentFile
             }
-            if let processed, let total, total > 0 {
+            if let processed = state.lastProcessedBytes, let total = state.lastTotalBytes, total > 0 {
                 state.lastFraction = min(max(Double(processed) / Double(total), 0.0), 1.0)
             }
             onProgress?(ArchiveProgress(
                 fractionCompleted: state.lastFraction,
                 currentFile: state.lastCurrentFile,
-                processedBytes: processed,
-                totalBytes: total
+                processedBytes: state.lastProcessedBytes,
+                totalBytes: state.lastTotalBytes,
+                isFileEvent: false
             ))
         case "file":
             let data = json["data"] as? [String: Any]
             if let filePath = (data?["path"] as? String) ?? (json["path"] as? String), !filePath.isEmpty {
                 state.lastCurrentFile = filePath
-                onProgress?(ArchiveProgress(fractionCompleted: state.lastFraction, currentFile: filePath))
+                onProgress?(ArchiveProgress(
+                    fractionCompleted: state.lastFraction,
+                    currentFile: filePath,
+                    processedBytes: state.lastProcessedBytes,
+                    totalBytes: state.lastTotalBytes,
+                    isFileEvent: true
+                ))
             }
         case "error":
             if let data = json["data"] as? [String: Any] {

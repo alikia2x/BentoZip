@@ -1,13 +1,6 @@
 import BentoZipCore
 import SwiftUI
 
-private enum ActiveWindowSheet: String, Identifiable {
-    case progress
-    case password
-
-    var id: String { rawValue }
-}
-
 struct ContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(ProgressState.self) private var progressState
@@ -49,29 +42,9 @@ struct ContentView: View {
         }
     }
 
-    private var activeSheetBinding: Binding<ActiveWindowSheet?> {
-        Binding(
-            get: {
-                if appState.needsPasswordPrompt {
-                    return .password
-                } else if progressState.isOperationInProgress {
-                    return .progress
-                } else {
-                    return nil
-                }
-            },
-            set: { newValue in
-                guard newValue == nil else { return }
-                if appState.needsPasswordPrompt {
-                    appState.cancelPasswordPrompt()
-                } else if progressState.isOperationInProgress {
-                    progressState.cancel()
-                }
-            }
-        )
-    }
-
     var body: some View {
+        @Bindable var appState = appState
+
         Group {
             switch appState.mode {
             case .empty:
@@ -80,6 +53,14 @@ struct ContentView: View {
                 workspaceView
             }
         }
+        .background(
+            WindowDocumentBridge(
+                appState: appState,
+                mode: appState.mode,
+                sourceArchiveURL: appState.sourceArchiveURL
+            )
+            .frame(width: 0, height: 0)
+        )
         .navigationTitle(windowTitle)
         .navigationSubtitle(windowSubtitle)
         .toolbarBackground(appState.mode == .empty ? .hidden : .automatic, for: .windowToolbar)
@@ -88,35 +69,26 @@ struct ContentView: View {
                 showDeleteConfirmation: $showToolbarDeleteConfirmation,
                 selectedCount: appState.selectedNodes.count,
                 isLoading: appState.isLoading,
+                isOperationInProgress: progressState.isOperationInProgress,
                 hasRootItems: !appState.rootNodes.isEmpty
             )
         }
-        .disabled(progressState.isOperationInProgress)
         .onOpenURL { url in
-            Task {
-                await appState.handleDroppedURLs([url])
-            }
+            DocumentWindowRouter.shared.openExternalURLs([url])
         }
         .onChange(of: appState.lastError) { _, newValue in
             showErrorAlert = newValue != nil
         }
-        .sheet(item: activeSheetBinding) { sheet in
-            switch sheet {
-            case .progress:
-                ProgressWindowView()
-                    .environment(progressState)
-                    .interactiveDismissDisabled()
-            case .password:
-                PasswordPromptSheet { password in
-                    await appState.coordinator.submitPassword(
-                        password,
-                        appState: appState,
-                        progressState: progressState
-                    )
-                }
-                .environment(appState)
-                .interactiveDismissDisabled(appState.isLoading)
+        .sheet(isPresented: $appState.needsPasswordPrompt) {
+            PasswordPromptSheet { password in
+                await appState.coordinator.submitPassword(
+                    password,
+                    appState: appState,
+                    progressState: progressState
+                )
             }
+            .environment(appState)
+            .interactiveDismissDisabled(appState.isLoading)
         }
         .alert("Operation Failed", isPresented: $showErrorAlert) {
             Button("OK") { appState.lastError = nil }

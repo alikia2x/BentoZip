@@ -63,9 +63,7 @@ struct RecentArchivesSidebar: View {
         let isHovered = hoveredRecentPath == path
 
         return Button {
-            Task {
-                await appState.coordinator.browseArchive(at: item.url, appState: appState)
-            }
+            DocumentWindowRouter.shared.openArchive(item.url, from: appState)
         } label: {
             HStack(spacing: 10) {
                 Image(nsImage: FileIconCache.icon(forFileAt: path))

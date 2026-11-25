@@ -648,4 +648,78 @@ struct CompressionCoordinatorTests {
         let archivedFiles = flattenPaths(entries)
         #expect(archivedFiles == ["Bundle/keep.txt"])
     }
+
+    @Test func transferManager_tracksTelemetrySpeedRatioAndLifecycleCleanly() async throws {
+        let manager = TransferManager()
+        let start = Date(timeIntervalSince1970: 1_000)
+        let destURL = URL(fileURLWithPath: "/tmp/example.7z")
+        let task = TransferTask(
+            kind: .compress,
+            title: "Compressing…",
+            totalBytes: 1_000_000,
+            totalFiles: 10,
+            destinationURL: destURL,
+            startedAt: start
+        )
+        manager.register(task)
+        #expect(manager.hasActiveTasks)
+        #expect(manager.tasks.count == 1)
+
+        task.apply(
+            ArchiveProgress(
+                fractionCompleted: 0.5,
+                currentFile: "folder/photo.png",
+                processedBytes: 500_000,
+                totalBytes: 1_000_000,
+                isFileEvent: true
+            ),
+            now: start.addingTimeInterval(2.0)
+        )
+        task.tick(now: start.addingTimeInterval(2.0), polledOutputSize: 250_000)
+
+        #expect(task.currentFileName == "photo.png")
+        #expect(task.processedFiles == 1)
+        #expect(task.processedBytes == 500_000)
+        #expect(task.elapsedSeconds == 2.0)
+        #expect(task.bytesPerSecond == 250_000)
+        #expect(task.estimatedRemainingSeconds == 2.0)
+        #expect(task.compressedBytes == 250_000)
+        #expect(task.compressionRatioPercent == 50)
+
+        task.markCompleted(now: start.addingTimeInterval(4.0), finalOutputSize: 400_000)
+        #expect(task.isCompleted)
+        #expect(!task.isCancellable)
+        #expect(task.fractionCompleted == 1.0)
+        #expect(task.processedBytes == 1_000_000)
+        #expect(task.estimatedRemainingSeconds == nil)
+        #expect(task.compressionRatioPercent == 40)
+
+        manager.remove(id: task.id)
+        #expect(!manager.hasActiveTasks)
+    }
+
+    @Test func coordinator_registersAndRemovesTransferTaskAcrossCompression() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let file = tmp.appendingPathComponent("hello.txt")
+        try Data(repeating: 0x61, count: 4096).write(to: file)
+
+        let manager = TransferManager()
+        let coordinator = CompressionCoordinator(engine: Bento7zEngine(), transferManager: manager)
+        let appState = AppState()
+        appState.coordinator = coordinator
+        appState.revealInFinderAfterExtract = false
+
+        await appState.loadFilesAsync(from: [file])
+        appState.compressionSettings.format = .zip
+        appState.compressionSettings.archiveName = "hello.zip"
+
+        let progressState = ProgressState()
+        await coordinator.compress(appState: appState, progressState: progressState)
+
+        #expect(appState.lastError == nil)
+        #expect(!progressState.isOperationInProgress)
+        #expect(!manager.hasActiveTasks)
+    }
 }

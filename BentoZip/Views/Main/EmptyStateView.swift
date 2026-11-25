@@ -1,7 +1,6 @@
 import AppKit
 import BentoZipCore
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct EmptyStateView: View {
     @Environment(AppState.self) private var appState
@@ -45,8 +44,13 @@ struct EmptyStateView: View {
         }
         .dropDestination(for: URL.self) { items, _ in
             guard !items.isEmpty else { return false }
-            Task {
-                await appState.handleDroppedURLs(items)
+            let allArchives = items.allSatisfy { FormatDetector.isArchiveFile($0) }
+            if allArchives {
+                for (index, url) in items.enumerated() {
+                    DocumentWindowRouter.shared.openArchive(url, from: index == 0 ? appState : nil)
+                }
+            } else {
+                DocumentWindowRouter.shared.openFilesToCompress(items, from: appState)
             }
             return true
         } isTargeted: { targeted in
@@ -78,11 +82,10 @@ struct EmptyStateView: View {
                     id: "create",
                     title: "New Archive",
                     icon: "plus.square.on.square",
-                    shortcut: "⌘N"
+                    shortcut: "⇧⌘N"
                 ) {
-                    chooseFilesToCompress()
+                    DocumentWindowRouter.shared.presentChooseFilesToCompressPanel(from: appState)
                 }
-                .keyboardShortcut("n", modifiers: .command)
 
                 welcomeActionTile(
                     id: "open",
@@ -90,9 +93,8 @@ struct EmptyStateView: View {
                     icon: "folder",
                     shortcut: "⌘O"
                 ) {
-                    chooseArchiveToOpen()
+                    DocumentWindowRouter.shared.presentOpenArchivePanel(from: appState)
                 }
-                .keyboardShortcut("o", modifiers: .command)
             }
             .frame(width: 248)
 
@@ -143,48 +145,10 @@ struct EmptyStateView: View {
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                hoveredActionID = hovering ? id : (hoveredActionID == id ? nil : hoveredActionID)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    hoveredActionID = hovering ? id : (hoveredActionID == id ? nil : hoveredActionID)
+                }
             }
-        }
-    }
-
-    private func chooseFilesToCompress() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.prompt = String(localized: "Choose")
-        if panel.runModal() == .OK, !panel.urls.isEmpty {
-            appState.loadFiles(from: panel.urls)
-        }
-    }
-
-    private func chooseArchiveToOpen() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.prompt = String(localized: "Open")
-        let archiveTypes: [UTType] = [
-            .zip, .gzip, .bz2, .archive,
-            UTType(filenameExtension: "7z"),
-            UTType(filenameExtension: "rar"),
-            UTType(filenameExtension: "xz"),
-            UTType(filenameExtension: "tar"),
-            UTType(filenameExtension: "tgz"),
-            UTType(filenameExtension: "tbz"),
-            UTType(filenameExtension: "tbz2"),
-            UTType(filenameExtension: "txz"),
-            UTType(filenameExtension: "zipx")
-        ].compactMap { $0 }
-        panel.allowedContentTypes = archiveTypes
-
-        if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                await appState.coordinator.browseArchive(at: url, appState: appState)
-            }
-        }
     }
 }

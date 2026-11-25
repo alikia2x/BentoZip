@@ -18,8 +18,9 @@ The app has three modes (`ArchiveMode`) controlled by `AppState.mode`:
 
 ### State Management
 
-- `AppState` (`@Observable`, `@MainActor`) is owned per window (`WindowRootView` inside `WindowGroup`) and passed via `.environment()` through that window's SwiftUI hierarchy.
-- `ProgressState` (`@Observable`, `@MainActor`) is owned per window and drives the window-attached progress sheet (unified with `PasswordPromptSheet` via a single `.sheet(item:)` in `ContentView`).
+- `AppState` (`@Observable`, `@MainActor`) is owned per window (`WindowRootView` inside `WindowGroup(id: "workspace", for: WorkspaceLaunchRequest.self)`) and passed via `.environment()` through that window's SwiftUI hierarchy.
+- `DocumentWindowRouter` + `WindowDocumentBridge` coordinate native macOS Document-Based App behavior across windows (`NSWindow.representedURL` proxy icons, duplicate-archive deduplication, `File > New / Open / Open Recent` menu routing, and Finder double-click / Dock drop handling) while keeping the Welcome screen on cold launch.
+- `TransferManager` (`@Observable`, `@MainActor`) tracks active compress/extract/mutate `TransferTask`s across all windows with live 7-Zip-style telemetry (elapsed/remaining time, speed, processed/total bytes, file count, compressed size/ratio) and drives the standalone macOS Progress window (`TransferWindowController` + `TransferWindowView`). `ProgressState` tracks per-window busy state for non-blocking re-entrancy protection.
 - `AppPreferences` uses SwiftData (`@Model`) managed by a shared `PreferencesManager` for persistent user preferences.
 
 ### Compression/Extraction Engine Chain
@@ -39,7 +40,7 @@ All engines conform to ArchiveEngine protocol:
 3. **Single top-directory unwrapping**: Archives with a single top-level directory can automatically unwrap it when configured (`AppPreferences.unwrapSingleTopDirectory`).
 4. **Atomic archive mutations**: `removeEntries` and `addEntries` use extract-then-rebuild with atomic file replacement, rollback on failure, and `DragDropManager` cache invalidation.
 5. **Bundled `bento7z` helper**: `bento7z` and `7z.so` from the sibling `../bento7z/build/` project are copied and code-signed into `BentoZip.app/Contents/Helpers/` during the Xcode build phase.
-6. **Per-window progress sheet**: Operations present `ProgressWindowView` as a compact window-attached sheet bound to that window's `ProgressState`, keeping multiple windows completely independent.
+6. **Standalone macOS Progress window**: Operations register `TransferTask`s in `TransferManager.shared`, automatically opening `TransferWindowController`'s standalone native window (stacking concurrent tasks from multiple windows without blocking document browsing, with an expandable 7-Zip-style statistics drawer per task) and auto-closing when all tasks finish.
 
 ### Drag and Drop & Quick Look
 
@@ -113,8 +114,9 @@ cd BentoZipCore && swift build
 
 | File | Purpose |
 |---|---|
-| `BentoZipApp.swift` | App entry point, SwiftData container, per-window `WindowRootView` & Settings scene |
-| `ContentView.swift` | Root view, mode switching, drop handling, unified progress/password sheet |
+| `BentoZipApp.swift` / `DocumentWindowRouter.swift` | App entry point, Document-Based multi-window routing, `NSWindow.representedURL`, File/Recent menus & Settings scene |
+| `TransferManager.swift` / `TransferWindowController.swift` / `TransferWindowView.swift` | Cross-window transfer telemetry and standalone macOS Progress window with expandable 7-Zip-style stats drawer |
+| `ContentView.swift` | Root view, mode switching, drop handling, password prompt sheet |
 | `FinderOutlineView.swift` / `FinderOutlineCoordinator.swift` | Native AppKit Finder-style `NSOutlineView`, responder-chain Quick Look, sorting & drag-and-drop |
 | `FileNode.swift` | Single-source-of-truth `@MainActor` reference tree node backing `AppState` and `NSOutlineView` |
 | `AppState.swift` | Per-window central state: `FileNode` tree, incremental update log, navigation, mode, settings & recent archives |

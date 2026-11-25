@@ -9,7 +9,10 @@ struct ToolbarCommands: ToolbarContent {
     @Binding var showDeleteConfirmation: Bool
     let selectedCount: Int
     let isLoading: Bool
+    let isOperationInProgress: Bool
     let hasRootItems: Bool
+
+    private var isBusy: Bool { isLoading || isOperationInProgress }
 
     var body: some ToolbarContent {
         if appState.mode != .empty {
@@ -30,7 +33,7 @@ struct ToolbarCommands: ToolbarContent {
                     } label: {
                         Label("Add", systemImage: "plus")
                     }
-                    .disabled(isLoading)
+                    .disabled(isBusy)
                     .help("Add Files or Folders")
 
                     Button {
@@ -38,7 +41,7 @@ struct ToolbarCommands: ToolbarContent {
                     } label: {
                         Label("Remove", systemImage: "trash")
                     }
-                    .disabled(selectedCount == 0 || isLoading)
+                    .disabled(selectedCount == 0 || isBusy)
                     .help("Remove Selected")
 
                     Button {
@@ -51,7 +54,7 @@ struct ToolbarCommands: ToolbarContent {
                     } label: {
                         Label("Compress", systemImage: "archivebox")
                     }
-                    .disabled(!hasRootItems || isLoading)
+                    .disabled(!hasRootItems || isBusy)
                     .help("Create Archive")
                 } else if appState.mode == .browseArchive {
                     if appState.isWritableArchive {
@@ -60,7 +63,7 @@ struct ToolbarCommands: ToolbarContent {
                         } label: {
                             Label("Add", systemImage: "plus")
                         }
-                        .disabled(isLoading)
+                        .disabled(isBusy)
                         .help("Add to Archive")
 
                         Button {
@@ -68,7 +71,7 @@ struct ToolbarCommands: ToolbarContent {
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
-                        .disabled(selectedCount == 0 || isLoading)
+                        .disabled(selectedCount == 0 || isBusy)
                         .help("Delete Selected from Archive")
                     }
 
@@ -127,7 +130,7 @@ struct ToolbarCommands: ToolbarContent {
                             )
                         }
                     }
-                    .disabled(isLoading)
+                    .disabled(isBusy)
                     .help("Extract")
                 }
             }

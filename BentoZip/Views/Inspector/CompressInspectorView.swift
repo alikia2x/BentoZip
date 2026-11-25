@@ -138,7 +138,7 @@ struct CompressInspectorView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
-                    .disabled(appState.rootNodes.isEmpty || appState.isLoading)
+                    .disabled(appState.rootNodes.isEmpty || appState.isLoading || progressState.isOperationInProgress)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)

@@ -5,13 +5,19 @@ import Observation
 @MainActor
 public class CompressionCoordinator {
     let engine: any ArchiveEngine
+    public let transferManager: TransferManager
     var activeTask: Task<Void, Never>?
     var activeOperationID: UUID?
+    var activeTransferTask: TransferTask?
     weak var lastExtractProgressState: ProgressState?
     var pendingExtractDestinationURL: URL?
 
-    public init(engine: any ArchiveEngine = Bento7zEngine()) {
+    public init(
+        engine: any ArchiveEngine = Bento7zEngine(),
+        transferManager: TransferManager? = nil
+    ) {
         self.engine = engine
+        self.transferManager = transferManager ?? .shared
     }
 
     // MARK: - Cancellation
@@ -91,16 +97,40 @@ public class CompressionCoordinator {
     @discardableResult
     func prepareProgress(
         _ progressState: ProgressState,
-        description: String
+        description: String,
+        kind: TransferTask.Kind = .compress,
+        totalBytes: Int64 = 0,
+        totalFiles: Int? = nil,
+        destinationURL: URL? = nil,
+        sourceArchiveURL: URL? = nil
     ) -> UUID {
         let operationID = UUID()
         activeOperationID = operationID
         progressState.reset(description: description)
         progressState.isOperationInProgress = true
-        progressState.onCancel = { [weak self, weak progressState] in
+
+        let cancelHandler: () -> Void = { [weak self, weak progressState] in
             guard let self, let progressState else { return }
             self.cancelOperation(progressState: progressState)
         }
+        progressState.onCancel = cancelHandler
+
+        if let previous = activeTransferTask {
+            transferManager.remove(id: previous.id)
+        }
+        let transferTask = TransferTask(
+            id: operationID,
+            kind: kind,
+            title: description,
+            totalBytes: totalBytes,
+            totalFiles: totalFiles,
+            destinationURL: destinationURL,
+            sourceArchiveURL: sourceArchiveURL
+        )
+        transferTask.onCancel = cancelHandler
+        activeTransferTask = transferTask
+        transferManager.register(transferTask)
+
         return operationID
     }
 
@@ -108,7 +138,8 @@ public class CompressionCoordinator {
         operationID: UUID,
         progressState: ProgressState
     ) -> @Sendable (ArchiveProgress) -> Void {
-        { [weak self, weak progressState] update in
+        let transferTask = activeTransferTask
+        return { [weak self, weak progressState, weak transferTask] update in
             Task { @MainActor in
                 guard let self,
                       let progressState,
@@ -117,6 +148,7 @@ public class CompressionCoordinator {
                     return
                 }
                 Self.applyProgress(update, to: progressState)
+                transferTask?.apply(update)
             }
         }
     }
@@ -133,6 +165,9 @@ public class CompressionCoordinator {
                 }
                 if progressState.isOperationInProgress {
                     self.abortProgress(progressState)
+                } else if let transfer = self.activeTransferTask, transfer.id == operationID {
+                    self.transferManager.remove(id: operationID)
+                    self.activeTransferTask = nil
                 }
             }
             await work()
@@ -145,6 +180,7 @@ public class CompressionCoordinator {
     func completeProgress(
         _ progressState: ProgressState,
         operationID: UUID,
+        finalOutputURL: URL? = nil,
         afterCompletion: () -> Void = {}
     ) async {
         if activeOperationID == operationID {
@@ -153,17 +189,35 @@ public class CompressionCoordinator {
         progressState.operationProgress = 1.0
         progressState.isCancellable = false
         progressState.onCancel = nil
+
+        var finalSize: Int64?
+        if let finalOutputURL,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: finalOutputURL.path) {
+            finalSize = (attrs[.size] as? NSNumber)?.int64Value
+        }
+        activeTransferTask?.markCompleted(finalOutputSize: finalSize)
+
         afterCompletion()
         if !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(180))
         }
         progressState.isOperationInProgress = false
+        if activeTransferTask?.id == operationID {
+            transferManager.remove(id: operationID)
+            activeTransferTask = nil
+        } else {
+            transferManager.remove(id: operationID)
+        }
     }
 
     func abortProgress(_ progressState: ProgressState) {
         progressState.isOperationInProgress = false
         progressState.currentFileName = ""
         progressState.onCancel = nil
+        if let transfer = activeTransferTask {
+            transferManager.remove(id: transfer.id)
+            activeTransferTask = nil
+        }
     }
 
     func refreshArchiveContents(
