@@ -602,4 +602,50 @@ struct CompressionCoordinatorTests {
         #expect(thirdExtracted != secondExtracted)
         #expect(try String(contentsOf: thirdExtracted, encoding: .utf8) == "version-2-longer-payload")
     }
+
+    @Test func compress_omitsNestedItemsRemovedInCompressMode() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let projectDir = tmp.appendingPathComponent("Bundle")
+        let skipDir = projectDir.appendingPathComponent("Cache")
+        try fm.createDirectory(at: skipDir, withIntermediateDirectories: true)
+        try "keep".write(to: projectDir.appendingPathComponent("keep.txt"), atomically: true, encoding: .utf8)
+        try "skip-file".write(to: projectDir.appendingPathComponent("skip.txt"), atomically: true, encoding: .utf8)
+        try "skip-dir-file".write(to: skipDir.appendingPathComponent("temp.dat"), atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let appState = AppState()
+        appState.coordinator = CompressionCoordinator(engine: engine)
+        appState.revealInFinderAfterExtract = false
+
+        await appState.loadFilesAsync(from: [projectDir])
+        let bundleNode = try #require(appState.rootNodes.first)
+        await appState.loadChildrenIfNeededAsync(for: bundleNode)
+
+        let skipFileNode = try #require(bundleNode.children?.first(where: { $0.name == "skip.txt" }))
+        let skipDirNode = try #require(bundleNode.children?.first(where: { $0.name == "Cache" }))
+        appState.selectedEntryIDs = [skipFileNode.id, skipDirNode.id]
+        appState.removeSelectedEntries()
+
+        let outputArchive = tmp.appendingPathComponent("Bundle.zip")
+        appState.compressionSettings.format = .zip
+        appState.compressionSettings.archiveName = "Bundle.zip"
+
+        let progressState = ProgressState()
+        await appState.coordinator.compress(appState: appState, progressState: progressState)
+
+        #expect(appState.lastError == nil)
+        #expect(fm.fileExists(atPath: outputArchive.path))
+
+        let entries = try await engine.listEntries(in: outputArchive)
+        func flattenPaths(_ list: [FileEntry]) -> [String] {
+            list.flatMap { entry -> [String] in
+                let selfPaths = entry.isDirectory ? [] : [entry.archiveRelativePath ?? entry.name]
+                return selfPaths + flattenPaths(entry.children ?? [])
+            }
+        }
+        let archivedFiles = flattenPaths(entries)
+        #expect(archivedFiles == ["Bundle/keep.txt"])
+    }
 }

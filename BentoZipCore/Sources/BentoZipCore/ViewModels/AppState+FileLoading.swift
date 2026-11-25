@@ -10,6 +10,7 @@ extension AppState {
         recentValidationTask?.cancel()
         recentValidationTask = nil
         isLoading = false
+        isCalculatingSizes = false
     }
 
     @discardableResult
@@ -21,6 +22,7 @@ extension AppState {
         sizeCalculationTask?.cancel()
         sizeCalculationTask = nil
         pendingSizeTargets.removeAll()
+        isCalculatingSizes = false
         loadingChildTasks.values.forEach { $0.cancel() }
         loadingChildTasks.removeAll()
         return loadGeneration
@@ -28,8 +30,11 @@ extension AppState {
 
     private func updateLoadingStateIfIdle(generation: UInt64) {
         guard loadGeneration == generation else { return }
-        if loadTask == nil && pendingAddedURLs.isEmpty && sizeCalculationTask == nil && pendingSizeTargets.isEmpty {
+        if loadTask == nil && pendingAddedURLs.isEmpty {
             isLoading = false
+        }
+        if sizeCalculationTask == nil && pendingSizeTargets.isEmpty {
+            isCalculatingSizes = false
         }
     }
 
@@ -83,6 +88,7 @@ extension AppState {
         replaceRootNodes(nodes)
         mode = .compress
         showInspector = true
+        isLoading = false
 
         if !directoryTargets.isEmpty {
             enqueueSizeCalculation(for: directoryTargets, generation: generation)
@@ -238,7 +244,10 @@ extension AppState {
               !liveNode.hasLoadedChildren else {
             return
         }
-        let childNodes = childEntries.map { FileNode(entry: $0, parent: liveNode) }
+        let filteredEntries = excludedCompressStandardizedPaths.isEmpty
+            ? childEntries
+            : childEntries.filter { !excludedCompressStandardizedPaths.contains($0.url.standardizedFileURL.path) }
+        let childNodes = filteredEntries.map { FileNode(entry: $0, parent: liveNode) }
         attachLoadedChildren(childNodes, to: nodeID)
     }
 
@@ -247,7 +256,7 @@ extension AppState {
     private func enqueueSizeCalculation(for targets: [(id: UUID, url: URL)], generation: UInt64) {
         guard !targets.isEmpty, loadGeneration == generation else { return }
         pendingSizeTargets.append(contentsOf: targets)
-        isLoading = true
+        isCalculatingSizes = true
         guard sizeCalculationTask == nil else { return }
 
         sizeCalculationTask = Task { [weak self] in
@@ -260,6 +269,9 @@ extension AppState {
         defer {
             if loadGeneration == generation {
                 sizeCalculationTask = nil
+                if Task.isCancelled {
+                    pendingSizeTargets.removeAll()
+                }
                 updateLoadingStateIfIdle(generation: generation)
             }
         }
@@ -268,8 +280,15 @@ extension AppState {
             guard !Task.isCancelled, loadGeneration == generation else { return }
             let (nodeID, url) = pendingSizeTargets.removeFirst()
             guard node(for: nodeID) != nil else { continue }
-            guard let bytes = await FileUtils.computeDirectorySizeAsync(at: url) else {
-                return
+            let excluded = excludedCompressStandardizedPaths
+            guard let bytes = await FileUtils.computeDirectorySizeAsync(
+                at: url,
+                excludingStandardizedPaths: excluded
+            ) else {
+                if Task.isCancelled || loadGeneration != generation {
+                    return
+                }
+                continue
             }
             guard !Task.isCancelled, loadGeneration == generation else { return }
             updateNodeSize(id: nodeID, bytes: bytes)
@@ -328,19 +347,28 @@ extension AppState {
     public func removeEntries(at offsets: IndexSet) {
         guard mode != .browseArchive else { return }
         let ids = Set(offsets.compactMap { rootNodes.indices.contains($0) ? rootNodes[$0].id : nil })
-        removeRootNodes(matching: ids)
+        let resizeTargets = removeNodesInTree(matching: ids)
+        if !resizeTargets.isEmpty {
+            enqueueSizeCalculation(for: resizeTargets, generation: loadGeneration)
+        }
     }
 
     public func removeSelectedEntries() {
         guard mode != .browseArchive else { return }
         let ids = selectedEntryIDs
-        removeRootNodes(matching: ids)
+        let resizeTargets = removeNodesInTree(matching: ids)
         selectedEntryIDs.removeAll()
+        if !resizeTargets.isEmpty {
+            enqueueSizeCalculation(for: resizeTargets, generation: loadGeneration)
+        }
     }
 
     public func removeNodes(_ nodes: [FileNode]) {
         guard mode != .browseArchive, !nodes.isEmpty else { return }
-        removeRootNodes(matching: Set(nodes.map(\.id)))
+        let resizeTargets = removeNodesInTree(matching: Set(nodes.map(\.id)))
+        if !resizeTargets.isEmpty {
+            enqueueSizeCalculation(for: resizeTargets, generation: loadGeneration)
+        }
     }
 
     // MARK: - Drop Routing

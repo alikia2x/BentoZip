@@ -546,7 +546,62 @@ struct AppStateTests {
 
         try await Task.sleep(for: .milliseconds(50))
         #expect(!appState.isLoading)
+        #expect(!appState.isCalculatingSizes)
         #expect(appState.rootNodes.isEmpty)
         #expect(appState.mode == .empty)
+    }
+
+    @Test func removeSelectedEntries_removesTopLevelAndNestedNodesAndTracksExclusions() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let rootFolder = dir.appendingPathComponent("Project")
+        let nestedDir = rootFolder.appendingPathComponent("Logs")
+        try fm.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+
+        let keepFile = rootFolder.appendingPathComponent("keep.txt")
+        let dropFile = rootFolder.appendingPathComponent("drop.txt")
+        let logFile = nestedDir.appendingPathComponent("debug.log")
+        let extraRoot = dir.appendingPathComponent("standalone.txt")
+        try Data(repeating: 0x41, count: 100).write(to: keepFile)
+        try Data(repeating: 0x42, count: 250).write(to: dropFile)
+        try Data(repeating: 0x43, count: 400).write(to: logFile)
+        try Data(repeating: 0x44, count: 50).write(to: extraRoot)
+
+        let appState = AppState()
+        await appState.loadFilesAsync(from: [rootFolder, extraRoot])
+        #expect(appState.totalSize == 800)
+
+        let projectNode = try #require(appState.rootNodes.first(where: { $0.name == "Project" }))
+        let standaloneNode = try #require(appState.rootNodes.first(where: { $0.name == "standalone.txt" }))
+        await appState.loadChildrenIfNeededAsync(for: projectNode)
+
+        let dropNode = try #require(projectNode.children?.first(where: { $0.name == "drop.txt" }))
+        let logsNode = try #require(projectNode.children?.first(where: { $0.name == "Logs" }))
+
+        // Removing a nested file updates children, records archive-relative exclusion, and deducts bytes
+        appState.selectedEntryIDs = [dropNode.id]
+        appState.removeSelectedEntries()
+        #expect(appState.selectedEntryIDs.isEmpty)
+        #expect(projectNode.children?.map(\.name) == ["Logs", "keep.txt"])
+        #expect(appState.excludedCompressRelativePaths.contains("Project/drop.txt"))
+        #expect(appState.totalSize == 550)
+
+        // Removing a nested folder records exclusion and recalculates root folder size asynchronously
+        appState.selectedEntryIDs = [logsNode.id]
+        appState.removeSelectedEntries()
+        #expect(projectNode.children?.map(\.name) == ["keep.txt"])
+        #expect(appState.excludedCompressRelativePaths.contains("Project/Logs"))
+        for _ in 0..<100 {
+            if !appState.isCalculatingSizes && appState.totalSize == 150 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(appState.totalSize == 150)
+
+        // Removing a top-level file removes it from rootNodes cleanly
+        appState.selectedEntryIDs = [standaloneNode.id]
+        appState.removeSelectedEntries()
+        #expect(appState.rootNodes.map(\.name) == ["Project"])
+        #expect(appState.totalSize == 100)
     }
 }

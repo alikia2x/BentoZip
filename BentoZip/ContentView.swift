@@ -84,7 +84,12 @@ struct ContentView: View {
         .navigationSubtitle(windowSubtitle)
         .toolbarBackground(appState.mode == .empty ? .hidden : .automatic, for: .windowToolbar)
         .toolbar {
-            ToolbarCommands(showDeleteConfirmation: $showToolbarDeleteConfirmation)
+            ToolbarCommands(
+                showDeleteConfirmation: $showToolbarDeleteConfirmation,
+                selectedCount: appState.selectedNodes.count,
+                isLoading: appState.isLoading,
+                hasRootItems: !appState.rootNodes.isEmpty
+            )
         }
         .disabled(progressState.isOperationInProgress)
         .onOpenURL { url in

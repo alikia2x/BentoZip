@@ -50,9 +50,7 @@ extension FinderOutlineCoordinator {
         let targets = selectedNodes()
         guard !targets.isEmpty else { return }
         if appState.mode == .compress {
-            let removable = targets.filter { $0.parent == nil }
-            guard !removable.isEmpty else { return }
-            appState.removeNodes(removable)
+            appState.removeNodes(targets)
         } else if appState.isWritableArchive {
             onRequestArchiveDelete(targets.map { $0.toFileEntry() })
         }

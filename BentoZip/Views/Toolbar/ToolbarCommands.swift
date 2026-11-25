@@ -7,10 +7,9 @@ struct ToolbarCommands: ToolbarContent {
     @Environment(ProgressState.self) private var progressState
 
     @Binding var showDeleteConfirmation: Bool
-
-    private var hasRemovableCompressSelection: Bool {
-        appState.selectedNodes.contains { $0.parent == nil }
-    }
+    let selectedCount: Int
+    let isLoading: Bool
+    let hasRootItems: Bool
 
     var body: some ToolbarContent {
         if appState.mode != .empty {
@@ -31,7 +30,7 @@ struct ToolbarCommands: ToolbarContent {
                     } label: {
                         Label("Add", systemImage: "plus")
                     }
-                    .disabled(appState.isLoading)
+                    .disabled(isLoading)
                     .help("Add Files or Folders")
 
                     Button {
@@ -39,7 +38,7 @@ struct ToolbarCommands: ToolbarContent {
                     } label: {
                         Label("Remove", systemImage: "trash")
                     }
-                    .disabled(!hasRemovableCompressSelection || appState.isLoading)
+                    .disabled(selectedCount == 0 || isLoading)
                     .help("Remove Selected")
 
                     Button {
@@ -52,7 +51,7 @@ struct ToolbarCommands: ToolbarContent {
                     } label: {
                         Label("Compress", systemImage: "archivebox")
                     }
-                    .disabled(appState.rootNodes.isEmpty || appState.isLoading)
+                    .disabled(!hasRootItems || isLoading)
                     .help("Create Archive")
                 } else if appState.mode == .browseArchive {
                     if appState.isWritableArchive {
@@ -61,7 +60,7 @@ struct ToolbarCommands: ToolbarContent {
                         } label: {
                             Label("Add", systemImage: "plus")
                         }
-                        .disabled(appState.isLoading)
+                        .disabled(isLoading)
                         .help("Add to Archive")
 
                         Button {
@@ -69,7 +68,7 @@ struct ToolbarCommands: ToolbarContent {
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
-                        .disabled(appState.selectedEntryIDs.isEmpty || appState.isLoading)
+                        .disabled(selectedCount == 0 || isLoading)
                         .help("Delete Selected from Archive")
                     }
 
@@ -128,7 +127,7 @@ struct ToolbarCommands: ToolbarContent {
                             )
                         }
                     }
-                    .disabled(appState.isLoading)
+                    .disabled(isLoading)
                     .help("Extract")
                 }
             }

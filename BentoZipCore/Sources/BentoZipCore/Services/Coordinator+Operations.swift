@@ -12,7 +12,12 @@ extension CompressionCoordinator {
               appState.mode == .compress,
               !appState.rootNodes.isEmpty else { return }
 
-        let settings = appState.compressionSettings
+        var settings = appState.compressionSettings
+        if !appState.excludedCompressRelativePaths.isEmpty {
+            let existing = Set(settings.exclusionPatterns)
+            let extra = appState.excludedCompressRelativePaths.sorted().filter { !existing.contains($0) }
+            settings.exclusionPatterns.append(contentsOf: extra)
+        }
         let sourceURLs = appState.rootNodes.map(\.url)
         guard let saveURL = resolveCompressSaveURL(sourceURLs: sourceURLs, settings: settings) else { return }
 

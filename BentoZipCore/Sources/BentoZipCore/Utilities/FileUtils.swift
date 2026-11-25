@@ -29,17 +29,23 @@ enum FileUtils {
     }
 
     /// Compute a directory's total byte size off the main actor without allocating `FileEntry` trees.
-    static func computeDirectorySizeAsync(at url: URL) async -> Int64? {
+    static func computeDirectorySizeAsync(
+        at url: URL,
+        excludingStandardizedPaths excludedPaths: Set<String> = []
+    ) async -> Int64? {
         await Task.detached(priority: .utility) {
-            computeDirectorySizeSync(at: url)
+            computeDirectorySizeSync(at: url, excludingStandardizedPaths: excludedPaths)
         }.value
     }
 
-    private static func computeDirectorySizeSync(at url: URL) -> Int64? {
+    private static func computeDirectorySizeSync(
+        at url: URL,
+        excludingStandardizedPaths excludedPaths: Set<String>
+    ) -> Int64? {
         var total: Int64 = 0
         guard let enumerator = FileManager.default.enumerator(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else {
             return Int64(0)
@@ -49,6 +55,16 @@ enum FileUtils {
             visited &+= 1
             if (visited & 0xFF) == 0, Task.isCancelled {
                 return nil
+            }
+            if !excludedPaths.isEmpty {
+                let standardized = fileURL.standardizedFileURL.path
+                if excludedPaths.contains(standardized) {
+                    let dirValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey])
+                    if dirValues?.isDirectory == true {
+                        enumerator.skipDescendants()
+                    }
+                    continue
+                }
             }
             let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
             if values?.isRegularFile == true {

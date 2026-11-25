@@ -59,14 +59,11 @@ extension FinderOutlineCoordinator {
         }
 
         if appState.mode == .compress {
-            let removable = targets.filter { $0.parent == nil }
-            if !removable.isEmpty {
-                secondaryItems.append(makeMenuItem(
-                    title: String(localized: "Remove"),
-                    action: #selector(contextRemove(_:)),
-                    targets: removable
-                ))
-            }
+            secondaryItems.append(makeMenuItem(
+                title: String(localized: "Remove"),
+                action: #selector(contextRemove(_:)),
+                targets: targets
+            ))
         } else if appState.isWritableArchive {
             secondaryItems.append(makeMenuItem(
                 title: String(localized: "Delete…"),

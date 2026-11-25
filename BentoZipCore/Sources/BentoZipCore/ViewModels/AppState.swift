@@ -21,6 +21,11 @@ public class AppState {
     private var nodesByID: [UUID: FileNode] = [:]
     public var selectedEntryIDs: Set<UUID> = []
     public var isLoading: Bool = false
+    /// Non-blocking background folder byte-size calculation indicator in `.compress` mode.
+    public internal(set) var isCalculatingSizes: Bool = false
+    /// Archive-relative paths (e.g. `Folder/sub/file.txt`) removed from staged local folders in `.compress` mode.
+    public internal(set) var excludedCompressRelativePaths: Set<String> = []
+    var excludedCompressStandardizedPaths: Set<String> = []
 
     // Incremental reload counters for AppKit NSOutlineView without full-table churn
     public struct NodeUpdateEvent: Sendable {
@@ -151,6 +156,8 @@ public class AppState {
     func replaceRootNodes(_ nodes: [FileNode]) {
         rootNodes = nodes
         nodesByID.removeAll(keepingCapacity: true)
+        excludedCompressRelativePaths.removeAll(keepingCapacity: true)
+        excludedCompressStandardizedPaths.removeAll(keepingCapacity: true)
         registerSubtrees(nodes)
         navigationNodeIDs.removeAll { nodesByID[$0] == nil }
         selectedEntryIDs = selectedEntryIDs.filter { nodesByID[$0] != nil }
@@ -183,20 +190,113 @@ public class AppState {
         if recordUpdate { recordNodeUpdate(id: id, reloadChildren: true) }
     }
 
-    func removeRootNodes(matching ids: Set<UUID>) {
-        guard !ids.isEmpty else { return }
-        var removedAny = false
+    /// Removes top-level staged items or nested items inside staged local folders.
+    /// Returns any root directories whose sizes should be recomputed after nested directory removal.
+    @discardableResult
+    func removeNodesInTree(matching ids: Set<UUID>) -> [(id: UUID, url: URL)] {
+        guard !ids.isEmpty else { return [] }
+
+        // Skip descendants whose ancestor is already targeted for removal.
+        let effectiveIDs = Set(ids.filter { id in
+            guard let node = nodesByID[id] else { return false }
+            var ancestor = node.parent
+            while let current = ancestor {
+                if ids.contains(current.id) { return false }
+                ancestor = current.parent
+            }
+            return true
+        })
+        guard !effectiveIDs.isEmpty else { return [] }
+
+        var removedRoot = false
+        var updatedParentIDs: [UUID] = []
+        var updatedParentSet: Set<UUID> = []
+        var rootsNeedingResizing: [UUID: URL] = [:]
+
+        // 1. Remove matching root nodes
+        var removedRootPrefixes: [(relPrefix: String, pathPrefix: String)] = []
         rootNodes.removeAll { node in
-            guard ids.contains(node.id) else { return false }
+            guard effectiveIDs.contains(node.id) else { return false }
+            let rootName = node.url.lastPathComponent
+            let rootPath = node.url.standardizedFileURL.path
+            removedRootPrefixes.append((rootName + "/", rootPath + "/"))
             unregisterSubtree(node)
-            removedAny = true
+            removedRoot = true
             return true
         }
-        guard removedAny else { return }
+
+        if !removedRootPrefixes.isEmpty {
+            excludedCompressRelativePaths = excludedCompressRelativePaths.filter { rel in
+                !removedRootPrefixes.contains { rel.hasPrefix($0.relPrefix) }
+            }
+            excludedCompressStandardizedPaths = excludedCompressStandardizedPaths.filter { path in
+                !removedRootPrefixes.contains { path.hasPrefix($0.pathPrefix) }
+            }
+        }
+
+        // 2. Remove matching nested nodes from their parent and record compress exclusions
+        for id in effectiveIDs {
+            guard let node = nodesByID[id], let parent = node.parent else { continue }
+            var rootAncestor = parent
+            while let next = rootAncestor.parent {
+                rootAncestor = next
+            }
+
+            if !node.isFromArchive {
+                let standardizedNodePath = node.url.standardizedFileURL.path
+                excludedCompressStandardizedPaths.insert(standardizedNodePath)
+                if let archiveRelPath = Self.compressArchiveRelativePath(for: node, under: rootAncestor) {
+                    excludedCompressRelativePaths.insert(archiveRelPath)
+                }
+
+                if node.size > 0 {
+                    let newRootSize = max(0, rootAncestor.size - node.size)
+                    let delta = newRootSize - rootAncestor.size
+                    rootAncestor.size = newRootSize
+                    totalSize = max(0, totalSize + delta)
+                    if !removedRoot {
+                        recordNodeUpdate(id: rootAncestor.id, reloadChildren: false)
+                    }
+                } else if node.isDirectory {
+                    rootsNeedingResizing[rootAncestor.id] = rootAncestor.url
+                }
+            }
+
+            parent.children?.removeAll { $0.id == node.id }
+            unregisterSubtree(node)
+            if updatedParentSet.insert(parent.id).inserted {
+                updatedParentIDs.append(parent.id)
+            }
+        }
+
+        guard removedRoot || !updatedParentIDs.isEmpty else { return [] }
+
+        let oldNavCount = navigationNodeIDs.count
         navigationNodeIDs.removeAll { nodesByID[$0] == nil }
+        let navigationChanged = navigationNodeIDs.count != oldNavCount
         selectedEntryIDs = selectedEntryIDs.filter { nodesByID[$0] != nil }
-        recomputeEntryMetrics()
-        bumpTreeStructureRevision()
+
+        if removedRoot || navigationChanged {
+            recomputeEntryMetrics()
+            bumpTreeStructureRevision()
+        } else {
+            for parentID in updatedParentIDs {
+                recordNodeUpdate(id: parentID, reloadChildren: true)
+            }
+        }
+
+        return rootsNeedingResizing.map { (id: $0.key, url: $0.value) }
+    }
+
+    private static func compressArchiveRelativePath(for node: FileNode, under root: FileNode) -> String? {
+        let rootPath = root.url.standardizedFileURL.path
+        let nodePath = node.url.standardizedFileURL.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        guard nodePath.hasPrefix(prefix) else { return nil }
+        let suffix = String(nodePath.dropFirst(prefix.count))
+        guard !suffix.isEmpty else { return nil }
+        let rootName = root.url.lastPathComponent
+        return rootName.isEmpty ? suffix : "\(rootName)/\(suffix)"
     }
 
     func resolveOrRegisterNode(_ node: FileNode) -> FileNode {

@@ -23,7 +23,7 @@ struct BreadcrumbView: View {
     }
 
     var body: some View {
-        if appState.canNavigateUp || appState.isLoading {
+        if appState.canNavigateUp || appState.isLoading || appState.isCalculatingSizes {
             VStack(spacing: 0) {
                 Divider()
 
@@ -62,7 +62,7 @@ struct BreadcrumbView: View {
 
                     Spacer(minLength: 8)
 
-                    if appState.isLoading {
+                    if appState.isLoading || appState.isCalculatingSizes {
                         ProgressView()
                             .controlSize(.small)
                             .scaleEffect(0.72)
