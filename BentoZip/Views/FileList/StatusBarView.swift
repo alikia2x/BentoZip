@@ -36,8 +36,8 @@ struct StatusBarView: View {
         let selectedNodes = appState.selectedNodes
         if !selectedNodes.isEmpty {
             let selectedSize = Self.byteFormatter.string(fromByteCount: selectedNodesSize)
-            let displayedIDs = Set(displayedNodes.map(\.id))
-            let allSelectedAreTopLevel = selectedNodes.allSatisfy { displayedIDs.contains($0.id) }
+            let currentNavID = appState.navigationNodeIDs.last
+            let allSelectedAreTopLevel = selectedNodes.allSatisfy { $0.parent?.id == currentNavID }
             if allSelectedAreTopLevel {
                 return String(localized: "\(selectedNodes.count) of \(displayedCount) selected, \(selectedSize)")
             }

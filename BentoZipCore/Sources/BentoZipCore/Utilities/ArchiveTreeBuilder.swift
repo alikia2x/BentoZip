@@ -82,17 +82,17 @@ public enum ArchiveTreeBuilder {
                 continue
             }
 
-            var components = normalized.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-            guard !components.contains("..") else { continue }
-            while components.first == "." {
-                components.removeFirst()
+            var components: [String] = []
+            var hasUnsafeSegment = false
+            for segment in normalized.split(separator: "/", omittingEmptySubsequences: true) {
+                if segment == ".." {
+                    hasUnsafeSegment = true
+                    break
+                }
+                if segment == "." { continue }
+                components.append(String(segment))
             }
-            guard !components.isEmpty else { continue }
-
-            let candidateRootURL = URL(fileURLWithPath: "/archive-root/" + components.joined(separator: "/"))
-            guard candidateRootURL.standardizedFileURL.path.hasPrefix("/archive-root/") else {
-                continue
-            }
+            guard !hasUnsafeSegment, !components.isEmpty else { continue }
 
             var current = root
             for i in 0..<(components.count - 1) {

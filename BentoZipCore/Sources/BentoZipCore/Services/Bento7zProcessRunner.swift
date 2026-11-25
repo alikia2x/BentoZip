@@ -176,7 +176,62 @@ struct Bento7zProcessRunner: Sendable {
             else { stderrBuffer.withLock { if $0.count < 65_536 { $0.append(chunk) } } }
         }
 
+        struct StdoutState: @unchecked Sendable {
+            var buffer = Data()
+            var scanOffset = 0
+            var stream = StreamState()
+            var isFinished = false
+            var continuation: CheckedContinuation<Void, Never>?
+        }
+        let stdoutLock = OSAllocatedUnfairLock(initialState: StdoutState())
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+                let pending = stdoutLock.withLock { state -> CheckedContinuation<Void, Never>? in
+                    if !state.buffer.isEmpty,
+                       !controller.isCancelled,
+                       let trailing = String(data: state.buffer, encoding: .utf8) {
+                        Self.handleOutputLine(trailing, state: &state.stream, onProgress: onProgress)
+                    }
+                    state.buffer.removeAll(keepingCapacity: false)
+                    state.isFinished = true
+                    defer { state.continuation = nil }
+                    return state.continuation
+                }
+                pending?.resume()
+                return
+            }
+
+            stdoutLock.withLock { state in
+                guard !controller.isCancelled else { return }
+                state.buffer.append(chunk)
+                let newline = UInt8(ascii: "\n")
+                var lineStart = state.buffer.startIndex
+                var searchIndex = state.buffer.index(lineStart, offsetBy: state.scanOffset, limitedBy: state.buffer.endIndex) ?? state.buffer.endIndex
+
+                while searchIndex < state.buffer.endIndex {
+                    if state.buffer[searchIndex] == newline {
+                        let lineData = state.buffer[lineStart..<searchIndex]
+                        if !lineData.isEmpty, let line = String(data: lineData, encoding: .utf8) {
+                            Self.handleOutputLine(line, state: &state.stream, onProgress: onProgress)
+                        }
+                        lineStart = state.buffer.index(after: searchIndex)
+                        searchIndex = lineStart
+                    } else {
+                        searchIndex = state.buffer.index(after: searchIndex)
+                    }
+                }
+
+                if lineStart > state.buffer.startIndex {
+                    state.buffer.removeSubrange(state.buffer.startIndex..<lineStart)
+                }
+                state.scanOffset = state.buffer.count
+            }
+        }
+
         defer {
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
             stderrPipe.fileHandleForReading.readabilityHandler = nil
             controller.detach()
         }
@@ -189,10 +244,13 @@ struct Bento7zProcessRunner: Sendable {
         try stdinPipe.fileHandleForWriting.write(contentsOf: requestLine)
         try stdinPipe.fileHandleForWriting.close()
 
-        var state = StreamState()
-        for try await line in stdoutPipe.fileHandleForReading.bytes.lines {
-            if Task.isCancelled || controller.isCancelled { break }
-            handleOutputLine(line, state: &state, onProgress: onProgress)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let alreadyFinished = stdoutLock.withLock { state -> Bool in
+                if state.isFinished { return true }
+                state.continuation = continuation
+                return false
+            }
+            if alreadyFinished { continuation.resume() }
         }
 
         let exitStatus: Int32 = await withCheckedContinuation { continuation in
@@ -203,6 +261,8 @@ struct Bento7zProcessRunner: Sendable {
             }
             if let status = alreadyExited { continuation.resume(returning: status) }
         }
+
+        let state = stdoutLock.withLock { $0.stream }
 
         if Task.isCancelled || controller.isCancelled { throw CancellationError() }
         if let errorMessage = state.errorMessage {

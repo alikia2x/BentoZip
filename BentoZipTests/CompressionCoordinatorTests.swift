@@ -722,4 +722,105 @@ struct CompressionCoordinatorTests {
         #expect(!progressState.isOperationInProgress)
         #expect(!manager.hasActiveTasks)
     }
+
+    @Test func browseArchive_switchesModeImmediatelyBeforeAsyncListingCompletes() async throws {
+        struct DelayedListEngine: ArchiveEngine {
+            let entries: [FileEntry]
+            func listEntries(in archiveURL: URL, password: String?) async throws -> [FileEntry] {
+                try await Task.sleep(for: .milliseconds(80))
+                return entries
+            }
+            func extract(archiveURL: URL, entries: [FileEntry]?, to destinationURL: URL, password: String?, onProgress: @escaping @Sendable (ArchiveProgress) -> Void) async throws {}
+            func create(from sourceURLs: [URL], to archiveURL: URL, settings: CompressionSettings, onProgress: @escaping @Sendable (ArchiveProgress) -> Void) async throws {}
+            func removeEntries(from archiveURL: URL, entries: [FileEntry], password: String?) async throws {}
+            func addEntries(to archiveURL: URL, from sourceURLs: [URL], password: String?, onProgress: @escaping @Sendable (ArchiveProgress) -> Void) async throws {}
+        }
+
+        let fakeArchive = URL(fileURLWithPath: "/tmp/huge-test.tar.gz")
+        let sampleEntry = FileEntry(
+            url: URL(fileURLWithPath: "/archive-root/readme.txt"),
+            name: "readme.txt",
+            isDirectory: false,
+            size: 128,
+            isFromArchive: true,
+            archiveRelativePath: "readme.txt"
+        )
+        let coordinator = CompressionCoordinator(engine: DelayedListEngine(entries: [sampleEntry]))
+        let appState = AppState()
+        appState.coordinator = coordinator
+
+        let browseTask = Task {
+            await coordinator.browseArchive(at: fakeArchive, appState: appState)
+        }
+        try await Task.sleep(for: .milliseconds(15))
+
+        // Workspace UI must switch immediately while listing runs in the background
+        #expect(appState.mode == .browseArchive)
+        #expect(appState.sourceArchiveURL == fakeArchive)
+        #expect(appState.isLoading)
+        #expect(appState.rootNodes.isEmpty)
+
+        await browseTask.value
+        #expect(!appState.isLoading)
+        #expect(appState.rootNodes.map(\.name) == ["readme.txt"])
+    }
+
+    @Test func detachWindowProgress_backToHomeDoesNotCancelRunningTransfer() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        struct SlowCreateEngine: ArchiveEngine {
+            func listEntries(in archiveURL: URL, password: String?) async throws -> [FileEntry] { [] }
+            func extract(archiveURL: URL, entries: [FileEntry]?, to destinationURL: URL, password: String?, onProgress: @escaping @Sendable (ArchiveProgress) -> Void) async throws {}
+            func create(from sourceURLs: [URL], to archiveURL: URL, settings: CompressionSettings, onProgress: @escaping @Sendable (ArchiveProgress) -> Void) async throws {
+                for i in 1...100 {
+                    onProgress(ArchiveProgress(
+                        fractionCompleted: Double(i) / 100.0,
+                        currentFile: "file_\(i).txt",
+                        processedBytes: Int64(i * 1024),
+                        totalBytes: 102_400,
+                        isFileEvent: true
+                    ))
+                    if i == 10 {
+                        try await Task.sleep(for: .milliseconds(90))
+                    }
+                }
+                try Data("archive-ok".utf8).write(to: archiveURL)
+            }
+            func removeEntries(from archiveURL: URL, entries: [FileEntry], password: String?) async throws {}
+            func addEntries(to archiveURL: URL, from sourceURLs: [URL], password: String?, onProgress: @escaping @Sendable (ArchiveProgress) -> Void) async throws {}
+        }
+
+        let sourceFile = tmp.appendingPathComponent("payload.txt")
+        try "hello".write(to: sourceFile, atomically: true, encoding: .utf8)
+
+        let manager = TransferManager()
+        let coordinator = CompressionCoordinator(engine: SlowCreateEngine(), transferManager: manager)
+        let appState = AppState()
+        appState.coordinator = coordinator
+        appState.revealInFinderAfterExtract = false
+        await appState.loadFilesAsync(from: [sourceFile])
+        appState.compressionSettings.format = .zip
+        appState.compressionSettings.archiveName = "detached.zip"
+
+        let progressState = ProgressState()
+        let compressTask = Task {
+            await coordinator.compress(appState: appState, progressState: progressState)
+        }
+        try await Task.sleep(for: .milliseconds(25))
+        #expect(manager.hasActiveTasks)
+
+        // Simulate clicking Back (<) in the window toolbar
+        coordinator.detachWindowProgress(progressState)
+        appState.reset()
+        #expect(appState.mode == .empty)
+        #expect(!progressState.isOperationInProgress)
+        #expect(manager.hasActiveTasks)
+
+        // The detached transfer must continue and finish writing the output archive cleanly
+        await compressTask.value
+        let expectedOutput = tmp.appendingPathComponent("detached.zip")
+        #expect(fm.fileExists(atPath: expectedOutput.path))
+        #expect(!manager.hasActiveTasks)
+    }
 }

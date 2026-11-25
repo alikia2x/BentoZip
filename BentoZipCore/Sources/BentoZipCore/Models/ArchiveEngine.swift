@@ -7,19 +7,22 @@ public struct ArchiveProgress: Sendable, Equatable {
     public let processedBytes: Int64?
     public let totalBytes: Int64?
     public let isFileEvent: Bool
+    public let fileCountDelta: Int
 
     public init(
         fractionCompleted: Double,
         currentFile: String? = nil,
         processedBytes: Int64? = nil,
         totalBytes: Int64? = nil,
-        isFileEvent: Bool = false
+        isFileEvent: Bool = false,
+        fileCountDelta: Int? = nil
     ) {
         self.fractionCompleted = fractionCompleted
         self.currentFile = currentFile
         self.processedBytes = processedBytes
         self.totalBytes = totalBytes
         self.isFileEvent = isFileEvent
+        self.fileCountDelta = fileCountDelta ?? (isFileEvent ? 1 : 0)
     }
 }
 

@@ -84,20 +84,12 @@ private struct TransferTaskRowView: View {
                     }
                     .frame(height: 16)
 
-                    // Row 2: Progress bar + constant-slot cancel button (fixed 16pt height at all stages)
+                    // Row 2: Native linear ProgressView + constant-slot cancel button (fixed 16pt height at all stages)
                     HStack(alignment: .center, spacing: 8) {
-                        GeometryReader { proxy in
-                            ZStack(alignment: .leading) {
-                                Capsule()
-                                    .fill(Color.primary.opacity(0.10))
-
-                                Capsule()
-                                    .fill(Color.accentColor)
-                                    .frame(width: max(0, proxy.size.width * clampedProgress))
-                                    .animation(.linear(duration: 0.08), value: clampedProgress)
-                            }
-                        }
-                        .frame(height: 5)
+                        ProgressView(value: clampedProgress, total: 1.0)
+                            .progressViewStyle(.linear)
+                            .labelsHidden()
+                            .controlSize(.small)
 
                         Button {
                             task.cancel()
@@ -128,14 +120,13 @@ private struct TransferTaskRowView: View {
                         Spacer(minLength: 4)
 
                         Button {
-                            withAnimation(.easeInOut(duration: 0.16)) {
-                                isExpanded.toggle()
-                            }
+                            isExpanded.toggle()
                         } label: {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                                .animation(.easeInOut(duration: 0.14), value: isExpanded)
                                 .frame(width: 16, height: 16)
                                 .contentShape(Rectangle())
                         }
@@ -154,7 +145,6 @@ private struct TransferTaskRowView: View {
                     .padding(.bottom, 8)
 
                 detailsGrid
-                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 14)

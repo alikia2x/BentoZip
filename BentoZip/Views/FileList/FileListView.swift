@@ -23,11 +23,23 @@ struct FileListView: View {
             showDeleteConfirmation = true
         }
         .overlay {
-            if appState.displayedNodes.isEmpty && !appState.isLoading {
-                Text("Empty Folder")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
+            if appState.displayedNodes.isEmpty {
+                if appState.isLoading {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.regular)
+
+                        Text(appState.mode == .browseArchive ? String(localized: "Reading archive…") : String(localized: "Loading…"))
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                    }
                     .allowsHitTesting(false)
+                } else {
+                    Text("Empty Folder")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .confirmationDialog(

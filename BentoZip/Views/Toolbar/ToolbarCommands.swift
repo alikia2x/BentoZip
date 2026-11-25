@@ -18,7 +18,7 @@ struct ToolbarCommands: ToolbarContent {
         if appState.mode != .empty {
             ToolbarItem(placement: .navigation) {
                 Button {
-                    appState.coordinator.cancelOperation(progressState: progressState)
+                    appState.coordinator.detachWindowProgress(progressState)
                     appState.reset()
                 } label: {
                     Label("Home", systemImage: "chevron.backward")

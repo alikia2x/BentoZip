@@ -33,43 +33,61 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         }
 
         let result = try await runner.execute(command: "list", params: params)
+        try Task.checkCancellation()
 
-        guard let items = result["items"] as? [[String: Any]] else {
-            throw Bento7zError.invalidResponse(String(localized: "Missing items field in list response", bundle: .module))
+        // Decode large JSON entry arrays and build the sorted hierarchy off the main actor.
+        struct UncheckedResultBox: @unchecked Sendable {
+            let value: [String: Any]
         }
+        let boxedResult = UncheckedResultBox(value: result)
 
-        let archivePackedSize = (result["packed_size"] as? NSNumber)?.int64Value
-
-        var flatEntries: [ArchiveTreeBuilder.FlatEntry] = []
-        flatEntries.reserveCapacity(items.count)
-
-        for item in items {
-            let path = item["path"] as? String ?? ""
-            let name = item["name"] as? String ?? (path as NSString).lastPathComponent
-            let isDir = item["is_dir"] as? Bool ?? false
-            let size = (item["size"] as? NSNumber)?.int64Value ?? 0
-            let packedSize = (item["packed_size"] as? NSNumber)?.int64Value
-            let isEncrypted = item["encrypted"] as? Bool ?? false
-            let modDate: Date?
-            if let timestamp = (item["modified_at"] as? NSNumber)?.doubleValue, timestamp > 0 {
-                modDate = Date(timeIntervalSince1970: timestamp)
-            } else {
-                modDate = nil
+        let decodeTask = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            guard let items = boxedResult.value["items"] as? [[String: Any]] else {
+                throw Bento7zError.invalidResponse(String(localized: "Missing items field in list response", bundle: .module))
             }
 
-            flatEntries.append(ArchiveTreeBuilder.FlatEntry(
-                path: path,
-                name: name,
-                isDirectory: isDir,
-                size: size,
-                packedSize: packedSize,
-                modificationDate: modDate,
-                isEncrypted: isEncrypted
-            ))
+            let archivePackedSize = (boxedResult.value["packed_size"] as? NSNumber)?.int64Value
+
+            var flatEntries: [ArchiveTreeBuilder.FlatEntry] = []
+            flatEntries.reserveCapacity(items.count)
+
+            for (index, item) in items.enumerated() {
+                if (index & 0x3FF) == 0 { try Task.checkCancellation() }
+                let path = item["path"] as? String ?? ""
+                let name = item["name"] as? String ?? (path as NSString).lastPathComponent
+                let isDir = item["is_dir"] as? Bool ?? false
+                let size = (item["size"] as? NSNumber)?.int64Value ?? 0
+                let packedSize = (item["packed_size"] as? NSNumber)?.int64Value
+                let isEncrypted = item["encrypted"] as? Bool ?? false
+                let modDate: Date?
+                if let timestamp = (item["modified_at"] as? NSNumber)?.doubleValue, timestamp > 0 {
+                    modDate = Date(timeIntervalSince1970: timestamp)
+                } else {
+                    modDate = nil
+                }
+
+                flatEntries.append(ArchiveTreeBuilder.FlatEntry(
+                    path: path,
+                    name: name,
+                    isDirectory: isDir,
+                    size: size,
+                    packedSize: packedSize,
+                    modificationDate: modDate,
+                    isEncrypted: isEncrypted
+                ))
+            }
+
+            try Task.checkCancellation()
+            let tree = ArchiveTreeBuilder.build(from: flatEntries)
+            return ArchiveListResult(entries: tree, archivePackedSize: archivePackedSize)
         }
 
-        let tree = ArchiveTreeBuilder.build(from: flatEntries)
-        return ArchiveListResult(entries: tree, archivePackedSize: archivePackedSize)
+        return try await withTaskCancellationHandler {
+            try await decodeTask.value
+        } onCancel: {
+            decodeTask.cancel()
+        }
     }
 
     public func extract(

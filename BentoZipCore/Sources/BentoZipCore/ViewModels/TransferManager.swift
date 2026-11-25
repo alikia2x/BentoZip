@@ -84,7 +84,9 @@ public final class TransferTask: Identifiable {
         if let file = update.currentFile, !file.isEmpty {
             currentFileName = (file as NSString).lastPathComponent
         }
-        if update.isFileEvent {
+        if update.fileCountDelta > 0 {
+            processedFiles += update.fileCountDelta
+        } else if update.isFileEvent {
             processedFiles += 1
         }
         if let total = update.totalBytes, total > 0 {

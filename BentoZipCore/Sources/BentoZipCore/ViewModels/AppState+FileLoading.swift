@@ -4,9 +4,11 @@ extension AppState {
 
     // MARK: - Background Task Lifecycle
 
-    /// Cancel all in-flight background loading, sizing, child-enumeration, and recent-archive tasks.
+    /// Cancel all in-flight window-local background loading, sizing, child-enumeration, browse-listing, and recent-archive tasks.
+    /// Does NOT cancel running transfer tasks (compress/extract/mutate) managed by `TransferManager`.
     public func cancelBackgroundTasks() {
         _ = cancelLoadAndSizingTasks()
+        coordinator.cancelBrowse()
         recentValidationTask?.cancel()
         recentValidationTask = nil
         isLoading = false
@@ -76,6 +78,9 @@ extension AppState {
         archivePackedSize = nil
         archivePassword = nil
         cancelPasswordPrompt()
+        replaceRootNodes([])
+        mode = .compress
+        showInspector = true
         isLoading = true
 
         let shallowEntries = await FileUtils.buildShallowEntriesAsync(from: urls)
@@ -86,8 +91,6 @@ extension AppState {
         let nodes = shallowEntries.map { FileNode(entry: $0) }
         let directoryTargets = nodes.filter(\.isDirectory).map { ($0.id, $0.url) }
         replaceRootNodes(nodes)
-        mode = .compress
-        showInspector = true
         isLoading = false
 
         if !directoryTargets.isEmpty {

@@ -23,7 +23,7 @@ final class TransferWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = String(localized: "Progress")
+        window.title = String(localized: "Tasks")
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
         window.isMovableByWindowBackground = true
@@ -97,9 +97,8 @@ final class TransferWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - NSWindowDelegate
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if transferManager.hasActiveTasks {
-            transferManager.cancelAll()
-        }
-        return true
+        // Closing the Tasks window hides it without interrupting running tasks;
+        // users can reopen it via Window > Tasks or cancel individual tasks explicitly.
+        true
     }
 }

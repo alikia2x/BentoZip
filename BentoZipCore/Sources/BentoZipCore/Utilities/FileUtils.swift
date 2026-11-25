@@ -51,25 +51,26 @@ enum FileUtils {
             return Int64(0)
         }
         var visited = 0
-        for case let fileURL as URL in enumerator {
+        while let fileURL = autoreleasepool(invoking: { enumerator.nextObject() as? URL }) {
             visited &+= 1
             if (visited & 0xFF) == 0, Task.isCancelled {
                 return nil
             }
-            if !excludedPaths.isEmpty {
-                let standardized = fileURL.standardizedFileURL.path
-                if excludedPaths.contains(standardized) {
-                    let dirValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey])
-                    if dirValues?.isDirectory == true {
-                        enumerator.skipDescendants()
+            let fileBytes: Int64 = autoreleasepool {
+                if !excludedPaths.isEmpty {
+                    let standardized = fileURL.standardizedFileURL.path
+                    if excludedPaths.contains(standardized) {
+                        let dirValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey])
+                        if dirValues?.isDirectory == true {
+                            enumerator.skipDescendants()
+                        }
+                        return 0
                     }
-                    continue
                 }
+                let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                return values?.isRegularFile == true ? Int64(values?.fileSize ?? 0) : 0
             }
-            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-            if values?.isRegularFile == true {
-                total += Int64(values?.fileSize ?? 0)
-            }
+            total += fileBytes
         }
         return Task.isCancelled ? nil : total
     }

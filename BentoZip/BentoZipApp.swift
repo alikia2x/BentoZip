@@ -76,7 +76,7 @@ struct BentoZipApp: App {
 
             CommandGroup(after: .windowList) {
                 Divider()
-                Button("Progress") {
+                Button("Tasks") {
                     TransferWindowController.shared.showProgressWindow(makeKey: true)
                 }
                 .keyboardShortcut("p", modifiers: [.command, .option])
