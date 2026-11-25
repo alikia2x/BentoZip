@@ -4,3 +4,11 @@
 DerivedData/
 xcuserdata/
 *.xcuserstate
+engine/bento7z/build/
+engine/bento7z/build-*/
+website/node_modules/
+website/dist/
+website/.astro/
+dist/
+artifacts/
+build/

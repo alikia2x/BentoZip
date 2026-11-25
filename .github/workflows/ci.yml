@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Build and test macOS app
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache bento7z dependencies
+        uses: actions/cache@v4
+        with:
+          path: engine/bento7z/build/_deps
+          key: bento7z-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/bento7z/CMakeLists.txt') }}
+
+      - name: Build bento7z engine
+        run: ./scripts/build-engine.sh
+
+      - name: Check for prohibited middle dot characters
+        run: |
+          if grep -rn "·" BentoZip/ BentoZipCore/; then
+            echo "::error::Found prohibited middle dot character (·) in source files"
+            exit 1
+          fi
+
+      - name: Build BentoZipCore Swift package
+        run: cd BentoZipCore && swift build -Xswiftc -warnings-as-errors
+
+      - name: Build BentoZip app
+        run: xcodebuild -project BentoZip.xcodeproj -scheme BentoZip -configuration Debug build
+
+      - name: Run BentoZip unit tests
+        run: xcodebuild -project BentoZip.xcodeproj -scheme BentoZip -configuration Debug -only-testing:BentoZipTests test
+
+  website:
+    name: Build website
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install website dependencies
+        run: pnpm --dir website install --frozen-lockfile || pnpm --dir website install
+
+      - name: Build website
+        run: pnpm --dir website build

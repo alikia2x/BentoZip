@@ -55,13 +55,26 @@ struct Bento7zProcessRunner: Sendable {
         ].compactMap { $0 }
     }
 
+    private static func repoEngineBuildPath(_ fileName: String) -> String {
+        // #filePath: <repo>/BentoZipCore/Sources/BentoZipCore/Services/Bento7zProcessRunner.swift
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Services
+            .deletingLastPathComponent() // BentoZipCore
+            .deletingLastPathComponent() // Sources
+            .deletingLastPathComponent() // BentoZipCore
+            .deletingLastPathComponent() // <repo>
+        return repoRoot
+            .appendingPathComponent("engine/bento7z/build/\(fileName)")
+            .path
+    }
+
     static func defaultBinaryPath() -> String {
         let fm = FileManager.default
         if let found = bundledCandidates(resource: "bento7z").first(where: { fm.isExecutableFile(atPath: $0) }) {
             return found
         }
         #if DEBUG
-        return "/Users/alikia/Code/bento7z/build/bento7z"
+        return repoEngineBuildPath("bento7z")
         #else
         return Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/bento7z").path
         #endif
@@ -75,7 +88,7 @@ struct Bento7zProcessRunner: Sendable {
             return found
         }
         #if DEBUG
-        return "/Users/alikia/Code/bento7z/build/7z.so"
+        return repoEngineBuildPath("7z.so")
         #else
         return binaryDir
         #endif

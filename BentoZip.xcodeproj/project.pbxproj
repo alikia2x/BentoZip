@@ -267,8 +267,8 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(PROJECT_DIR)/../bento7z/build/bento7z",
-				"$(PROJECT_DIR)/../bento7z/build/7z.so",
+				"$(PROJECT_DIR)/engine/bento7z/build/bento7z",
+				"$(PROJECT_DIR)/engine/bento7z/build/7z.so",
 			);
 			name = "Bundle bento7z Engine";
 			outputFileListPaths = (
@@ -279,7 +279,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nif [ ! -f \"${SCRIPT_INPUT_FILE_0}\" ] || [ ! -f \"${SCRIPT_INPUT_FILE_1}\" ]; then\n  echo \"error: Missing bento7z engine binaries. Build ../bento7z first (expected ${SCRIPT_INPUT_FILE_0} and ${SCRIPT_INPUT_FILE_1}).\" >&2\n  exit 1\nfi\nSTAGE_DIR=\"${TEMP_DIR}/bento7z_stage\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers\"\nmkdir -p \"${STAGE_DIR}\" \"${DEST_DIR}\"\ncp -f \"${SCRIPT_INPUT_FILE_0}\" \"${STAGE_DIR}/bento7z\"\ncp -f \"${SCRIPT_INPUT_FILE_1}\" \"${STAGE_DIR}/7z.so\"\nchmod 755 \"${STAGE_DIR}/bento7z\" \"${STAGE_DIR}/7z.so\"\nSIGN_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\n/usr/bin/codesign --force --sign \"${SIGN_IDENTITY}\" --timestamp=none \"${STAGE_DIR}/7z.so\"\n/usr/bin/codesign --force --sign \"${SIGN_IDENTITY}\" --timestamp=none \"${STAGE_DIR}/bento7z\"\ncp -fp \"${STAGE_DIR}/bento7z\" \"${SCRIPT_OUTPUT_FILE_0}\"\ncp -fp \"${STAGE_DIR}/7z.so\" \"${SCRIPT_OUTPUT_FILE_1}\"\n";
+			shellScript = "set -e\nif [ ! -f \"${SCRIPT_INPUT_FILE_0}\" ] || [ ! -f \"${SCRIPT_INPUT_FILE_1}\" ]; then\n  echo \"error: Missing bento7z engine binaries. Run ./scripts/build-engine.sh first (expected ${SCRIPT_INPUT_FILE_0} and ${SCRIPT_INPUT_FILE_1}).\" >&2\n  exit 1\nfi\nSTAGE_DIR=\"${TEMP_DIR}/bento7z_stage\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers\"\nmkdir -p \"${STAGE_DIR}\" \"${DEST_DIR}\"\ncp -f \"${SCRIPT_INPUT_FILE_0}\" \"${STAGE_DIR}/bento7z\"\ncp -f \"${SCRIPT_INPUT_FILE_1}\" \"${STAGE_DIR}/7z.so\"\nchmod 755 \"${STAGE_DIR}/bento7z\" \"${STAGE_DIR}/7z.so\"\nSIGN_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\nif [ -n \"${SIGN_IDENTITY}\" ] && [ \"${SIGN_IDENTITY}\" != \"-\" ]; then\n  /usr/bin/codesign --force --options runtime --timestamp --sign \"${SIGN_IDENTITY}\" \"${STAGE_DIR}/7z.so\"\n  /usr/bin/codesign --force --options runtime --timestamp --sign \"${SIGN_IDENTITY}\" \"${STAGE_DIR}/bento7z\"\nelse\n  /usr/bin/codesign --force --sign \"-\" --timestamp=none \"${STAGE_DIR}/7z.so\"\n  /usr/bin/codesign --force --sign \"-\" --timestamp=none \"${STAGE_DIR}/bento7z\"\nfi\ncp -fp \"${STAGE_DIR}/bento7z\" \"${SCRIPT_OUTPUT_FILE_0}\"\ncp -fp \"${STAGE_DIR}/7z.so\" \"${SCRIPT_OUTPUT_FILE_1}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -449,6 +449,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -483,6 +484,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;

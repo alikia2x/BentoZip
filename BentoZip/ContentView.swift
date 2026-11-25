@@ -50,7 +50,7 @@ struct ContentView: View {
             case .empty:
                 EmptyStateView()
             case .compress, .browseArchive:
-                workspaceView
+                workspaceView(showInspector: $appState.showInspector)
             }
         }
         .background(
@@ -116,58 +116,50 @@ struct ContentView: View {
         }
     }
 
-    private var workspaceView: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                FileListView()
-                BreadcrumbView()
-                StatusBarView()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .dropDestination(for: URL.self) { items, _ in
-                guard !items.isEmpty, canAcceptFileDrop else { return false }
-                if appState.mode == .compress {
-                    appState.addEntries(from: items)
-                    return true
-                } else if appState.isWritableArchive {
-                    Task {
-                        await appState.coordinator.addEntries(
-                            appState: appState,
-                            urls: items,
-                            progressState: progressState
-                        )
-                    }
-                    return true
+    private func workspaceView(showInspector: Binding<Bool>) -> some View {
+        VStack(spacing: 0) {
+            FileListView()
+            BreadcrumbView()
+            StatusBarView()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .dropDestination(for: URL.self) { items, _ in
+            guard !items.isEmpty, canAcceptFileDrop else { return false }
+            if appState.mode == .compress {
+                appState.addEntries(from: items)
+                return true
+            } else if appState.isWritableArchive {
+                Task {
+                    await appState.coordinator.addEntries(
+                        appState: appState,
+                        urls: items,
+                        progressState: progressState
+                    )
                 }
-                return false
-            } isTargeted: { targeted in
-                isTargeted = targeted && canAcceptFileDrop
+                return true
             }
-            .overlay {
-                if isTargeted && canAcceptFileDrop {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.05))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 2)
-                        )
-                        .padding(6)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
-                }
-            }
-            .animation(.easeOut(duration: 0.14), value: isTargeted)
-
-            if appState.showInspector {
-                Divider()
-                    .ignoresSafeArea(edges: .top)
-
-                CompressionSettingsView()
-                    .frame(width: 268)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            return false
+        } isTargeted: { targeted in
+            isTargeted = targeted && canAcceptFileDrop
+        }
+        .overlay {
+            if isTargeted && canAcceptFileDrop {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 2)
+                    )
+                    .padding(6)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
         }
-        .clipped()
+        .animation(.easeOut(duration: 0.14), value: isTargeted)
+        .inspector(isPresented: showInspector) {
+            CompressionSettingsView()
+                .inspectorColumnWidth(min: 240, ideal: 272, max: 400)
+        }
     }
 }
