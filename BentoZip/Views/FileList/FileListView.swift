@@ -1,3 +1,4 @@
+import AppKit
 import BentoZipCore
 import SwiftUI
 
@@ -41,44 +42,7 @@ struct FileListView: View {
         .overlay {
             if appState.displayedNodes.isEmpty {
                 if appState.isLoading {
-                    VStack(spacing: 10) {
-                        Text(loadingStageTitle)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(.primary)
-
-                        if let progress = appState.browseProgress {
-                            ProgressView(value: progress, total: 1.0)
-                                .progressViewStyle(.linear)
-                                .labelsHidden()
-                                .controlSize(.small)
-                                .frame(width: 220)
-
-                            HStack(spacing: 10) {
-                                Text("\(Int((progress * 100).rounded()))%")
-                                if appState.browseTotalBytes > 0 {
-                                    Text("\(Self.byteFormatter.string(fromByteCount: appState.browseProcessedBytes)) / \(Self.byteFormatter.string(fromByteCount: appState.browseTotalBytes))")
-                                } else if appState.browseProcessedBytes > 0 {
-                                    Text(Self.byteFormatter.string(fromByteCount: appState.browseProcessedBytes))
-                                }
-                            }
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        } else {
-                            ProgressView()
-                                .controlSize(.regular)
-                        }
-
-                        if appState.mode == .browseArchive {
-                            Button("Cancel") {
-                                appState.reset()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .padding(.top, 2)
-                        }
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 18)
+                    loadingOverlay
                 } else {
                     Text("Empty Folder")
                         .font(.system(size: 13))
@@ -109,5 +73,97 @@ struct FileListView: View {
         } message: {
             Text("This modifies the archive and cannot be undone.")
         }
+    }
+
+    private var loadingOverlay: some View {
+        ZStack {
+            Color(nsColor: .controlBackgroundColor)
+
+            VStack(spacing: 10) {
+                if appState.mode == .browseArchive, let archiveURL = appState.sourceArchiveURL {
+                    Image(nsImage: FileIconCache.icon(forFileAt: archiveURL.path))
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 48, height: 48)
+                        .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+
+                    Text(archiveURL.lastPathComponent)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 300)
+                }
+
+                if let progress = appState.browseProgress {
+                    VStack(spacing: 6) {
+                        ProgressView(value: progress, total: 1.0)
+                            .progressViewStyle(.linear)
+                            .labelsHidden()
+                            .controlSize(.small)
+
+                        HStack(spacing: 8) {
+                            Text(loadingStageTitle)
+                                .lineLimit(1)
+
+                            Spacer(minLength: 8)
+
+                            Text(determinateDetailText(progress: progress))
+                                .monospacedDigit()
+                                .fixedSize()
+                        }
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    }
+                    .frame(width: 248)
+                    .padding(.top, 2)
+                } else {
+                    HStack(spacing: 7) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.85)
+
+                        Text(indeterminateStatusText)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+
+                if appState.mode == .browseArchive {
+                    Button("Cancel") {
+                        appState.reset()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .keyboardShortcut(.cancelAction)
+                    .padding(.top, 6)
+                }
+            }
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func determinateDetailText(progress: Double) -> String {
+        let pct = "\(Int((progress * 100).rounded()))%"
+        if appState.browseTotalBytes > 0 {
+            let done = Self.byteFormatter.string(fromByteCount: appState.browseProcessedBytes)
+            let total = Self.byteFormatter.string(fromByteCount: appState.browseTotalBytes)
+            return "\(pct)  \(done) / \(total)"
+        }
+        if appState.browseProcessedBytes > 0 {
+            let done = Self.byteFormatter.string(fromByteCount: appState.browseProcessedBytes)
+            return "\(pct)  \(done)"
+        }
+        return pct
+    }
+
+    private var indeterminateStatusText: String {
+        if appState.browseProcessedBytes > 0 {
+            let done = Self.byteFormatter.string(fromByteCount: appState.browseProcessedBytes)
+            return "\(loadingStageTitle) \(done)"
+        }
+        return loadingStageTitle
     }
 }
