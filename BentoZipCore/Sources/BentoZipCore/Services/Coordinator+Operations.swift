@@ -191,6 +191,7 @@ extension CompressionCoordinator {
             do {
                 try await self.engine.addEntries(to: archiveURL, from: urls, password: password, onProgress: context.progressHandler)
                 DragDropManager.shared.invalidateCache(for: archiveURL)
+                ArchiveCacheManager.shared.invalidate(for: archiveURL)
                 try Task.checkCancellation()
                 try await self.refreshArchiveContentsIfStillViewing(at: archiveURL, password: password, into: appState)
                 appState.lastError = nil
@@ -228,6 +229,7 @@ extension CompressionCoordinator {
             do {
                 try await self.engine.removeEntries(from: archiveURL, entries: entries, password: password)
                 DragDropManager.shared.invalidateCache(for: archiveURL)
+                ArchiveCacheManager.shared.invalidate(for: archiveURL)
                 try Task.checkCancellation()
                 if !FileManager.default.fileExists(atPath: archiveURL.path) {
                     if appState.sourceArchiveURL?.standardizedFileURL == archiveURL.standardizedFileURL {

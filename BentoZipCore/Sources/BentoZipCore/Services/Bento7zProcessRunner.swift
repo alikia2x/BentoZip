@@ -308,6 +308,9 @@ struct Bento7zProcessRunner: Sendable {
             guard let data = json["data"] as? [String: Any] else { return }
             let processed = (data["processed_bytes"] as? NSNumber)?.int64Value
             let total = (data["total_bytes"] as? NSNumber)?.int64Value
+            let filesDelta = (data["files_delta"] as? NSNumber)?.intValue ?? 0
+            let rawStage = (data["stage"] as? NSNumber)?.uint8Value ?? 0
+            let stage = ArchiveProgress.Stage(rawValue: rawStage) ?? .normal
             if let processed { state.lastProcessedBytes = processed }
             if let total, total > 0 { state.lastTotalBytes = total }
             if let currentFile = data["current_file"] as? String, !currentFile.isEmpty {
@@ -321,7 +324,9 @@ struct Bento7zProcessRunner: Sendable {
                 currentFile: state.lastCurrentFile,
                 processedBytes: state.lastProcessedBytes,
                 totalBytes: state.lastTotalBytes,
-                isFileEvent: false
+                isFileEvent: filesDelta > 0,
+                fileCountDelta: filesDelta,
+                stage: stage
             ))
         case "file":
             let data = json["data"] as? [String: Any]

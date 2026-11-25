@@ -27,7 +27,7 @@ The app has three modes (`ArchiveMode`) controlled by `AppState.mode`:
 
 ```
 CompressionCoordinator
-  └── Bento7zEngine (JSONL subprocess client for bundled `bento7z` + `7z.so`)
+  └── Bento7zEngine (full-async binary Unix-socket client for bundled `bento7z --server` + ARM64 `7z.so`, with JSONL stdio fallback)
 
 All engines conform to ArchiveEngine protocol:
   listArchive(), listEntries(), extract(), create(), removeEntries(), addEntries()
@@ -38,7 +38,7 @@ All engines conform to ArchiveEngine protocol:
 1. **Single-source-of-truth `FileNode` tree**: `FileNode` (`@MainActor final class`) holds `parent`/`children` references for O(1) incremental updates (background folder sizing and lazy 1-level directory expansion) and directly backs `NSOutlineView`. `ArchiveTreeBuilder` converts flat archive listings into hierarchical `FileEntry` trees while rejecting path traversal segments, which `AppState` materializes into `FileNode`s.
 2. **Native Finder `NSOutlineView` file list**: `FinderOutlineView` + `FinderOutlineCoordinator` render both `.compress` and `.browseArchive` modes in a single unified outline view (toggling only `Packed` column visibility), with native blue selection, arrow/type-ahead navigation, responder-chain `QLPreviewPanelController` Quick Look, native drag-in, and `NSFilePromiseProvider` drag-out.
 3. **Single top-directory unwrapping**: Archives with a single top-level directory can automatically unwrap it when configured (`AppPreferences.unwrapSingleTopDirectory`).
-4. **Atomic archive mutations**: `removeEntries` and `addEntries` use extract-then-rebuild with atomic file replacement, rollback on failure, and `DragDropManager` cache invalidation.
+4. **Native in-place mutations & persistent disk cache**: ZIP, 7z, and TAR additions/deletions run natively in-place via `bento7z` (`BitArchiveEditor`), falling back to atomic extract-rebuild only for compound `.tar.*` / solid archives. Non-encrypted compound `.tar.gz`/`.tar.bz2`/`.tar.xz` archives cache their unwrapped `.tar` under `~/Library/Caches` (`ArchiveCacheManager`) with configurable LRU quota, staleness validation, and real outer-stream progress reporting.
 5. **Bundled `bento7z` helper**: `bento7z` and `7z.so` from the sibling `../bento7z/build/` project are copied and code-signed into `BentoZip.app/Contents/Helpers/` during the Xcode build phase.
 6. **Standalone macOS Progress window**: Operations register `TransferTask`s in `TransferManager.shared`, automatically opening `TransferWindowController`'s standalone native window (stacking concurrent tasks from multiple windows without blocking document browsing, with an expandable 7-Zip-style statistics drawer per task) and auto-closing when all tasks finish.
 

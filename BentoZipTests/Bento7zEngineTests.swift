@@ -545,4 +545,126 @@ struct Bento7zEngineTests {
             }
         }
     }
+
+    @Test func archiveCacheManager_persistsInvalidatesStaleAndSkipsEncrypted() throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let cacheDir = dir.appendingPathComponent("Cache")
+        let cache = ArchiveCacheManager(directory: cacheDir, maxCacheMB: 16)
+
+        let tarGz = dir.appendingPathComponent("sample.tar.gz")
+        try Data(repeating: 0x1F, count: 1024).write(to: tarGz)
+
+        // Encrypted archives must never be cached on disk
+        #expect(cache.tarCacheURL(for: tarGz, isEncrypted: true) == nil)
+
+        // Non-compound ZIP must not use tar cache
+        let zipFile = dir.appendingPathComponent("sample.zip")
+        try Data([0x50, 0x4B, 0x05, 0x06]).write(to: zipFile)
+        #expect(cache.tarCacheURL(for: zipFile, isEncrypted: false) == nil)
+
+        // Compound tar.gz gets a deterministic cache path and tracks disk usage
+        let cacheURL = try #require(cache.tarCacheURL(for: tarGz, isEncrypted: false))
+        try Data(repeating: 0xAA, count: 4096).write(to: cacheURL)
+        cache.recordMaterializedTar(for: tarGz, at: cacheURL)
+        #expect(cache.stats().entryCount == 1)
+        #expect(cache.stats().totalBytes == 4096)
+
+        // Modifying the source archive invalidates the old cache entry
+        try Data(repeating: 0x2F, count: 2048).write(to: tarGz)
+        let refreshedURL = try #require(cache.tarCacheURL(for: tarGz, isEncrypted: false))
+        #expect(refreshedURL != cacheURL)
+        #expect(!fm.fileExists(atPath: cacheURL.path))
+
+        cache.clearCache()
+        #expect(cache.stats().entryCount == 0)
+        #expect(cache.stats().totalBytes == 0)
+    }
+
+    @Test func binaryServer_compoundTarGzPersistentCacheAndOuterProgress() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let srcDir = dir.appendingPathComponent("Payload")
+        try fm.createDirectory(at: srcDir, withIntermediateDirectories: true)
+        try Data(repeating: 0x41, count: 128 * 1024).write(to: srcDir.appendingPathComponent("a.bin"))
+        try Data(repeating: 0x42, count: 128 * 1024).write(to: srcDir.appendingPathComponent("b.bin"))
+
+        let cache = ArchiveCacheManager(directory: dir.appendingPathComponent("TarCache"), maxCacheMB: 64)
+        let testEngine = Bento7zEngine(cacheManager: cache)
+        let tarGzURL = dir.appendingPathComponent("bundle.tar.gz")
+
+        try await testEngine.create(
+            from: [srcDir],
+            to: tarGzURL,
+            settings: CompressionSettings(format: .tarGz, compressionLevel: .fast)
+        ) { _ in }
+
+        let progressLock = NSLock()
+        var sawUnpackingOuter = false
+        let firstList = try await testEngine.listArchive(in: tarGzURL, password: nil) { update in
+            if update.stage == .unpackingOuter {
+                progressLock.withLock { sawUnpackingOuter = true }
+            }
+        }
+        #expect(firstList.entries.count == 2)
+        #expect(sawUnpackingOuter)
+        #expect(cache.stats().entryCount == 1)
+        #expect(cache.stats().totalBytes > 0)
+
+        // Second open reuses the persistent cached tar without re-decompressing outer stream
+        var sawOuterOnSecondOpen = false
+        let secondList = try await testEngine.listArchive(in: tarGzURL, password: nil) { update in
+            if update.stage == .unpackingOuter {
+                progressLock.withLock { sawOuterOnSecondOpen = true }
+            }
+        }
+        #expect(secondList.entries.count == 2)
+        #expect(!sawOuterOnSecondOpen)
+    }
+
+    @Test func binaryServer_concurrentInteractiveAndInPlaceZip7zMutations() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let fileA = dir.appendingPathComponent("alpha.txt")
+        let fileB = dir.appendingPathComponent("beta.txt")
+        let fileC = dir.appendingPathComponent("gamma.txt")
+        try "alpha-data".write(to: fileA, atomically: true, encoding: .utf8)
+        try "beta-data".write(to: fileB, atomically: true, encoding: .utf8)
+        try "gamma-data".write(to: fileC, atomically: true, encoding: .utf8)
+
+        let testEngine = Bento7zEngine()
+        for format in [ArchiveFormat.zip, ArchiveFormat.sevenZip] {
+            let archiveURL = dir.appendingPathComponent("inplace_\(format.fileExtension).\(format.fileExtension)")
+            try await testEngine.create(
+                from: [fileA, fileB],
+                to: archiveURL,
+                settings: CompressionSettings(format: format, compressionLevel: .fast)
+            ) { _ in }
+
+            // Concurrent interactive requests over the multiplexed binary worker
+            let outAlpha = dir.appendingPathComponent("out_\(format.fileExtension)_alpha.txt")
+            let outBeta = dir.appendingPathComponent("out_\(format.fileExtension)_beta.txt")
+            async let listTask = testEngine.listArchive(in: archiveURL, password: nil)
+            async let extractA: Void = testEngine.extractEntry(from: archiveURL, entryPath: "alpha.txt", to: outAlpha)
+            async let extractB: Void = testEngine.extractEntry(from: archiveURL, entryPath: "beta.txt", to: outBeta)
+            let (listed, _, _) = try await (listTask, extractA, extractB)
+            #expect(Set(listed.entries.map(\.name)) == ["alpha.txt", "beta.txt"])
+            #expect(try String(contentsOf: outAlpha, encoding: .utf8) == "alpha-data")
+            #expect(try String(contentsOf: outBeta, encoding: .utf8) == "beta-data")
+
+            // In-place add
+            try await testEngine.addEntries(to: archiveURL, from: [fileC], password: nil) { _ in }
+            let afterAdd = try await testEngine.listEntries(in: archiveURL)
+            #expect(Set(afterAdd.map(\.name)) == ["alpha.txt", "beta.txt", "gamma.txt"])
+
+            // In-place delete
+            let betaEntry = try #require(afterAdd.first(where: { $0.name == "beta.txt" }))
+            try await testEngine.removeEntries(from: archiveURL, entries: [betaEntry], password: nil)
+            let afterDelete = try await testEngine.listEntries(in: archiveURL)
+            #expect(Set(afterDelete.map(\.name)) == ["alpha.txt", "gamma.txt"])
+        }
+    }
 }

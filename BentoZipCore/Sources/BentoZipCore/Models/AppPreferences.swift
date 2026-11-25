@@ -10,6 +10,7 @@ public final class AppPreferences {
     public var recentArchives: [String] = []
     public var revealInFinderAfterExtract: Bool = true
     public var unwrapSingleTopDirectory: Bool = true
+    public var maxCacheSizeMB: Int = 2048
 
     public init(
         defaultFormat: String = ArchiveFormat.zip.rawValue,
@@ -18,7 +19,8 @@ public final class AppPreferences {
         lastSaveDirectory: String? = nil,
         recentArchives: [String] = [],
         revealInFinderAfterExtract: Bool = true,
-        unwrapSingleTopDirectory: Bool = true
+        unwrapSingleTopDirectory: Bool = true,
+        maxCacheSizeMB: Int = 2048
     ) {
         self.defaultFormat = defaultFormat
         self.defaultCompressionLevel = defaultCompressionLevel
@@ -27,5 +29,6 @@ public final class AppPreferences {
         self.recentArchives = recentArchives
         self.revealInFinderAfterExtract = revealInFinderAfterExtract
         self.unwrapSingleTopDirectory = unwrapSingleTopDirectory
+        self.maxCacheSizeMB = maxCacheSizeMB
     }
 }

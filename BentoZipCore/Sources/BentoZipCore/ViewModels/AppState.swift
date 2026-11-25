@@ -21,6 +21,11 @@ public class AppState {
     private var nodesByID: [UUID: FileNode] = [:]
     public var selectedEntryIDs: Set<UUID> = []
     public var isLoading: Bool = false
+    /// Live browse-loading telemetry when opening large archives (e.g. `.tar.gz` / `.tar.xz` outer stream decompression).
+    public var browseProgress: Double?
+    public var browseStage: ArchiveProgress.Stage = .normal
+    public var browseProcessedBytes: Int64 = 0
+    public var browseTotalBytes: Int64 = 0
     /// Non-blocking background folder byte-size calculation indicator in `.compress` mode.
     public internal(set) var isCalculatingSizes: Bool = false
     /// Archive-relative paths (e.g. `Folder/sub/file.txt`) removed from staged local folders in `.compress` mode.

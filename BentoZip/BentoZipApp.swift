@@ -214,6 +214,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             TransferManager.shared.cancelAll()
+            Bento7zEngine.shutdownInteractiveWorkers()
             DragDropManager.shared.cleanup()
         }
     }

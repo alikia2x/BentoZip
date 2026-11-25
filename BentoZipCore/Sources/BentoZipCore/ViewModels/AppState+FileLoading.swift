@@ -12,6 +12,10 @@ extension AppState {
         recentValidationTask?.cancel()
         recentValidationTask = nil
         isLoading = false
+        browseProgress = nil
+        browseStage = .normal
+        browseProcessedBytes = 0
+        browseTotalBytes = 0
         isCalculatingSizes = false
     }
 

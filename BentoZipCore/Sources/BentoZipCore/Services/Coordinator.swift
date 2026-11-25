@@ -192,11 +192,32 @@ public class CompressionCoordinator {
         appState.archivePackedSize = nil
         appState.clearNavigationAndSelection()
         appState.setEntries([])
+        appState.browseProgress = nil
+        appState.browseStage = .normal
+        appState.browseProcessedBytes = 0
+        appState.browseTotalBytes = 0
         appState.isLoading = true
 
+        let browseCoalescer = ProgressCoalescer(minInterval: .milliseconds(50)) { [weak self, weak appState] update in
+            guard let self, let appState, self.browseGeneration == generation, appState.isLoading else { return }
+            appState.browseStage = update.stage
+            if let processed = update.processedBytes {
+                appState.browseProcessedBytes = processed
+            }
+            if let total = update.totalBytes, total > 0 {
+                appState.browseTotalBytes = total
+                appState.browseProgress = min(max(update.fractionCompleted, 0.0), 1.0)
+            } else if update.fractionCompleted > 0 {
+                appState.browseProgress = min(max(update.fractionCompleted, 0.0), 1.0)
+            }
+        }
+
         let task = Task { @MainActor in
+            defer { browseCoalescer.stop() }
             do {
-                let result = try await engine.listArchive(in: url, password: password)
+                let result = try await engine.listArchive(in: url, password: password) { update in
+                    browseCoalescer.receive(update)
+                }
                 guard !Task.isCancelled, self.browseGeneration == generation else { return }
                 appState.mode = .browseArchive
                 appState.sourceArchiveURL = url
@@ -205,18 +226,28 @@ public class CompressionCoordinator {
                 appState.clearNavigationAndSelection()
                 appState.cancelPasswordPrompt()
                 appState.setEntries(result.entries)
+                appState.browseProgress = nil
+                appState.browseStage = .normal
+                appState.browseProcessedBytes = 0
+                appState.browseTotalBytes = 0
                 appState.isLoading = false
                 appState.preferencesManager?.recordArchive(url.path)
             } catch is CancellationError {
                 if self.browseGeneration == generation {
+                    appState.browseProgress = nil
+                    appState.browseStage = .normal
                     appState.isLoading = false
                 }
             } catch let error as Bento7zError where error == .passwordRequired || error == .wrongPassword {
                 guard !Task.isCancelled, self.browseGeneration == generation else { return }
+                appState.browseProgress = nil
+                appState.browseStage = .normal
                 appState.isLoading = false
                 presentPasswordPrompt(for: url, action: .browse(url), error: error, in: appState)
             } catch {
                 guard !Task.isCancelled, self.browseGeneration == generation else { return }
+                appState.browseProgress = nil
+                appState.browseStage = .normal
                 appState.isLoading = false
                 appState.reset()
                 appState.lastError = String(localized: "Unable to read archive: \(error.localizedDescription)", bundle: .module)

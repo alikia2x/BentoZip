@@ -1,13 +1,20 @@
 import Foundation
 
-/// Detailed progress update emitted by an archive engine during compress/extract operations.
+/// Detailed progress update emitted by an archive engine during compress/extract/browse operations.
 public struct ArchiveProgress: Sendable, Equatable {
+    public enum Stage: UInt8, Sendable, Equatable {
+        case normal = 0
+        case unpackingOuter = 1
+        case readingEntries = 2
+    }
+
     public let fractionCompleted: Double
     public let currentFile: String?
     public let processedBytes: Int64?
     public let totalBytes: Int64?
     public let isFileEvent: Bool
     public let fileCountDelta: Int
+    public let stage: Stage
 
     public init(
         fractionCompleted: Double,
@@ -15,7 +22,8 @@ public struct ArchiveProgress: Sendable, Equatable {
         processedBytes: Int64? = nil,
         totalBytes: Int64? = nil,
         isFileEvent: Bool = false,
-        fileCountDelta: Int? = nil
+        fileCountDelta: Int? = nil,
+        stage: Stage = .normal
     ) {
         self.fractionCompleted = fractionCompleted
         self.currentFile = currentFile
@@ -23,6 +31,7 @@ public struct ArchiveProgress: Sendable, Equatable {
         self.totalBytes = totalBytes
         self.isFileEvent = isFileEvent
         self.fileCountDelta = fileCountDelta ?? (isFileEvent ? 1 : 0)
+        self.stage = stage
     }
 }
 
@@ -42,6 +51,12 @@ public protocol ArchiveEngine: Sendable {
     func listEntries(in archiveURL: URL, password: String?) async throws -> [FileEntry]
 
     func listArchive(in archiveURL: URL, password: String?) async throws -> ArchiveListResult
+
+    func listArchive(
+        in archiveURL: URL,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveListResult
 
     func extract(
         archiveURL: URL,
@@ -76,6 +91,14 @@ public extension ArchiveEngine {
     func listArchive(in archiveURL: URL, password: String?) async throws -> ArchiveListResult {
         let entries = try await listEntries(in: archiveURL, password: password)
         return ArchiveListResult(entries: entries, archivePackedSize: nil)
+    }
+
+    func listArchive(
+        in archiveURL: URL,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveListResult {
+        try await listArchive(in: archiveURL, password: password)
     }
 
     func listArchive(in archiveURL: URL) async throws -> ArchiveListResult {

@@ -157,6 +157,22 @@
       }
     },
     "BentoZip": {},
+    "Cache": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缓存"
+          }
+        }
+      }
+    },
     "Cancel": {
       "localizations": {
         "zh-Hans": {
@@ -183,6 +199,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "清除"
+          }
+        }
+      }
+    },
+    "Clear Cache": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Cache"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除缓存"
           }
         }
       }
@@ -269,12 +301,44 @@
         }
       }
     },
+    "Current Usage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current Usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前占用"
+          }
+        }
+      }
+    },
     "Date Modified": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "修改日期"
+          }
+        }
+      }
+    },
+    "Decompressing archive stream…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decompressing archive stream…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在解压外层数据流…"
           }
         }
       }
@@ -369,6 +433,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "目标位置"
+          }
+        }
+      }
+    },
+    "Disk Cache Limit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disk Cache Limit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁盘缓存上限"
           }
         }
       }
@@ -741,6 +821,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "确定"
+          }
+        }
+      }
+    },
+    "Off": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭"
           }
         }
       }
