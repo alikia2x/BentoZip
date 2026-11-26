@@ -157,9 +157,11 @@ struct ToolbarCommands: ToolbarContent {
                 }
             }
 
+#if compiler(>=6.2)
             if #available(macOS 26.0, *) {
                 ToolbarSpacer(.fixed, placement: .automatic)
             }
+#endif
 
             ToolbarItem(placement: .automatic) {
                 CollapsibleToolbarSearchView(
@@ -170,9 +172,11 @@ struct ToolbarCommands: ToolbarContent {
                 )
             }
 
+#if compiler(>=6.2)
             if #available(macOS 26.0, *) {
                 ToolbarSpacer(.fixed, placement: .automatic)
             }
+#endif
 
             ToolbarItem(placement: .automatic) {
                 Button {
@@ -186,6 +190,7 @@ struct ToolbarCommands: ToolbarContent {
         } else {
             // Keep an invisible placeholder item in `.empty` mode so macOS preserves the same
             // unified toolbar height and traffic-light coordinates as the workspace window.
+#if compiler(>=6.2)
             if #available(macOS 26.0, *) {
                 ToolbarItem(placement: .automatic) {
                     Color.clear
@@ -200,6 +205,13 @@ struct ToolbarCommands: ToolbarContent {
                         .accessibilityHidden(true)
                 }
             }
+#else
+            ToolbarItem(placement: .automatic) {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityHidden(true)
+            }
+#endif
         }
     }
 
