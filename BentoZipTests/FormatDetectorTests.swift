@@ -72,6 +72,15 @@ struct FormatDetectorTests {
         #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "native.aar")) == .aar)
         #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "native.aar")) == .aar)
         #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "native.yaa")) == .aar)
+
+        // Comic book archives map .cbz -> .zip (writable) and .cbr -> .rar (read-only)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "comic.cbz")) == .zip)
+        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "comic.cbz")) == .zip)
+        #expect(FormatDetector.isArchiveFile(URL(fileURLWithPath: "comic.cbz")))
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "comic.cbr")) == .rar)
+        #expect(FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "comic.cbr"))?.isReadOnly == true)
+        #expect(FormatDetector.detectFormat(of: URL(fileURLWithPath: "comic.cbr")) == nil)
+        #expect(FormatDetector.isArchiveFile(URL(fileURLWithPath: "comic.cbr")))
     }
 
     @Test func detectFormat_ignoresDirectoriesNamedLikeArchives() throws {

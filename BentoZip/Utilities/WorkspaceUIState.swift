@@ -8,6 +8,8 @@ import SwiftUI
 final class WorkspaceUIState {
     var showNewFolderSheet: Bool = false
     var showUpdatePasswordSheet: Bool = false
+    var showImageGallery: Bool = false
+    var galleryInitialNodeID: UUID?
     var renameTargetEntry: FileEntry?
     var searchFocusRequestID: UInt64 = 0
     var outlineFocusRequestID: UInt64 = 0

@@ -38,21 +38,27 @@ struct FileListView: View {
                 }
             }
 
-            FinderFileListRepresentable(
-                appState: appState,
-                progressState: progressState,
-                uiState: uiState,
-                mode: appState.mode,
-                sourceArchiveURL: appState.sourceArchiveURL,
-                showInspector: appState.showInspector,
-                treeStructureRevision: appState.treeStructureRevision,
-                nodeUpdateRevision: appState.nodeUpdateRevision,
-                isSearchVisible: appState.isSearchVisible,
-                outlineFocusRequestID: uiState.outlineFocusRequestID,
-                selectedEntryIDs: appState.selectedEntryIDs
-            ) { entries in
-                pendingDeleteEntries = entries
-                showDeleteConfirmation = true
+            Group {
+                if appState.viewMode == .grid {
+                    FinderGridView()
+                } else {
+                    FinderFileListRepresentable(
+                        appState: appState,
+                        progressState: progressState,
+                        uiState: uiState,
+                        mode: appState.mode,
+                        sourceArchiveURL: appState.sourceArchiveURL,
+                        showInspector: appState.showInspector,
+                        treeStructureRevision: appState.treeStructureRevision,
+                        nodeUpdateRevision: appState.nodeUpdateRevision,
+                        isSearchVisible: appState.isSearchVisible,
+                        outlineFocusRequestID: uiState.outlineFocusRequestID,
+                        selectedEntryIDs: appState.selectedEntryIDs
+                    ) { entries in
+                        pendingDeleteEntries = entries
+                        showDeleteConfirmation = true
+                    }
+                }
             }
             .overlay {
                 if appState.displayedNodes.isEmpty {

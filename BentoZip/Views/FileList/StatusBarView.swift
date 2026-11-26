@@ -116,6 +116,8 @@ struct StatusBarView: View {
                         .foregroundStyle(.secondary)
                         .help("Encrypted")
                 }
+
+                viewModeToggle
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
@@ -123,5 +125,40 @@ struct StatusBarView: View {
             .frame(height: 23)
             .background(.bar)
         }
+    }
+
+    private var viewModeToggle: some View {
+        HStack(spacing: 2) {
+            viewModeButton(mode: .list, systemImage: "list.bullet", help: String(localized: "List View"))
+            viewModeButton(mode: .grid, systemImage: "square.grid.2x2", help: String(localized: "Icon View"))
+        }
+        .padding(1.5)
+        .background(
+            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+    }
+
+    private func viewModeButton(mode: BrowserViewMode, systemImage: String, help: String) -> some View {
+        let isActive = appState.viewMode == mode
+        return Button {
+            guard appState.viewMode != mode else { return }
+            appState.viewMode = mode
+            appState.preferencesManager?.updatePreferences { prefs in
+                prefs.defaultViewMode = mode.rawValue
+            }
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: isActive ? .semibold : .regular))
+                .foregroundStyle(isActive ? .primary : .secondary)
+                .frame(width: 20, height: 15)
+                .background(
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                        .fill(isActive ? Color(nsColor: .controlBackgroundColor) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }

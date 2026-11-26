@@ -9,25 +9,93 @@ struct CompressInspectorView: View {
     @State private var showPassword: Bool = false
     @State private var savedFeedbackVisible: Bool = false
     @State private var feedbackTask: Task<Void, Never>?
+    @State private var presets: [ArchivePreset] = []
+    @State private var showSavePresetSheet: Bool = false
+    @State private var newPresetName: String = ""
 
     var body: some View {
         @Bindable var appState = appState
 
-        Form {
-            Section {
-                Picker("Format", selection: formatBinding) {
-                    ForEach(ArchiveFormat.allCases) { format in
-                        Text(format.rawValue).tag(format)
+        InspectorScrollContainer {
+            InspectorCard {
+                InspectorRow("Preset") {
+                    Menu {
+                        ForEach(presets) { preset in
+                            Button {
+                                appState.applyPreset(preset)
+                            } label: {
+                                if selectedPreset?.id == preset.id {
+                                    Label(preset.name, systemImage: "checkmark")
+                                } else {
+                                    Text(preset.name)
+                                }
+                            }
+                        }
+                    } label: {
+                        InspectorMenuLabel(title: selectedPreset?.name ?? String(localized: "Custom"))
                     }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
 
-                Picker("Level", selection: $appState.compressionSettings.compressionLevel) {
-                    ForEach(CompressionLevel.allCases) { level in
-                        Text(level.localizedName).tag(level)
+                InspectorRowDivider()
+
+                HStack {
+                    Spacer()
+                    Button("Save as Preset…") {
+                        newPresetName = ""
+                        showSavePresetSheet = true
                     }
+                    .buttonStyle(InspectorPillButtonStyle(compact: true))
+                }
+            }
+
+            InspectorCard {
+                InspectorRow("Format") {
+                    Menu {
+                        ForEach(ArchiveFormat.allCases) { format in
+                            Button {
+                                appState.updateCompressionFormat(to: format)
+                            } label: {
+                                if appState.compressionSettings.format == format {
+                                    Label(format.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(format.rawValue)
+                                }
+                            }
+                        }
+                    } label: {
+                        InspectorMenuLabel(title: appState.compressionSettings.format.rawValue)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
 
-                LabeledContent("Name") {
+                InspectorRowDivider()
+
+                InspectorRow("Level") {
+                    Menu {
+                        ForEach(CompressionLevel.allCases) { level in
+                            Button {
+                                appState.compressionSettings.compressionLevel = level
+                            } label: {
+                                if appState.compressionSettings.compressionLevel == level {
+                                    Label(level.localizedName, systemImage: "checkmark")
+                                } else {
+                                    Text(level.localizedName)
+                                }
+                            }
+                        }
+                    } label: {
+                        InspectorMenuLabel(title: appState.compressionSettings.compressionLevel.localizedName)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+
+                InspectorRowDivider()
+
+                InspectorRow("Name") {
                     TextField(
                         "",
                         text: $appState.compressionSettings.archiveName,
@@ -40,7 +108,9 @@ struct CompressInspectorView: View {
                 }
 
                 if supportsPasswordEncryption {
-                    LabeledContent("Password") {
+                    InspectorRowDivider()
+
+                    InspectorRow("Password") {
                         HStack(spacing: 4) {
                             Group {
                                 if showPassword {
@@ -69,6 +139,23 @@ struct CompressInspectorView: View {
                             }
 
                             Button {
+                                let generated = PasswordGenerator.generate()
+                                appState.compressionSettings.password = generated
+                                showPassword = true
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(generated, forType: .string)
+                            } label: {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 18, height: 18)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(Text("Generate Strong Password"))
+                            .help("Generate Strong Password")
+
+                            Button {
                                 showPassword.toggle()
                             } label: {
                                 Image(systemName: showPassword ? "eye.slash" : "eye")
@@ -85,39 +172,73 @@ struct CompressInspectorView: View {
                     }
 
                     if appState.compressionSettings.format == .zip && !(appState.compressionSettings.password ?? "").isEmpty {
-                        Picker("Encryption", selection: $appState.compressionSettings.zipEncryptionMethod) {
-                            ForEach(ZipEncryptionMethod.allCases) { method in
-                                Text(method.rawValue).tag(method)
+                        InspectorRowDivider()
+
+                        InspectorRow("Encryption") {
+                            Menu {
+                                ForEach(ZipEncryptionMethod.allCases) { method in
+                                    Button {
+                                        appState.compressionSettings.zipEncryptionMethod = method
+                                    } label: {
+                                        if appState.compressionSettings.zipEncryptionMethod == method {
+                                            Label(method.rawValue, systemImage: "checkmark")
+                                        } else {
+                                            Text(method.rawValue)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                InspectorMenuLabel(title: appState.compressionSettings.zipEncryptionMethod.rawValue)
                             }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize(horizontal: true, vertical: false)
                         }
                     } else if appState.compressionSettings.format == .sevenZip && !(appState.compressionSettings.password ?? "").isEmpty {
-                        Toggle("Encrypt Filenames", isOn: $appState.compressionSettings.encryptHeaders)
+                        InspectorRowDivider()
+
+                        InspectorToggleRow("Encrypt Filenames", isOn: $appState.compressionSettings.encryptHeaders)
                     }
                 }
 
                 if appState.compressionSettings.format.supportsSplitVolumes {
-                    Picker("Split Volumes", selection: $appState.compressionSettings.volumeSizeBytes) {
-                        Text("Single File").tag(Int64(0))
-                        Text("10 MB").tag(Int64(10 * 1024 * 1024))
-                        Text("100 MB").tag(Int64(100 * 1024 * 1024))
-                        Text("500 MB").tag(Int64(500 * 1024 * 1024))
-                        Text("1 GB").tag(Int64(1024 * 1024 * 1024))
-                        Text("2 GB").tag(Int64(2 * 1024 * 1024 * 1024))
-                        Text("4 GB").tag(Int64(4 * 1024 * 1024 * 1024))
+                    InspectorRowDivider()
+
+                    InspectorRow("Split Volumes") {
+                        Menu {
+                            ForEach(Self.volumeSizeOptions, id: \.bytes) { option in
+                                Button {
+                                    appState.compressionSettings.volumeSizeBytes = option.bytes
+                                } label: {
+                                    if appState.compressionSettings.volumeSizeBytes == option.bytes {
+                                        Label(option.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.title)
+                                    }
+                                }
+                            }
+                        } label: {
+                            InspectorMenuLabel(title: currentVolumeSizeTitle)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
 
-            Section {
-                Toggle("Preserve Folders", isOn: $appState.compressionSettings.preserveDirectoryStructure)
-                Toggle("Follow Symlinks", isOn: $appState.compressionSettings.followSymlinks)
+            InspectorCard {
+                InspectorToggleRow("Preserve Folders", isOn: $appState.compressionSettings.preserveDirectoryStructure)
+                InspectorRowDivider()
+                InspectorToggleRow("Follow Symlinks", isOn: $appState.compressionSettings.followSymlinks)
+                if appState.rootNodes.count > 1 {
+                    InspectorRowDivider()
+                    InspectorToggleRow("Compress each item separately", isOn: $appState.compressionSettings.compressEachSeparately)
+                }
             }
 
-            Section("Exclude") {
+            InspectorCard("Exclude") {
                 ExclusionPatternsEditor(patterns: $appState.compressionSettings.exclusionPatterns)
             }
         }
-        .formStyle(.grouped)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 Divider()
@@ -170,21 +291,53 @@ struct CompressInspectorView: View {
                 .background(.bar)
             }
         }
+        .onAppear {
+            reloadPresets()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: PreferencesManager.preferencesDidChangeNotification)) { _ in
+            reloadPresets()
+        }
         .onDisappear {
             feedbackTask?.cancel()
             feedbackTask = nil
         }
+        .sheet(isPresented: $showSavePresetSheet) {
+            SavePresetSheet(name: $newPresetName) { presetName in
+                let preset = ArchivePreset(name: presetName, settings: appState.compressionSettings)
+                appState.preferencesManager?.addPreset(preset)
+                reloadPresets()
+            }
+        }
+    }
+
+    private static let volumeSizeOptions: [(bytes: Int64, title: String)] = [
+        (0, String(localized: "Single File")),
+        (10 * 1024 * 1024, String(localized: "10 MB")),
+        (100 * 1024 * 1024, String(localized: "100 MB")),
+        (500 * 1024 * 1024, String(localized: "500 MB")),
+        (1024 * 1024 * 1024, String(localized: "1 GB")),
+        (2 * 1024 * 1024 * 1024, String(localized: "2 GB")),
+        (4 * 1024 * 1024 * 1024, String(localized: "4 GB")),
+    ]
+
+    private var currentVolumeSizeTitle: String {
+        Self.volumeSizeOptions.first { $0.bytes == appState.compressionSettings.volumeSizeBytes }?.title
+            ?? String(localized: "Single File")
+    }
+
+    private var selectedPreset: ArchivePreset? {
+        let current = appState.compressionSettings
+        return presets.first { preset in
+            ArchivePreset(id: preset.id, name: preset.name, settings: current) == preset
+        }
+    }
+
+    private func reloadPresets() {
+        presets = appState.preferencesManager?.loadPresets() ?? ArchivePreset.builtInDefaults
     }
 
     private var supportsPasswordEncryption: Bool {
         appState.compressionSettings.format == .zip || appState.compressionSettings.format == .sevenZip
-    }
-
-    private var formatBinding: Binding<ArchiveFormat> {
-        Binding(
-            get: { appState.compressionSettings.format },
-            set: { appState.updateCompressionFormat(to: $0) }
-        )
     }
 
     private var passwordBinding: Binding<String> {
@@ -195,18 +348,64 @@ struct CompressInspectorView: View {
     }
 }
 
-private struct InspectorInputWellModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(Color.primary.opacity(0.055))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75)
-            )
+private struct SavePresetSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var name: String
+    let onSave: (String) -> Void
+    @FocusState private var isNameFocused: Bool
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Save Compression Preset")
+                .font(.system(size: 14, weight: .semibold))
+
+            TextField("", text: $name, prompt: Text("Preset Name"))
+                .labelsHidden()
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .focused($isNameFocused)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                )
+                .onSubmit {
+                    if !trimmedName.isEmpty {
+                        onSave(trimmedName)
+                        dismiss()
+                    }
+                }
+
+            HStack(spacing: 8) {
+                Spacer()
+
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Save") {
+                    onSave(trimmedName)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(trimmedName.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+        .onAppear {
+            isNameFocused = true
+        }
     }
 }

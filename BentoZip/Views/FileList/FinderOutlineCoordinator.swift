@@ -117,6 +117,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
 
         outlineView.setDraggingSourceOperationMask(appState.isWritableArchive ? .move : [], forLocal: true)
         applyColumnVisibility(for: outlineView)
+        outlineView.fitColumnsToVisibleWidthIfNeeded()
 
         let modeOrArchiveChanged = (lastMode != appState.mode || lastArchiveURL != appState.sourceArchiveURL)
         lastMode = appState.mode
@@ -440,6 +441,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
         UserDefaults.standard.set(Array(hiddenColumnIDs), forKey: Self.hiddenColumnsDefaultsKey)
         if let outlineView {
             applyColumnVisibility(for: outlineView)
+            outlineView.fitColumnsToVisibleWidthIfNeeded()
         }
     }
 

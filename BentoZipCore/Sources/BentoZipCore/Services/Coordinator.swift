@@ -118,6 +118,7 @@ private final class ProgressCoalescer: @unchecked Sendable {
 public class CompressionCoordinator {
     let engine: any ArchiveEngine
     public let transferManager: TransferManager
+    let passwordVault: PasswordVaultService
 
     struct ManagedOperation {
         let id: UUID
@@ -135,10 +136,12 @@ public class CompressionCoordinator {
 
     public init(
         engine: any ArchiveEngine = Bento7zEngine(),
-        transferManager: TransferManager? = nil
+        transferManager: TransferManager? = nil,
+        passwordVault: PasswordVaultService = .shared
     ) {
         self.engine = engine
         self.transferManager = transferManager ?? .shared
+        self.passwordVault = passwordVault
     }
 
     // MARK: - Cancellation & Detachment
@@ -224,6 +227,8 @@ public class CompressionCoordinator {
 
         let unwrapSingleTopDirectory = appState.unwrapSingleTopDirectory
         let encodingName = encoding.iconvName
+        let autoTryVault = (password == nil)
+            && (appState.preferencesManager?.loadPreferences().autoTryVaultPasswords ?? appState.autoTryVaultPasswords)
 
         let browseCoalescer = ProgressCoalescer(minInterval: .milliseconds(50)) { [weak self, weak appState] update in
             guard let self, let appState, self.browseGeneration == generation, appState.isLoading else { return }
@@ -252,18 +257,49 @@ public class CompressionCoordinator {
         let task = Task { @MainActor in
             defer { browseCoalescer.stop() }
             do {
-                let result = try await engine.listArchive(
-                    in: url,
-                    password: password,
-                    encoding: encodingName,
-                    unwrapSingleTopDirectory: unwrapSingleTopDirectory
-                ) { update in
-                    browseCoalescer.receive(update)
+                var resolvedPassword = password
+                let result: ArchiveListResult
+                do {
+                    result = try await engine.listArchive(
+                        in: url,
+                        password: password,
+                        encoding: encodingName,
+                        unwrapSingleTopDirectory: unwrapSingleTopDirectory
+                    ) { update in
+                        browseCoalescer.receive(update)
+                    }
+                } catch let error as Bento7zError where error == .passwordRequired && autoTryVault {
+                    var matchedResult: ArchiveListResult?
+                    for candidate in self.passwordVault.allPasswords() {
+                        try Task.checkCancellation()
+                        guard self.browseGeneration == generation else { return }
+                        do {
+                            let attempt = try await engine.listArchive(
+                                in: url,
+                                password: candidate,
+                                encoding: encodingName,
+                                unwrapSingleTopDirectory: unwrapSingleTopDirectory
+                            ) { update in
+                                browseCoalescer.receive(update)
+                            }
+                            resolvedPassword = candidate
+                            matchedResult = attempt
+                            break
+                        } catch let attemptError as Bento7zError
+                            where attemptError == .passwordRequired || attemptError == .wrongPassword {
+                            continue
+                        }
+                    }
+                    if let matchedResult {
+                        result = matchedResult
+                    } else {
+                        throw error
+                    }
                 }
                 guard !Task.isCancelled, self.browseGeneration == generation else { return }
                 appState.mode = .browseArchive
                 appState.sourceArchiveURL = url
-                appState.archivePassword = password
+                appState.archivePassword = resolvedPassword
                 appState.archivePackedSize = result.archivePackedSize
                 appState.archiveComment = result.archiveComment
                 appState.clearNavigationAndSelection()

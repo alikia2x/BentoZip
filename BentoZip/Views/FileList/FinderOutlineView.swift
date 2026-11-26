@@ -24,6 +24,27 @@ final class FinderOutlineView: NSOutlineView {
         }
     }
 
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        fitColumnsToVisibleWidthIfNeeded()
+    }
+
+    func fitColumnsToVisibleWidthIfNeeded() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        let availableWidth = clipView.bounds.width
+        guard availableWidth > 0,
+              let lastVisibleIndex = tableColumns.lastIndex(where: { !$0.isHidden }) else {
+            return
+        }
+        let trailingEdge = rect(ofColumn: lastVisibleIndex).maxX
+        let delta = availableWidth - trailingEdge
+        guard abs(delta) > 0.5, let nameColumn = outlineTableColumn else { return }
+        let updatedWidth = max(nameColumn.minWidth, nameColumn.width + delta)
+        if abs(updatedWidth - nameColumn.width) > 0.5 {
+            nameColumn.width = updatedWidth
+        }
+    }
+
     @objc func copy(_ sender: Any?) {
         onCopyNames?()
     }

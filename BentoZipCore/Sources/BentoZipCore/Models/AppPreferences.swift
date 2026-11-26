@@ -86,6 +86,14 @@ public enum FilenameEncodingOption: String, Codable, Sendable, CaseIterable, Ide
     }
 }
 
+/// Display layout mode for the file browser.
+public enum BrowserViewMode: String, Codable, Sendable, CaseIterable, Identifiable {
+    case list
+    case grid
+
+    public var id: String { rawValue }
+}
+
 @Model
 public final class AppPreferences {
     public var defaultFormat: String = ArchiveFormat.zip.rawValue
@@ -106,6 +114,9 @@ public final class AppPreferences {
     public var sortColumnKey: String = "name"
     public var sortAscending: Bool = true
     public var stripQuarantineOnExtract: Bool = false
+    public var savedPresetsJSON: String = ""
+    public var autoTryVaultPasswords: Bool = true
+    public var defaultViewMode: String = BrowserViewMode.list.rawValue
 
     public init(
         defaultFormat: String = ArchiveFormat.zip.rawValue,
@@ -125,7 +136,10 @@ public final class AppPreferences {
         showHiddenFiles: Bool = false,
         sortColumnKey: String = "name",
         sortAscending: Bool = true,
-        stripQuarantineOnExtract: Bool = false
+        stripQuarantineOnExtract: Bool = false,
+        savedPresetsJSON: String = "",
+        autoTryVaultPasswords: Bool = true,
+        defaultViewMode: String = BrowserViewMode.list.rawValue
     ) {
         self.defaultFormat = defaultFormat
         self.defaultCompressionLevel = defaultCompressionLevel
@@ -145,5 +159,8 @@ public final class AppPreferences {
         self.sortColumnKey = sortColumnKey
         self.sortAscending = sortAscending
         self.stripQuarantineOnExtract = stripQuarantineOnExtract
+        self.savedPresetsJSON = savedPresetsJSON
+        self.autoTryVaultPasswords = autoTryVaultPasswords
+        self.defaultViewMode = defaultViewMode
     }
 }

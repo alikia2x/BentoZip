@@ -74,35 +74,40 @@ extension CompressionCoordinator {
         archiveURL: URL,
         destinationMode: ExtractDestinationMode,
         customDirectoryPath: String?,
-        conflictPolicy: ExtractConflictPolicy
+        conflictPolicy: ExtractConflictPolicy,
+        overrideBaseDirectory: URL? = nil
     ) -> URL? {
         let fm = FileManager.default
         let baseDirectory: URL
-        switch destinationMode {
-        case .sameFolder:
-            baseDirectory = archiveURL.deletingLastPathComponent()
-        case .customFolder:
-            if let customDirectoryPath, !customDirectoryPath.isEmpty {
-                let candidate = URL(fileURLWithPath: customDirectoryPath, isDirectory: true)
-                do {
-                    try fm.createDirectory(at: candidate, withIntermediateDirectories: true)
-                    baseDirectory = candidate
-                } catch {
+        if let overrideBaseDirectory {
+            baseDirectory = overrideBaseDirectory
+        } else {
+            switch destinationMode {
+            case .sameFolder:
+                baseDirectory = archiveURL.deletingLastPathComponent()
+            case .customFolder:
+                if let customDirectoryPath, !customDirectoryPath.isEmpty {
+                    let candidate = URL(fileURLWithPath: customDirectoryPath, isDirectory: true)
+                    do {
+                        try fm.createDirectory(at: candidate, withIntermediateDirectories: true)
+                        baseDirectory = candidate
+                    } catch {
+                        baseDirectory = archiveURL.deletingLastPathComponent()
+                    }
+                } else {
                     baseDirectory = archiveURL.deletingLastPathComponent()
                 }
-            } else {
-                baseDirectory = archiveURL.deletingLastPathComponent()
+            case .askEveryTime:
+                let panel = NSOpenPanel()
+                panel.canChooseFiles = false
+                panel.canChooseDirectories = true
+                panel.canCreateDirectories = true
+                panel.allowsMultipleSelection = false
+                panel.prompt = String(localized: "Extract Here", bundle: .module)
+                let response = panel.runModal()
+                guard response == .OK, let chosenDir = panel.url else { return nil }
+                baseDirectory = chosenDir
             }
-        case .askEveryTime:
-            let panel = NSOpenPanel()
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.canCreateDirectories = true
-            panel.allowsMultipleSelection = false
-            panel.prompt = String(localized: "Extract Here", bundle: .module)
-            let response = panel.runModal()
-            guard response == .OK, let chosenDir = panel.url else { return nil }
-            baseDirectory = chosenDir
         }
 
         let folderName = PathUtils.splitArchiveName(archiveURL.lastPathComponent).stem

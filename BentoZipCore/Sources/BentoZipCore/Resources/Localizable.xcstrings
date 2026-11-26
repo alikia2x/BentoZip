@@ -127,6 +127,12 @@
         }
       }
     },
+    "Cannot move an item into itself or its subfolder." : {
+
+    },
+    "Checksums can only be computed for files." : {
+
+    },
     "Compressing…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -403,6 +409,9 @@
         }
       }
     },
+    "Failed to move items: %@" : {
+
+    },
     "Failed to remove items: %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -428,6 +437,12 @@
           }
         }
       }
+    },
+    "Failed to save modified file back to archive: %@" : {
+
+    },
+    "Failed to update password: %@" : {
+
     },
     "Fast" : {
       "localizations" : {
@@ -458,6 +473,9 @@
           }
         }
       }
+    },
+    "Invalid archive entry name." : {
+
     },
     "Invalid archive path: %@" : {
       "localizations" : {
@@ -647,6 +665,15 @@
         }
       }
     },
+    "Modified temporary file could not be found." : {
+
+    },
+    "Moving entries is not supported by this engine." : {
+
+    },
+    "Moving items…" : {
+
+    },
     "None" : {
       "localizations" : {
         "zh-Hans" : {
@@ -683,6 +710,9 @@
         }
       }
     },
+    "Opening %@…" : {
+
+    },
     "Operation failed [%@]: %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -708,6 +738,9 @@
           }
         }
       }
+    },
+    "Password protection is only supported for ZIP and 7z archives." : {
+
     },
     "Path traversal detected: %@" : {
       "localizations" : {
@@ -802,6 +835,9 @@
           }
         }
       }
+    },
+    "Saving %@ to archive…" : {
+
     },
     "Simplified Chinese (GB18030)" : {
       "localizations" : {
@@ -919,6 +955,9 @@
         }
       }
     },
+    "Unable to open nested archive: %@" : {
+
+    },
     "Unable to read archive: %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -928,6 +967,12 @@
           }
         }
       }
+    },
+    "Updating archive password is not supported by this engine." : {
+
+    },
+    "Updating archive password…" : {
+
     },
     "Western European (Windows-1252)" : {
       "localizations" : {

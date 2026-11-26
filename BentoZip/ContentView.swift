@@ -131,6 +131,9 @@ struct ContentView: View {
         .sheet(isPresented: $uiState.showUpdatePasswordSheet) {
             UpdatePasswordSheet()
         }
+        .sheet(isPresented: $uiState.showImageGallery) {
+            ImageGallerySheet(initialNodeID: uiState.galleryInitialNodeID)
+        }
         .alert(
             testArchiveAlertTitle,
             isPresented: Binding(

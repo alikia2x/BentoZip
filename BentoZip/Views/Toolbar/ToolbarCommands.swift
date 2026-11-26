@@ -354,7 +354,7 @@ private struct CollapsibleToolbarSearchView: NSViewRepresentable {
 private final class SearchContainerView: NSView {
     private static let collapsedWidth: CGFloat = 36
     private static let expandedWidth: CGFloat = 196
-    private static let controlHeight: CGFloat = 28
+    private static let controlHeight: CGFloat = 36
 
     unowned let coordinator: CollapsibleToolbarSearchView.Coordinator
     var isExpandedState = false
@@ -399,11 +399,12 @@ private final class SearchContainerView: NSView {
         let searchSymbol = NSImage(
             systemSymbolName: "magnifyingglass",
             accessibilityDescription: String(localized: "Find")
-        )?.withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
+        )?.withSymbolConfiguration(.init(pointSize: 14.5, weight: .regular))
         iconButton.image = searchSymbol
         iconButton.isBordered = false
-        iconButton.bezelStyle = .accessoryBarAction
+        iconButton.bezelStyle = .regularSquare
         iconButton.imagePosition = .imageOnly
+        iconButton.imageScaling = .scaleNone
         iconButton.contentTintColor = .labelColor
         iconButton.target = self
         iconButton.action = #selector(handleIconClick)
@@ -450,7 +451,7 @@ private final class SearchContainerView: NSView {
 
         widthConstraint = widthAnchor.constraint(equalToConstant: Self.collapsedWidth)
         widthConstraint.priority = .required
-        iconLeadingConstraint = iconButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9)
+        iconLeadingConstraint = iconButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8)
 
         let textLeading = textField.leadingAnchor.constraint(equalTo: iconButton.trailingAnchor, constant: 5)
         let textCenterY = textField.centerYAnchor.constraint(equalTo: centerYAnchor)
@@ -472,8 +473,8 @@ private final class SearchContainerView: NSView {
 
             iconLeadingConstraint,
             iconButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconButton.widthAnchor.constraint(equalToConstant: 18),
-            iconButton.heightAnchor.constraint(equalToConstant: 18),
+            iconButton.widthAnchor.constraint(equalToConstant: 20),
+            iconButton.heightAnchor.constraint(equalToConstant: 20),
         ])
     }
 
@@ -511,7 +512,7 @@ private final class SearchContainerView: NSView {
         let generation = animationGeneration
 
         let targetWidth = expanded ? Self.expandedWidth : Self.collapsedWidth
-        let targetIconLeading: CGFloat = expanded ? 10 : 9
+        let targetIconLeading: CGFloat = expanded ? 10 : 8
         iconButton.toolTip = expanded ? nil : String(localized: "Find")
         iconButton.contentTintColor = expanded ? .secondaryLabelColor : .labelColor
 

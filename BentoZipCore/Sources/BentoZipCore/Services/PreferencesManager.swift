@@ -74,4 +74,42 @@ public final class PreferencesManager {
         let prefs = loadPreferences()
         recordArchive(path, in: prefs)
     }
+
+    // MARK: - Presets
+
+    public func loadPresets() -> [ArchivePreset] {
+        let json = loadPreferences().savedPresetsJSON
+        guard !json.isEmpty,
+              let data = json.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([ArchivePreset].self, from: data) else {
+            return ArchivePreset.builtInDefaults
+        }
+        return decoded
+    }
+
+    public func savePresets(_ presets: [ArchivePreset]) {
+        guard let data = try? JSONEncoder().encode(presets),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+        updatePreferences { prefs in
+            prefs.savedPresetsJSON = json
+        }
+    }
+
+    public func addPreset(_ preset: ArchivePreset) {
+        var presets = loadPresets()
+        if let existingIndex = presets.firstIndex(where: { $0.id == preset.id }) {
+            presets[existingIndex] = preset
+        } else {
+            presets.append(preset)
+        }
+        savePresets(presets)
+    }
+
+    public func deletePreset(id: UUID) {
+        var presets = loadPresets()
+        presets.removeAll { $0.id == id }
+        savePresets(presets)
+    }
 }

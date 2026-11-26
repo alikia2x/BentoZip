@@ -1,7 +1,7 @@
 import Foundation
 
 /// Encryption method used when creating password-protected ZIP archives.
-public enum ZipEncryptionMethod: String, CaseIterable, Identifiable, Sendable, Equatable, Hashable {
+public enum ZipEncryptionMethod: String, CaseIterable, Identifiable, Codable, Sendable, Equatable, Hashable {
     case aes256 = "AES-256"
     case zipCrypto = "ZipCrypto"
 
@@ -30,6 +30,8 @@ public struct CompressionSettings: Sendable, Equatable {
     public var encryptHeaders: Bool = true
     /// Follow symbolic links and archive their targets instead of storing links.
     public var followSymlinks: Bool = false
+    /// Compress each top-level input item into its own separate archive when multiple items are staged.
+    public var compressEachSeparately: Bool = false
 
     public init(
         format: ArchiveFormat = .zip,
@@ -41,7 +43,8 @@ public struct CompressionSettings: Sendable, Equatable {
         zipEncryptionMethod: ZipEncryptionMethod = .aes256,
         volumeSizeBytes: Int64 = 0,
         encryptHeaders: Bool = true,
-        followSymlinks: Bool = false
+        followSymlinks: Bool = false,
+        compressEachSeparately: Bool = false
     ) {
         self.format = format
         self.compressionLevel = compressionLevel
@@ -53,6 +56,7 @@ public struct CompressionSettings: Sendable, Equatable {
         self.volumeSizeBytes = volumeSizeBytes
         self.encryptHeaders = encryptHeaders
         self.followSymlinks = followSymlinks
+        self.compressEachSeparately = compressEachSeparately
     }
 
     /// Return a copy with `format` updated and `archiveName` extension synchronized when appropriate.
@@ -111,7 +115,7 @@ public struct CompressionSettings: Sendable, Equatable {
 }
 
 /// Writable archive formats exposed in compression settings and UI pickers.
-public enum ArchiveFormat: String, CaseIterable, Identifiable, Sendable, Equatable, Hashable {
+public enum ArchiveFormat: String, CaseIterable, Identifiable, Codable, Sendable, Equatable, Hashable {
     case zip = "ZIP"
     case sevenZip = "7z"
     case tar = "TAR"
@@ -286,7 +290,7 @@ public enum ReadableArchiveFormat: String, CaseIterable, Identifiable, Sendable,
 }
 
 /// Compression strength presets mapped to bento7z compression levels.
-public enum CompressionLevel: String, CaseIterable, Identifiable, Sendable, Equatable, Hashable {
+public enum CompressionLevel: String, CaseIterable, Identifiable, Codable, Sendable, Equatable, Hashable {
     case none = "无压缩"
     case fast = "快速"
     case normal = "标准"

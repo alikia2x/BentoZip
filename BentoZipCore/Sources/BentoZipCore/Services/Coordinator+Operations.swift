@@ -22,6 +22,19 @@ extension CompressionCoordinator {
         let sourceURLs = appState.rootNodes.map(\.url)
         let shouldReveal = appState.revealInFinderAfterExtract
         let preferencesManager = appState.preferencesManager
+
+        if settings.compressEachSeparately && sourceURLs.count > 1 {
+            await compressEachSeparately(
+                sourceURLs: sourceURLs,
+                settings: settings,
+                shouldReveal: shouldReveal,
+                preferencesManager: preferencesManager,
+                appState: appState,
+                progressState: progressState
+            )
+            return
+        }
+
         guard let saveURL = resolveCompressSaveURL(sourceURLs: sourceURLs, settings: settings) else { return }
 
         let context = startOperation(
@@ -72,6 +85,107 @@ extension CompressionCoordinator {
         }
     }
 
+    private func compressEachSeparately(
+        sourceURLs: [URL],
+        settings: CompressionSettings,
+        shouldReveal: Bool,
+        preferencesManager: PreferencesManager?,
+        appState: AppState,
+        progressState: ProgressState
+    ) async {
+        let totalCount = sourceURLs.count
+        let context = startOperation(
+            progressState: progressState,
+            description: String(localized: "Compressing \(totalCount) items…", bundle: .module),
+            kind: .compress,
+            totalBytes: appState.totalSize,
+            totalFiles: totalCount,
+            destinationURL: sourceURLs.first?.deletingLastPathComponent()
+        )
+
+        await runManagedTask(context: context, progressState: progressState) {
+            var createdURLs: [URL] = []
+            createdURLs.reserveCapacity(totalCount)
+            var currentSaveURL: URL?
+
+            do {
+                for (index, sourceURL) in sourceURLs.enumerated() {
+                    try Task.checkCancellation()
+
+                    let stem = AppState.defaultArchiveStem(for: [sourceURL])
+                    let fileName = "\(stem).\(settings.format.fileExtension)"
+                    let proposedURL = sourceURL.deletingLastPathComponent().appendingPathComponent(fileName)
+                    let itemSaveURL = PathUtils.uniqueFileURL(for: proposedURL)
+                    currentSaveURL = itemSaveURL
+
+                    var itemSettings = settings
+                    itemSettings.archiveName = itemSaveURL.lastPathComponent
+
+                    let baseFraction = Double(index) / Double(totalCount)
+                    let spanFraction = 1.0 / Double(totalCount)
+                    let itemLabel = sourceURL.lastPathComponent
+                    let parentHandler = context.progressHandler
+
+                    let itemProgressHandler: @Sendable (ArchiveProgress) -> Void = { update in
+                        let clamped = min(max(update.fractionCompleted, 0.0), 1.0)
+                        let scaled = ArchiveProgress(
+                            fractionCompleted: baseFraction + clamped * spanFraction,
+                            currentFile: update.currentFile ?? itemLabel,
+                            processedBytes: update.processedBytes,
+                            totalBytes: update.totalBytes,
+                            isFileEvent: update.isFileEvent,
+                            fileCountDelta: update.fileCountDelta,
+                            stage: update.stage
+                        )
+                        parentHandler(scaled)
+                    }
+
+                    try await self.engine.create(
+                        from: [sourceURL],
+                        to: itemSaveURL,
+                        settings: itemSettings,
+                        onProgress: itemProgressHandler
+                    )
+                    try Task.checkCancellation()
+
+                    let splitVolumes = (settings.volumeSizeBytes > 0)
+                        ? Bento7zEngine.splitVolumeURLs(for: itemSaveURL)
+                        : []
+                    let primaryURL = splitVolumes.first ?? itemSaveURL
+                    currentSaveURL = nil
+
+                    createdURLs.append(primaryURL)
+                    preferencesManager?.recordArchive(primaryURL.path)
+                }
+
+                await self.completeOperation(context.id, finalOutputURL: createdURLs.last) {
+                    appState.lastError = nil
+                }
+
+                if shouldReveal && !createdURLs.isEmpty {
+                    NSWorkspace.shared.activateFileViewerSelecting(createdURLs)
+                }
+            } catch is CancellationError {
+                if let partial = currentSaveURL {
+                    try? FileManager.default.removeItem(at: partial)
+                    if settings.volumeSizeBytes > 0 {
+                        Bento7zEngine.cleanupSplitVolumes(baseArchiveURL: partial)
+                    }
+                }
+                self.abortOperation(context.id)
+            } catch {
+                if let partial = currentSaveURL {
+                    try? FileManager.default.removeItem(at: partial)
+                    if settings.volumeSizeBytes > 0 {
+                        Bento7zEngine.cleanupSplitVolumes(baseArchiveURL: partial)
+                    }
+                }
+                self.abortOperation(context.id)
+                appState.lastError = String(localized: "Compression failed: \(error.localizedDescription)", bundle: .module)
+            }
+        }
+    }
+
     // MARK: - Extract
 
     public func extract(
@@ -106,6 +220,8 @@ extension CompressionCoordinator {
 
         let isFullExtract = (entries == nil || entries?.isEmpty == true)
         let password = appState.archivePassword
+        let autoTryVault = (password == nil)
+            && (appState.preferencesManager?.loadPreferences().autoTryVaultPasswords ?? appState.autoTryVaultPasswords)
         let encodingName = appState.selectedEncoding.iconvName
         let shouldUnwrap = appState.unwrapSingleTopDirectory
         let shouldReveal = appState.revealInFinderAfterExtract
@@ -144,18 +260,53 @@ extension CompressionCoordinator {
             }
 
             do {
-                let stage = try Self.makeStagingDirectory(for: destinationURL)
+                var stage = try Self.makeStagingDirectory(for: destinationURL)
                 stagingDir = stage
 
-                try await self.engine.extract(
-                    archiveURL: archiveURL,
-                    entries: entries,
-                    to: stage,
-                    password: password,
-                    encoding: encodingName,
-                    onProgress: context.progressHandler
-                )
+                var matchedVaultPassword: String?
+                do {
+                    try await self.engine.extract(
+                        archiveURL: archiveURL,
+                        entries: entries,
+                        to: stage,
+                        password: password,
+                        encoding: encodingName,
+                        onProgress: context.progressHandler
+                    )
+                } catch let error as Bento7zError where error == .passwordRequired && autoTryVault {
+                    var succeeded = false
+                    for candidate in self.passwordVault.allPasswords() {
+                        try Task.checkCancellation()
+                        try? FileManager.default.removeItem(at: stage)
+                        stage = try Self.makeStagingDirectory(for: destinationURL)
+                        stagingDir = stage
+                        do {
+                            try await self.engine.extract(
+                                archiveURL: archiveURL,
+                                entries: entries,
+                                to: stage,
+                                password: candidate,
+                                encoding: encodingName,
+                                onProgress: context.progressHandler
+                            )
+                            matchedVaultPassword = candidate
+                            succeeded = true
+                            break
+                        } catch let attemptError as Bento7zError
+                            where attemptError == .passwordRequired || attemptError == .wrongPassword {
+                            continue
+                        }
+                    }
+                    if !succeeded {
+                        throw error
+                    }
+                }
                 try Task.checkCancellation()
+
+                if let matchedVaultPassword,
+                   appState.sourceArchiveURL?.standardizedFileURL == archiveURL.standardizedFileURL {
+                    appState.archivePassword = matchedVaultPassword
+                }
 
                 if isFullExtract && shouldUnwrap {
                     await Self.unwrapSingleTopDirectory(at: stage)
@@ -259,21 +410,93 @@ extension CompressionCoordinator {
         preferencesManager: PreferencesManager?,
         onNeedPasswordFallback: (@MainActor @Sendable (URL) -> Void)? = nil
     ) async {
+        _ = await extractSingleDirectly(
+            archiveURL: archiveURL,
+            preferencesManager: preferencesManager,
+            overrideBaseDirectory: nil,
+            revealImmediately: true,
+            onNeedPasswordFallback: onNeedPasswordFallback
+        )
+    }
+
+    /// Directly extract multiple archives in sequence, revealing all extracted outputs together when configured.
+    public func extractMultipleDirectly(
+        archiveURLs: [URL],
+        preferencesManager: PreferencesManager?,
+        onNeedPasswordFallback: (@MainActor @Sendable (URL) -> Void)? = nil
+    ) async {
+        guard !archiveURLs.isEmpty else { return }
+        if archiveURLs.count == 1 {
+            await extractDirectly(
+                archiveURL: archiveURLs[0],
+                preferencesManager: preferencesManager,
+                onNeedPasswordFallback: onNeedPasswordFallback
+            )
+            return
+        }
+
+        let prefs = preferencesManager?.loadPreferences() ?? AppPreferences()
+        let destMode = ExtractDestinationMode(rawValue: prefs.extractDestinationMode) ?? .sameFolder
+        let shouldReveal = prefs.revealInFinderAfterExtract
+
+        var overrideBaseDirectory: URL?
+        if destMode == .askEveryTime {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.prompt = String(localized: "Extract Here", bundle: .module)
+            let response = panel.runModal()
+            guard response == .OK, let chosenDir = panel.url else { return }
+            overrideBaseDirectory = chosenDir
+        }
+
+        var extractedURLs: [URL] = []
+        extractedURLs.reserveCapacity(archiveURLs.count)
+
+        for archiveURL in archiveURLs {
+            if Task.isCancelled { break }
+            if let extracted = await extractSingleDirectly(
+                archiveURL: archiveURL,
+                preferencesManager: preferencesManager,
+                overrideBaseDirectory: overrideBaseDirectory,
+                revealImmediately: false,
+                onNeedPasswordFallback: onNeedPasswordFallback
+            ) {
+                extractedURLs.append(extracted)
+            }
+        }
+
+        if shouldReveal && !extractedURLs.isEmpty {
+            NSWorkspace.shared.activateFileViewerSelecting(extractedURLs)
+        }
+    }
+
+    private func extractSingleDirectly(
+        archiveURL: URL,
+        preferencesManager: PreferencesManager?,
+        overrideBaseDirectory: URL?,
+        revealImmediately: Bool,
+        onNeedPasswordFallback: (@MainActor @Sendable (URL) -> Void)?
+    ) async -> URL? {
         let prefs = preferencesManager?.loadPreferences() ?? AppPreferences()
         let destMode = ExtractDestinationMode(rawValue: prefs.extractDestinationMode) ?? .sameFolder
         let conflictPolicy = ExtractConflictPolicy(rawValue: prefs.extractConflictPolicy) ?? .ask
         let shouldUnwrap = prefs.unwrapSingleTopDirectory
-        let shouldReveal = prefs.revealInFinderAfterExtract
+        let shouldReveal = prefs.revealInFinderAfterExtract && revealImmediately
         let shouldTrash = prefs.moveArchiveToTrashAfterExtract
         let shouldStripQuarantine = prefs.stripQuarantineOnExtract
+        let autoTryVault = prefs.autoTryVaultPasswords
 
         guard let destinationURL = resolveDirectExtractDestinationURL(
             archiveURL: archiveURL,
             destinationMode: destMode,
             customDirectoryPath: prefs.customExtractDirectory,
-            conflictPolicy: conflictPolicy
+            conflictPolicy: conflictPolicy,
+            overrideBaseDirectory: overrideBaseDirectory
         ) else {
-            return
+            return nil
         }
 
         let destinationExistedBefore = Bento7zPathSafety.itemExists(at: destinationURL)
@@ -289,6 +512,8 @@ extension CompressionCoordinator {
             sourceArchiveURL: archiveURL
         )
 
+        var extractedOutputURL: URL?
+
         await runManagedTask(context: context, progressState: localProgress) {
             var stagingDir: URL?
             defer {
@@ -298,17 +523,45 @@ extension CompressionCoordinator {
             }
 
             do {
-                let stage = try Self.makeStagingDirectory(for: destinationURL)
+                var stage = try Self.makeStagingDirectory(for: destinationURL)
                 stagingDir = stage
 
-                try await self.engine.extract(
-                    archiveURL: archiveURL,
-                    entries: nil,
-                    to: stage,
-                    password: nil,
-                    encoding: nil,
-                    onProgress: context.progressHandler
-                )
+                do {
+                    try await self.engine.extract(
+                        archiveURL: archiveURL,
+                        entries: nil,
+                        to: stage,
+                        password: nil,
+                        encoding: nil,
+                        onProgress: context.progressHandler
+                    )
+                } catch let error as Bento7zError where error == .passwordRequired && autoTryVault {
+                    var succeeded = false
+                    for candidate in self.passwordVault.allPasswords() {
+                        try Task.checkCancellation()
+                        try? FileManager.default.removeItem(at: stage)
+                        stage = try Self.makeStagingDirectory(for: destinationURL)
+                        stagingDir = stage
+                        do {
+                            try await self.engine.extract(
+                                archiveURL: archiveURL,
+                                entries: nil,
+                                to: stage,
+                                password: candidate,
+                                encoding: nil,
+                                onProgress: context.progressHandler
+                            )
+                            succeeded = true
+                            break
+                        } catch let attemptError as Bento7zError
+                            where attemptError == .passwordRequired || attemptError == .wrongPassword {
+                            continue
+                        }
+                    }
+                    if !succeeded {
+                        throw error
+                    }
+                }
                 try Task.checkCancellation()
 
                 if shouldUnwrap {
@@ -323,6 +576,10 @@ extension CompressionCoordinator {
                     appState: nil
                 )
                 try Task.checkCancellation()
+
+                if Bento7zPathSafety.itemExists(at: mergeResult.finalDestinationURL) {
+                    extractedOutputURL = mergeResult.finalDestinationURL
+                }
 
                 await self.completeOperation(context.id) {
                     preferencesManager?.recordArchive(archiveURL.path)
@@ -358,6 +615,8 @@ extension CompressionCoordinator {
                 }
             }
         }
+
+        return extractedOutputURL
     }
 
     // MARK: - Mutate, Test, Encoding & Open Entry

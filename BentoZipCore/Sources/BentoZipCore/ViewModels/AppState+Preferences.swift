@@ -93,6 +93,20 @@ extension AppState {
 
     // MARK: - Preferences
 
+    /// Apply a saved `ArchivePreset` to `compressionSettings` while syncing the archive filename extension.
+    public func applyPreset(_ preset: ArchivePreset) {
+        var updated = compressionSettings.updatingFormat(to: preset.format)
+        updated.compressionLevel = preset.compressionLevel
+        updated.zipEncryptionMethod = preset.zipEncryptionMethod
+        updated.encryptHeaders = preset.encryptHeaders
+        updated.volumeSizeBytes = preset.format.supportsSplitVolumes ? preset.volumeSizeBytes : 0
+        updated.preserveDirectoryStructure = preset.preserveDirectoryStructure
+        updated.followSymlinks = preset.followSymlinks
+        updated.compressEachSeparately = preset.compressEachSeparately
+        updated.exclusionPatterns = preset.exclusionPatterns
+        compressionSettings = updated
+    }
+
     public func applyPreferences() {
         guard let prefs = preferencesManager?.loadPreferences() else { return }
         preferencesManager?.applyDefaults(to: &compressionSettings, from: prefs)
@@ -102,6 +116,8 @@ extension AppState {
         moveArchiveToTrashAfterExtract = prefs.moveArchiveToTrashAfterExtract
         closeWindowAfterExtract = prefs.closeWindowAfterExtract
         stripQuarantineOnExtract = prefs.stripQuarantineOnExtract
+        autoTryVaultPasswords = prefs.autoTryVaultPasswords
+        viewMode = BrowserViewMode(rawValue: prefs.defaultViewMode) ?? .list
         showHiddenFiles = prefs.showHiddenFiles
     }
 
@@ -117,6 +133,8 @@ extension AppState {
             prefs.moveArchiveToTrashAfterExtract = moveArchiveToTrashAfterExtract
             prefs.closeWindowAfterExtract = closeWindowAfterExtract
             prefs.stripQuarantineOnExtract = stripQuarantineOnExtract
+            prefs.autoTryVaultPasswords = autoTryVaultPasswords
+            prefs.defaultViewMode = viewMode.rawValue
             prefs.showHiddenFiles = showHiddenFiles
         }
     }
@@ -129,6 +147,8 @@ extension AppState {
         moveArchiveToTrashAfterExtract = prefs.moveArchiveToTrashAfterExtract
         closeWindowAfterExtract = prefs.closeWindowAfterExtract
         stripQuarantineOnExtract = prefs.stripQuarantineOnExtract
+        autoTryVaultPasswords = prefs.autoTryVaultPasswords
+        viewMode = BrowserViewMode(rawValue: prefs.defaultViewMode) ?? .list
         showHiddenFiles = prefs.showHiddenFiles
         if mode == .empty {
             preferencesManager?.applyDefaults(to: &compressionSettings, from: prefs)

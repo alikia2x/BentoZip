@@ -79,6 +79,22 @@ struct UpdatePasswordSheet: View {
                     }
 
                     Button {
+                        let generated = PasswordGenerator.generate()
+                        newPassword = generated
+                        showPassword = true
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(generated, forType: .string)
+                    } label: {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Generate Strong Password")
+
+                    Button {
                         showPassword.toggle()
                     } label: {
                         Image(systemName: showPassword ? "eye.slash" : "eye")

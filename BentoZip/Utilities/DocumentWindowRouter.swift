@@ -291,15 +291,11 @@ final class DocumentWindowRouter {
 
             if allArchives {
                 if action == .extract {
-                    for url in urls {
-                        Task { @MainActor in
-                            await CompressionCoordinator().extractDirectly(
-                                archiveURL: url,
-                                preferencesManager: manager
-                            ) { encryptedURL in
-                                DocumentWindowRouter.shared.openArchive(encryptedURL)
-                            }
-                        }
+                    await CompressionCoordinator().extractMultipleDirectly(
+                        archiveURLs: urls,
+                        preferencesManager: manager
+                    ) { encryptedURL in
+                        DocumentWindowRouter.shared.openArchive(encryptedURL)
                     }
                 } else {
                     for url in urls {

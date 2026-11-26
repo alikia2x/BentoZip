@@ -6,9 +6,18 @@ struct ArchiveInfoInspectorView: View {
     @Environment(AppState.self) private var appState
     @Environment(ProgressState.self) private var progressState
     @Environment(WorkspaceUIState.self) private var uiState
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var checksumsByNodeID: [UUID: FileChecksums] = [:]
     @State private var computingChecksumNodeID: UUID?
+
+    private var primaryTextColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.92) : Color(nsColor: .labelColor)
+    }
+
+    private var secondaryTextColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.60) : Color(nsColor: .secondaryLabelColor)
+    }
 
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -44,7 +53,7 @@ struct ArchiveInfoInspectorView: View {
     var body: some View {
         let selectedNodes = appState.selectedNodes
 
-        Form {
+        InspectorScrollContainer {
             if selectedNodes.isEmpty {
                 archiveOverviewSections
             } else if selectedNodes.count == 1, let node = selectedNodes.first {
@@ -53,7 +62,6 @@ struct ArchiveInfoInspectorView: View {
                 multiSelectionSections(for: selectedNodes)
             }
         }
-        .formStyle(.grouped)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomBar(selectedNodes: selectedNodes)
         }
@@ -80,7 +88,7 @@ struct ArchiveInfoInspectorView: View {
         let uncompressedStr = Self.byteFormatter.string(fromByteCount: appState.totalSize)
 
         if let archiveURL = appState.sourceArchiveURL {
-            Section {
+            InspectorCard {
                 HStack(spacing: 10) {
                     Image(nsImage: FileIconCache.icon(forFileAt: archiveURL.path))
                         .resizable()
@@ -94,47 +102,61 @@ struct ArchiveInfoInspectorView: View {
 
                         Text(archiveMetaSummary)
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(secondaryTextColor)
                     }
                 }
-                .padding(.vertical, 2)
             }
         }
 
-        Section("Info") {
-            LabeledContent("Items") {
+        InspectorCard("Info") {
+            InspectorRow("Items") {
                 Text(String(localized: "\(totalCount) items"))
                     .monospacedDigit()
+                    .foregroundStyle(secondaryTextColor)
             }
 
-            LabeledContent("Size") {
+            InspectorRowDivider()
+
+            InspectorRow("Size") {
                 Text(uncompressedStr)
                     .monospacedDigit()
+                    .foregroundStyle(secondaryTextColor)
             }
 
             if let packed = appState.totalPackedSize, packed > 0 {
-                LabeledContent("Packed") {
+                InspectorRowDivider()
+
+                InspectorRow("Packed") {
                     Text(Self.byteFormatter.string(fromByteCount: packed))
                         .monospacedDigit()
+                        .foregroundStyle(secondaryTextColor)
                 }
 
                 if appState.totalSize > 0 && packed <= appState.totalSize {
                     let saved = Int(((Double(appState.totalSize - packed) / Double(appState.totalSize)) * 100).rounded())
-                    LabeledContent("Saved Ratio") {
+                    InspectorRowDivider()
+
+                    InspectorRow("Saved Ratio") {
                         Text("\(saved)%")
                             .monospacedDigit()
+                            .foregroundStyle(secondaryTextColor)
                     }
                 }
             }
 
             if appState.isArchiveEncrypted {
-                LabeledContent("Encryption") {
+                InspectorRowDivider()
+
+                InspectorRow("Encryption") {
                     Text("Encrypted")
+                        .foregroundStyle(secondaryTextColor)
                 }
             }
 
             if canUpdatePassword {
-                LabeledContent("Password") {
+                InspectorRowDivider()
+
+                InspectorRow("Password") {
                     Button(appState.isArchiveEncrypted ? "Change…" : "Set…") {
                         uiState.showUpdatePasswordSheet = true
                     }
@@ -143,14 +165,35 @@ struct ArchiveInfoInspectorView: View {
                 }
             }
 
-            Picker("Encoding", selection: encodingBinding) {
-                ForEach(FilenameEncodingOption.allCases) { option in
-                    Text(option.displayName).tag(option)
-                }
-            }
-            .disabled(isBusy)
+            InspectorRowDivider()
 
-            LabeledContent("Integrity") {
+            InspectorRow("Encoding") {
+                Menu {
+                    ForEach(FilenameEncodingOption.allCases) { option in
+                        Button {
+                            guard option != appState.selectedEncoding else { return }
+                            Task {
+                                await appState.coordinator.reloadWithEncoding(option, appState: appState)
+                            }
+                        } label: {
+                            if appState.selectedEncoding == option {
+                                Label(option.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(option.displayName)
+                            }
+                        }
+                    }
+                } label: {
+                    InspectorMenuLabel(title: appState.selectedEncoding.displayName)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize(horizontal: true, vertical: false)
+                .disabled(isBusy)
+            }
+
+            InspectorRowDivider()
+
+            InspectorRow("Integrity") {
                 Button("Verify") {
                     Task {
                         await appState.coordinator.testArchive(
@@ -165,10 +208,10 @@ struct ArchiveInfoInspectorView: View {
         }
 
         if let comment = appState.archiveComment, !comment.isEmpty {
-            Section("Comment") {
+            InspectorCard("Comment") {
                 Text(comment)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryTextColor)
                     .lineLimit(4)
                     .textSelection(.enabled)
             }
@@ -182,7 +225,7 @@ struct ArchiveInfoInspectorView: View {
         let kind = FileKindCache.localizedKind(for: node)
         let location = parentLocation(for: node)
 
-        Section {
+        InspectorCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
                     Image(nsImage: FileIconCache.icon(for: node))
@@ -197,12 +240,12 @@ struct ArchiveInfoInspectorView: View {
 
                         Text(kind)
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(secondaryTextColor)
                     }
                 }
 
                 if !node.isDirectory {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Button {
                             let entry = node.toFileEntry()
                             QuickLookHelper.shared.preview(
@@ -218,16 +261,16 @@ struct ArchiveInfoInspectorView: View {
                                 )
                             }
                         } label: {
-                            HStack(spacing: 5) {
+                            HStack(spacing: 4) {
                                 Image(systemName: "eye")
-                                    .symbolRenderingMode(.monochrome)
-                                    .foregroundStyle(Color(nsColor: .labelColor))
-                                    .font(.system(size: 11.5, weight: .medium))
+                                    .font(.system(size: 11, weight: .medium))
                                 Text("Quick Look")
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(InspectorPillButtonStyle())
+                        .buttonStyle(InspectorPillButtonStyle(compact: true))
                         .disabled(isBusy)
 
                         Button {
@@ -241,35 +284,42 @@ struct ArchiveInfoInspectorView: View {
                                 )
                             }
                         } label: {
-                            HStack(spacing: 5) {
+                            HStack(spacing: 4) {
                                 Image(systemName: "arrow.up.forward.app")
-                                    .symbolRenderingMode(.monochrome)
-                                    .foregroundStyle(Color(nsColor: .labelColor))
-                                    .font(.system(size: 11.5, weight: .medium))
+                                    .font(.system(size: 11, weight: .medium))
                                 Text("Open")
+                                    .lineLimit(1)
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(InspectorPillButtonStyle())
+                        .buttonStyle(InspectorPillButtonStyle(compact: true))
                         .disabled(isBusy)
                     }
                 }
             }
-            .padding(.vertical, 2)
         }
 
-        Section("Info") {
+        if !node.isDirectory,
+           InlinePreviewHelper.isImageFile(node.name) ||
+           (InlinePreviewHelper.isTextPreviewable(node.name) && node.size <= 256 * 1024) {
+            SingleEntryPreviewSection(node: node)
+        }
+
+        InspectorCard("Info") {
             if let location {
-                LabeledContent("Location") {
+                InspectorRow("Location") {
                     Text(location)
+                        .foregroundStyle(secondaryTextColor)
                         .multilineTextAlignment(.trailing)
                         .lineLimit(3)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
+
+                InspectorRowDivider()
             }
 
-            LabeledContent("Size") {
+            InspectorRow("Size") {
                 let effectiveSize = node.isDirectory ? node.archiveTotalSize : node.size
                 if node.isDirectory && effectiveSize <= 0 {
                     Text("--")
@@ -277,52 +327,70 @@ struct ArchiveInfoInspectorView: View {
                 } else {
                     Text(Self.byteFormatter.string(fromByteCount: effectiveSize))
                         .monospacedDigit()
+                        .foregroundStyle(secondaryTextColor)
                 }
             }
 
             if !node.isDirectory, let packed = node.packedSize, packed > 0 {
-                LabeledContent("Packed") {
+                InspectorRowDivider()
+
+                InspectorRow("Packed") {
                     Text(Self.byteFormatter.string(fromByteCount: packed))
                         .monospacedDigit()
+                        .foregroundStyle(secondaryTextColor)
                 }
 
                 if node.size > 0 && packed <= node.size {
                     let saved = Int(((Double(node.size - packed) / Double(node.size)) * 100).rounded())
-                    LabeledContent("Saved Ratio") {
+                    InspectorRowDivider()
+
+                    InspectorRow("Saved Ratio") {
                         Text("\(saved)%")
                             .monospacedDigit()
+                            .foregroundStyle(secondaryTextColor)
                     }
                 }
             }
 
             if let modified = node.modificationDate {
-                LabeledContent("Modified") {
+                InspectorRowDivider()
+
+                InspectorRow("Modified") {
                     Text(FileListFormatters.dateFormatter.string(from: modified))
                         .monospacedDigit()
+                        .foregroundStyle(secondaryTextColor)
                 }
             }
 
             if node.isEncrypted {
-                LabeledContent("Encryption") {
+                InspectorRowDivider()
+
+                InspectorRow("Encryption") {
                     Text("Encrypted")
+                        .foregroundStyle(secondaryTextColor)
                 }
             }
 
             if let crc = node.crc {
-                LabeledContent("CRC32") {
+                InspectorRowDivider()
+
+                InspectorRow("CRC32") {
                     Text(String(format: "%08X", crc))
                         .font(.system(size: 11.5, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(secondaryTextColor)
                         .textSelection(.enabled)
                 }
             }
 
             if !node.isDirectory {
+                InspectorRowDivider()
+
                 if let checksums = checksumsByNodeID[node.id] {
                     checksumRow(title: "SHA-256", value: checksums.sha256)
+                    InspectorRowDivider()
                     checksumRow(title: "MD5", value: checksums.md5)
                 } else {
-                    LabeledContent("Checksums") {
+                    InspectorRow("Checksums") {
                         if computingChecksumNodeID == node.id {
                             ProgressView()
                                 .controlSize(.small)
@@ -345,29 +413,32 @@ struct ArchiveInfoInspectorView: View {
     private func multiSelectionSections(for selectedNodes: [FileNode]) -> some View {
         let totals = combinedSelectionTotals(for: selectedNodes)
 
-        Section {
+        InspectorCard {
             HStack(spacing: 10) {
                 Image(systemName: "doc.on.doc")
                     .font(.system(size: 22))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryTextColor)
                     .frame(width: 32, height: 32)
 
                 Text(String(localized: "\(selectedNodes.count) items selected"))
                     .font(.system(size: 12.5, weight: .semibold))
             }
-            .padding(.vertical, 2)
         }
 
-        Section("Info") {
-            LabeledContent("Size") {
+        InspectorCard("Info") {
+            InspectorRow("Size") {
                 Text(Self.byteFormatter.string(fromByteCount: totals.uncompressed))
                     .monospacedDigit()
+                    .foregroundStyle(secondaryTextColor)
             }
 
             if totals.packed > 0 {
-                LabeledContent("Packed") {
+                InspectorRowDivider()
+
+                InspectorRow("Packed") {
                     Text(Self.byteFormatter.string(fromByteCount: totals.packed))
                         .monospacedDigit()
+                        .foregroundStyle(secondaryTextColor)
                 }
             }
         }
@@ -462,12 +533,12 @@ struct ArchiveInfoInspectorView: View {
     // MARK: - Helpers
 
     @ViewBuilder
-    private func checksumRow(title: String, value: String) -> some View {
-        LabeledContent(title) {
+    private func checksumRow(title: LocalizedStringKey, value: String) -> some View {
+        InspectorRow(title) {
             HStack(spacing: 4) {
                 Text(value)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryTextColor)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
@@ -478,7 +549,7 @@ struct ArchiveInfoInspectorView: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(secondaryTextColor)
                         .frame(width: 18, height: 18)
                         .contentShape(Rectangle())
                 }
@@ -566,20 +637,133 @@ struct ArchiveInfoInspectorView: View {
     }
 }
 
-private struct InspectorPillButtonStyle: ButtonStyle {
-    var compact: Bool = false
-    @Environment(\.isEnabled) private var isEnabled
+private struct SingleEntryPreviewSection: View {
+    @Environment(AppState.self) private var appState
+    @Environment(WorkspaceUIState.self) private var uiState
+    @Environment(\.colorScheme) private var colorScheme
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: compact ? 11.5 : 12, weight: .medium))
-            .foregroundStyle(isEnabled ? .primary : .tertiary)
-            .padding(.horizontal, compact ? 10 : 8)
-            .padding(.vertical, compact ? 3 : 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.primary.opacity(configuration.isPressed ? 0.14 : 0.08))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    let node: FileNode
+
+    @State private var previewImage: NSImage?
+    @State private var previewText: String?
+    @State private var isLoading: Bool = false
+
+    private var secondaryTextColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.60) : Color(nsColor: .secondaryLabelColor)
+    }
+
+    private struct PreviewKey: Equatable {
+        let nodeID: UUID
+        let archiveURL: URL?
+        let password: String?
+        let encoding: FilenameEncodingOption
+    }
+
+    private var isImage: Bool {
+        InlinePreviewHelper.isImageFile(node.name)
+    }
+
+    private var taskKey: PreviewKey {
+        PreviewKey(
+            nodeID: node.id,
+            archiveURL: appState.sourceArchiveURL,
+            password: appState.archivePassword,
+            encoding: appState.selectedEncoding
+        )
+    }
+
+    var body: some View {
+        InspectorCard("Preview") {
+            VStack(alignment: .leading, spacing: 8) {
+                if isLoading {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .controlSize(.small)
+                        Spacer()
+                    }
+                    .frame(height: 64)
+                } else if isImage, let previewImage {
+                    Image(nsImage: previewImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: 150)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                    if !appState.galleryImageNodes.isEmpty {
+                        Button {
+                            uiState.galleryInitialNodeID = node.id
+                            uiState.showImageGallery = true
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 11.5, weight: .medium))
+                                Text("Open Gallery")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(InspectorPillButtonStyle())
+                    }
+                } else if let previewText {
+                    ScrollView {
+                        Text(previewText.isEmpty ? String(localized: "(Empty file)") : previewText)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(secondaryTextColor)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 140)
+                } else {
+                    Text("Preview unavailable")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .task(id: taskKey) {
+            await loadPreview()
+        }
+    }
+
+    @MainActor
+    private func loadPreview() async {
+        previewImage = nil
+        previewText = nil
+        isLoading = true
+        defer { isLoading = false }
+
+        let targetURL: URL
+        if !node.isFromArchive {
+            targetURL = node.url
+        } else {
+            guard let archiveURL = appState.sourceArchiveURL else { return }
+            do {
+                guard let extracted = try await DragDropManager.shared.prepareForDragThrowing(
+                    node.toFileEntry(),
+                    sourceArchiveURL: archiveURL,
+                    password: appState.archivePassword,
+                    encoding: appState.selectedEncoding.iconvName
+                ) else {
+                    return
+                }
+                targetURL = extracted
+            } catch {
+                return
+            }
+        }
+
+        guard !Task.isCancelled else { return }
+        if isImage {
+            let loaded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                guard let data = try? Data(contentsOf: targetURL) else { return nil }
+                return NSImage(data: data)
+            }.value
+            guard !Task.isCancelled else { return }
+            previewImage = loaded
+        } else {
+            let snippet = await InlinePreviewHelper.loadTextSnippet(from: targetURL, maxBytes: 16_384)
+            guard !Task.isCancelled else { return }
+            previewText = snippet
+        }
     }
 }

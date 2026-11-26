@@ -89,14 +89,14 @@ public struct FormatDetector {
 
     private static func detectBySingleExtension(_ ext: String) -> ReadableArchiveFormat? {
         switch ext {
-        case "zip", "zipx": return .zip
+        case "zip", "zipx", "cbz": return .zip
         case "7z": return .sevenZip
         case "tar": return .tar
         case "gz", "gzip": return .gz
         case "bz2", "bzip2": return .bz2
         case "xz": return .xz
         case "zst", "zstd": return .zst
-        case "rar": return .rar
+        case "rar", "cbr": return .rar
         case "dmg": return .dmg
         case "iso": return .iso
         case "xar", "pkg": return .xar

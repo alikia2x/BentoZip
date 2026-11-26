@@ -5,6 +5,7 @@ struct PasswordPromptSheet: View {
     @Environment(AppState.self) private var appState
     @State private var password: String = ""
     @State private var showPassword: Bool = false
+    @State private var saveToVault: Bool = false
     @FocusState private var isPasswordFocused: Bool
 
     var onSubmit: ((String) async -> Void)? = nil
@@ -72,6 +73,10 @@ struct PasswordPromptSheet: View {
                     .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
             )
 
+            Toggle("Save password to Vault", isOn: $saveToVault)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12))
+
             HStack(spacing: 8) {
                 Spacer()
 
@@ -111,6 +116,8 @@ struct PasswordPromptSheet: View {
     private func submit() {
         guard !password.isEmpty, !appState.isLoading else { return }
         let entered = password
+        let shouldSaveToVault = saveToVault
+        let label = archiveName
         Task {
             if let onSubmit {
                 await onSubmit(entered)
@@ -120,6 +127,10 @@ struct PasswordPromptSheet: View {
             if appState.needsPasswordPrompt && appState.isPasswordRetryError {
                 password = ""
                 isPasswordFocused = true
+            } else if shouldSaveToVault,
+                      !appState.needsPasswordPrompt,
+                      !PasswordVaultService.shared.contains(password: entered) {
+                PasswordVaultService.shared.addEntry(label: label, password: entered)
             }
         }
     }

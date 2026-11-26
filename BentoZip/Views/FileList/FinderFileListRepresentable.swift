@@ -29,8 +29,8 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         let outlineView = FinderOutlineView()
         let coordinator = context.coordinator
 
-        outlineView.style = .inset
-        outlineView.usesAlternatingRowBackgroundColors = false
+        outlineView.style = .plain
+        outlineView.usesAlternatingRowBackgroundColors = true
         outlineView.allowsMultipleSelection = true
         outlineView.allowsEmptySelection = true
         outlineView.rowHeight = 22
@@ -125,7 +125,7 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         outlineView.addTableColumn(crcColumn)
         outlineView.addTableColumn(kindColumn)
         outlineView.outlineTableColumn = nameColumn
-        outlineView.autosaveName = "BentoZipFinderOutline"
+        outlineView.autosaveName = "BentoZipFinderOutlineV2"
         outlineView.autosaveTableColumns = true
 
         let prefs = appState.preferencesManager?.loadPreferences()
