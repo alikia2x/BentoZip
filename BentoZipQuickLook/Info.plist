@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>BentoZip Quick Look</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>QLIsDataBasedPreview</key>
+			<true/>
+			<key>QLSupportedContentTypes</key>
+			<array>
+				<string>public.zip-archive</string>
+				<string>com.pkware.zip-archive</string>
+				<string>com.winzip.zipx-archive</string>
+				<string>org.7-zip.7-zip-archive</string>
+				<string>public.tar-archive</string>
+				<string>org.gnu.gnu-zip-tar-archive</string>
+				<string>org.gnu.gnu-zip-archive</string>
+				<string>public.bzip2-archive</string>
+				<string>public.tar-bzip2-archive</string>
+				<string>org.tukaani.xz-archive</string>
+				<string>org.tukaani.tar-xz-archive</string>
+				<string>org.tukaani.lzma-archive</string>
+				<string>com.rarlab.rar-archive</string>
+				<string>com.facebook.zstandard-archive</string>
+				<string>com.apple.disk-image-udif</string>
+				<string>public.iso-image</string>
+				<string>com.apple.xar-archive</string>
+				<string>com.apple.installer-package-archive</string>
+				<string>com.bentozip.split-archive</string>
+				<string>com.apple.archive</string>
+				<string>com.bentozip.apple-archive</string>
+				<string>com.microsoft.cab</string>
+				<string>com.microsoft.wim-archive</string>
+				<string>public.cpio-archive</string>
+				<string>org.debian.deb-archive</string>
+				<string>org.rpm.rpm-archive</string>
+				<string>public.archive.lha</string>
+				<string>org.kernel.squashfs-archive</string>
+				<string>com.vmware.vmdk-disk-image</string>
+				<string>com.microsoft.chm-archive</string>
+				<string>com.bentozip.arj-archive</string>
+				<string>org.lz4.lz4-archive</string>
+				<string>org.brotli.brotli-archive</string>
+				<string>org.idpf.epub-container</string>
+				<string>com.bentozip.cbz-archive</string>
+				<string>com.bentozip.cbr-archive</string>
+			</array>
+		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.quicklook.preview</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).PreviewProvider</string>
+	</dict>
+</dict>
+</plist>

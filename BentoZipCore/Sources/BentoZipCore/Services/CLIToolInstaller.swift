@@ -119,7 +119,11 @@ public struct CLIToolInstaller: Sendable {
                 while [ $# -gt 0 ]; do
                     case "$1" in
                         -p|--password)
-                            PASSWORD="${2:-}"
+                            if [ $# -lt 2 ]; then
+                                echo "bentozip: option '$1' requires an argument" >&2
+                                exit 2
+                            fi
+                            PASSWORD="$2"
                             shift 2
                             ;;
                         *)
@@ -147,15 +151,29 @@ public struct CLIToolInstaller: Sendable {
                 ARCHIVE="$1"
                 shift
                 DEST="."
+                HAS_DEST=0
                 PASSWORD=""
                 while [ $# -gt 0 ]; do
                     case "$1" in
                         -p|--password)
-                            PASSWORD="${2:-}"
+                            if [ $# -lt 2 ]; then
+                                echo "bentozip: option '$1' requires an argument" >&2
+                                exit 2
+                            fi
+                            PASSWORD="$2"
                             shift 2
                             ;;
+                        -*)
+                            echo "bentozip: unknown option '$1'" >&2
+                            exit 2
+                            ;;
                         *)
+                            if [ "$HAS_DEST" -ne 0 ]; then
+                                echo "bentozip: unexpected argument '$1'" >&2
+                                exit 2
+                            fi
                             DEST="$1"
+                            HAS_DEST=1
                             shift
                             ;;
                     esac
@@ -185,15 +203,27 @@ public struct CLIToolInstaller: Sendable {
                 while [ $# -gt 0 ]; do
                     case "$1" in
                         -f|--format)
-                            FORMAT="${2:-}"
+                            if [ $# -lt 2 ]; then
+                                echo "bentozip: option '$1' requires an argument" >&2
+                                exit 2
+                            fi
+                            FORMAT="$2"
                             shift 2
                             ;;
                         -l|--level)
-                            LEVEL="${2:-normal}"
+                            if [ $# -lt 2 ]; then
+                                echo "bentozip: option '$1' requires an argument" >&2
+                                exit 2
+                            fi
+                            LEVEL="$2"
                             shift 2
                             ;;
                         -p|--password)
-                            PASSWORD="${2:-}"
+                            if [ $# -lt 2 ]; then
+                                echo "bentozip: option '$1' requires an argument" >&2
+                                exit 2
+                            fi
+                            PASSWORD="$2"
                             shift 2
                             ;;
                         *)
@@ -246,6 +276,9 @@ public struct CLIToolInstaller: Sendable {
                 if !fm.fileExists(atPath: parentURL.path) {
                     try fm.createDirectory(at: parentURL, withIntermediateDirectories: true)
                 }
+                if Bento7zPathSafety.itemExists(at: targetURL) {
+                    try fm.removeItem(at: targetURL)
+                }
                 try script.write(to: targetURL, atomically: true, encoding: .utf8)
                 try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: targetURL.path)
             }.value
@@ -264,7 +297,7 @@ public struct CLIToolInstaller: Sendable {
             try script.write(to: tempScriptURL, atomically: true, encoding: .utf8)
         }.value
 
-        let shellCommand = "mkdir -p \(Self.shellSingleQuoted(parentURL.path)) && cp \(Self.shellSingleQuoted(tempScriptURL.path)) \(Self.shellSingleQuoted(targetURL.path)) && chmod 755 \(Self.shellSingleQuoted(targetURL.path))"
+        let shellCommand = "mkdir -p \(Self.shellSingleQuoted(parentURL.path)) && rm -f \(Self.shellSingleQuoted(targetURL.path)) && cp \(Self.shellSingleQuoted(tempScriptURL.path)) \(Self.shellSingleQuoted(targetURL.path)) && chmod 755 \(Self.shellSingleQuoted(targetURL.path))"
         try await runPrivilegedShellScript(shellCommand, isUninstall: false)
     }
 

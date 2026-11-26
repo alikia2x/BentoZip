@@ -69,6 +69,13 @@ struct FinderGridView: View {
             handleEscapeKey()
             return .handled
         }
+        .onKeyPress(.delete) {
+            handleDeleteKey()
+            return .handled
+        }
+        .onDeleteCommand {
+            handleDeleteKey()
+        }
         .confirmationDialog(
             Text("Delete \(pendingDeleteEntries.count) selected items from archive?"),
             isPresented: $showDeleteConfirmation,
@@ -187,8 +194,10 @@ struct FinderGridView: View {
             appState.navigateInto(node)
             return
         }
-        if appState.mode == .browseArchive,
-           FormatDetector.isArchiveFile(URL(fileURLWithPath: node.name)) {
+        let isArchiveItem = !node.url.path.hasPrefix("/")
+            ? (!node.name.isEmpty && FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "/tmp/\(node.name)")) != nil)
+            : FormatDetector.isArchiveFile(node.url)
+        if appState.mode == .browseArchive, isArchiveItem {
             guard !isBusy else { return }
             let entry = node.toFileEntry()
             Task {
@@ -255,6 +264,18 @@ struct FinderGridView: View {
             appState.navigateUp()
         } else {
             appState.clearSelection()
+        }
+    }
+
+    private func handleDeleteKey() {
+        guard !isBusy else { return }
+        let targets = appState.selectedNodes
+        guard !targets.isEmpty else { return }
+        if appState.mode == .compress {
+            appState.removeNodes(targets)
+        } else if appState.isWritableArchive {
+            pendingDeleteEntries = targets.map { $0.toFileEntry() }
+            showDeleteConfirmation = true
         }
     }
 

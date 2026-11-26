@@ -83,6 +83,11 @@ public struct DiskImageEngine: Sendable {
 
     // MARK: - Staging
 
+    private struct FileIdentity: Hashable {
+        let device: dev_t
+        let inode: ino_t
+    }
+
     private static func stageSources(
         _ sourceURLs: [URL],
         into stagingDir: URL,
@@ -116,27 +121,33 @@ public struct DiskImageEngine: Sendable {
         exclusions: [String]
     ) throws -> Int64 {
         let fm = FileManager.default
-        let status = Bento7zPathSafety.itemStatus(at: url)
-        guard status.exists else { return 0 }
+        let lstatStatus = Bento7zPathSafety.itemStatus(at: url)
+        guard lstatStatus.exists else { return 0 }
 
         let rootName = url.lastPathComponent
         if isExcluded(name: rootName, relativePath: rootName, patterns: exclusions) {
             return 0
         }
 
-        let rootValues = try? url.resourceValues(forKeys: Set<URLResourceKey>([.isSymbolicLinkKey]))
-        let isRootSymlink = rootValues?.isSymbolicLink ?? false
+        let isRootSymlink = isSymbolicLink(at: url)
         let effectiveURL = (isRootSymlink && followSymlinks) ? url.resolvingSymlinksInPath() : url
-        let effectiveStatus = Bento7zPathSafety.itemStatus(at: effectiveURL)
+        let effectiveStatus = followSymlinks
+            ? resolvedStatStatus(at: effectiveURL)
+            : lstatFileStatus(at: url)
+
+        guard let effectiveStatus else {
+            // Broken symlink when following symlinks: preserve symlink entry safely
+            let target = PathUtils.uniqueFileURL(for: stagingDir.appendingPathComponent(rootName))
+            try copyEntry(from: url, resolvedURL: url, to: target, followSymlinks: false)
+            return 0
+        }
 
         if !effectiveStatus.isDirectory {
             let target = PathUtils.uniqueFileURL(for: stagingDir.appendingPathComponent(rootName))
             try copyEntry(from: url, resolvedURL: effectiveURL, to: target, followSymlinks: followSymlinks)
-            let size = (try? fm.attributesOfItem(atPath: effectiveURL.path)[.size] as? NSNumber)?.int64Value ?? 0
-            return size
+            return max(0, effectiveStatus.size)
         }
 
-        var copiedBytes: Int64 = 0
         let baseDest = preserveStructure
             ? PathUtils.uniqueFileURL(for: stagingDir.appendingPathComponent(rootName, isDirectory: true))
             : stagingDir
@@ -144,47 +155,124 @@ public struct DiskImageEngine: Sendable {
             try fm.createDirectory(at: baseDest, withIntermediateDirectories: true)
         }
 
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
-        let keySet = Set(keys)
-        if let enumerator = fm.enumerator(
-            at: effectiveURL,
-            includingPropertiesForKeys: keys,
+        var activeDirectories: Set<FileIdentity> = [effectiveStatus.identity]
+        return try stageDirectoryContents(
+            sourceDir: effectiveURL,
+            destDir: baseDest,
+            stagingRoot: stagingDir,
+            archiveRelativePrefix: preserveStructure ? rootName : "",
+            preserveStructure: preserveStructure,
+            followSymlinks: followSymlinks,
+            exclusions: exclusions,
+            activeDirectories: &activeDirectories
+        )
+    }
+
+    private static func stageDirectoryContents(
+        sourceDir: URL,
+        destDir: URL,
+        stagingRoot: URL,
+        archiveRelativePrefix: String,
+        preserveStructure: Bool,
+        followSymlinks: Bool,
+        exclusions: [String],
+        activeDirectories: inout Set<FileIdentity>
+    ) throws -> Int64 {
+        let fm = FileManager.default
+        let children = try fm.contentsOfDirectory(
+            at: sourceDir,
+            includingPropertiesForKeys: [.isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey],
             options: []
-        ) {
-            for case let childURL as URL in enumerator {
-                try Task.checkCancellation()
-                let relFromSource = relativeSubpath(of: childURL, under: effectiveURL)
-                guard !relFromSource.isEmpty else { continue }
-                let archiveRel = preserveStructure ? "\(rootName)/\(relFromSource)" : relFromSource
+        )
 
-                let values = try? childURL.resourceValues(forKeys: keySet)
-                let isSymlink = values?.isSymbolicLink ?? false
-                let childIsDir = (values?.isDirectory ?? false) && !isSymlink
+        var copiedBytes: Int64 = 0
+        for childURL in children {
+            try Task.checkCancellation()
+            let childName = childURL.lastPathComponent
+            let archiveRel = archiveRelativePrefix.isEmpty ? childName : "\(archiveRelativePrefix)/\(childName)"
 
-                if isExcluded(name: childURL.lastPathComponent, relativePath: archiveRel, patterns: exclusions) {
-                    if childIsDir {
-                        enumerator.skipDescendants()
-                    }
+            if isExcluded(name: childName, relativePath: archiveRel, patterns: exclusions) {
+                continue
+            }
+
+            let isSymlink = isSymbolicLink(at: childURL)
+            if isSymlink && !followSymlinks {
+                let targetURL = preserveStructure
+                    ? destDir.appendingPathComponent(childName)
+                    : PathUtils.uniqueFileURL(for: stagingRoot.appendingPathComponent(childName))
+                try fm.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try copyEntry(from: childURL, resolvedURL: childURL, to: targetURL, followSymlinks: false)
+                continue
+            }
+
+            let targetStat = followSymlinks
+                ? resolvedStatStatus(at: childURL)
+                : lstatFileStatus(at: childURL)
+
+            guard let targetStat else {
+                // Dangling symlink when followSymlinks is enabled: preserve link without crashing
+                let targetURL = preserveStructure
+                    ? destDir.appendingPathComponent(childName)
+                    : PathUtils.uniqueFileURL(for: stagingRoot.appendingPathComponent(childName))
+                try fm.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try copyEntry(from: childURL, resolvedURL: childURL, to: targetURL, followSymlinks: false)
+                continue
+            }
+
+            if targetStat.isDirectory {
+                guard activeDirectories.insert(targetStat.identity).inserted else {
                     continue
                 }
+                defer { activeDirectories.remove(targetStat.identity) }
 
-                let targetURL = preserveStructure
-                    ? baseDest.appendingPathComponent(relFromSource)
-                    : PathUtils.uniqueFileURL(for: stagingDir.appendingPathComponent(childURL.lastPathComponent))
-
-                if childIsDir {
-                    if preserveStructure {
-                        try fm.createDirectory(at: targetURL, withIntermediateDirectories: true)
-                    }
-                } else {
-                    try fm.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    let resolvedChild = (isSymlink && followSymlinks) ? childURL.resolvingSymlinksInPath() : childURL
-                    try copyEntry(from: childURL, resolvedURL: resolvedChild, to: targetURL, followSymlinks: followSymlinks)
-                    copiedBytes += Int64(values?.fileSize ?? 0)
+                let nextSource = (isSymlink && followSymlinks) ? childURL.resolvingSymlinksInPath() : childURL
+                let nextDest = preserveStructure
+                    ? destDir.appendingPathComponent(childName, isDirectory: true)
+                    : stagingRoot
+                if preserveStructure {
+                    try fm.createDirectory(at: nextDest, withIntermediateDirectories: true)
                 }
+                copiedBytes += try stageDirectoryContents(
+                    sourceDir: nextSource,
+                    destDir: nextDest,
+                    stagingRoot: stagingRoot,
+                    archiveRelativePrefix: archiveRel,
+                    preserveStructure: preserveStructure,
+                    followSymlinks: followSymlinks,
+                    exclusions: exclusions,
+                    activeDirectories: &activeDirectories
+                )
+            } else {
+                let targetURL = preserveStructure
+                    ? destDir.appendingPathComponent(childName)
+                    : PathUtils.uniqueFileURL(for: stagingRoot.appendingPathComponent(childName))
+                try fm.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let resolvedChild = (isSymlink && followSymlinks) ? childURL.resolvingSymlinksInPath() : childURL
+                try copyEntry(from: childURL, resolvedURL: resolvedChild, to: targetURL, followSymlinks: followSymlinks)
+                copiedBytes += max(0, targetStat.size)
             }
         }
         return copiedBytes
+    }
+
+    private static func isSymbolicLink(at url: URL) -> Bool {
+        var st = stat()
+        guard lstat(url.path, &st) == 0 else { return false }
+        return (st.st_mode & S_IFMT) == S_IFLNK
+    }
+
+    private static func lstatFileStatus(at url: URL) -> (isDirectory: Bool, size: Int64, identity: FileIdentity)? {
+        var st = stat()
+        guard lstat(url.path, &st) == 0 else { return nil }
+        let isDir = (st.st_mode & S_IFMT) == S_IFDIR
+        return (isDir, Int64(st.st_size), FileIdentity(device: st.st_dev, inode: st.st_ino))
+    }
+
+    private static func resolvedStatStatus(at url: URL) -> (isDirectory: Bool, size: Int64, identity: FileIdentity)? {
+        var st = stat()
+        guard stat(url.path, &st) == 0 else { return nil }
+        let isDir = (st.st_mode & S_IFMT) == S_IFDIR
+        return (isDir, Int64(st.st_size), FileIdentity(device: st.st_dev, inode: st.st_ino))
     }
 
     private static func copyEntry(from originalURL: URL, resolvedURL: URL, to targetURL: URL, followSymlinks: Bool) throws {
@@ -197,14 +285,6 @@ public struct DiskImageEngine: Sendable {
         } else {
             try fm.copyItem(at: originalURL, to: targetURL)
         }
-    }
-
-    private static func relativeSubpath(of childURL: URL, under rootURL: URL) -> String {
-        let rootPath = rootURL.standardizedFileURL.path
-        let childPath = childURL.standardizedFileURL.path
-        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        guard childPath.hasPrefix(prefix) else { return "" }
-        return String(childPath.dropFirst(prefix.count))
     }
 
     private static func isExcluded(name: String, relativePath: String, patterns: [String]) -> Bool {
@@ -254,17 +334,28 @@ public struct DiskImageEngine: Sendable {
 
         struct ExitState: Sendable {
             var status: Int32?
+            var stdoutEOF = false
+            var stderrEOF = false
             var continuation: CheckedContinuation<Int32, Never>?
+
+            mutating func takeReadyContinuationIfComplete() -> (CheckedContinuation<Int32, Never>, Int32)? {
+                guard let status, stdoutEOF, stderrEOF, let cont = continuation else {
+                    return nil
+                }
+                continuation = nil
+                return (cont, status)
+            }
         }
         let exitLock = OSAllocatedUnfairLock(initialState: ExitState())
         process.terminationHandler = { proc in
             let status = proc.terminationStatus
-            let pending = exitLock.withLock { state -> CheckedContinuation<Int32, Never>? in
+            let pending = exitLock.withLock { state -> (CheckedContinuation<Int32, Never>, Int32)? in
                 state.status = status
-                defer { state.continuation = nil }
-                return state.continuation
+                return state.takeReadyContinuationIfComplete()
             }
-            pending?.resume(returning: status)
+            if let (cont, exitStatus) = pending {
+                cont.resume(returning: exitStatus)
+            }
         }
 
         let stderrBuffer = OSAllocatedUnfairLock(initialState: Data())
@@ -272,33 +363,72 @@ public struct DiskImageEngine: Sendable {
             let chunk = handle.availableData
             if chunk.isEmpty {
                 handle.readabilityHandler = nil
+                try? handle.close()
+                let pending = exitLock.withLock { state -> (CheckedContinuation<Int32, Never>, Int32)? in
+                    state.stderrEOF = true
+                    return state.takeReadyContinuationIfComplete()
+                }
+                if let (cont, exitStatus) = pending {
+                    cont.resume(returning: exitStatus)
+                }
             } else {
-                stderrBuffer.withLock { if $0.count < 65_536 { $0.append(chunk) } }
+                stderrBuffer.withLock {
+                    let remaining = 65_536 - $0.count
+                    if remaining > 0 {
+                        $0.append(chunk.prefix(remaining))
+                    }
+                }
             }
         }
         stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            if handle.availableData.isEmpty {
+            let chunk = handle.availableData
+            if chunk.isEmpty {
                 handle.readabilityHandler = nil
+                try? handle.close()
+                let pending = exitLock.withLock { state -> (CheckedContinuation<Int32, Never>, Int32)? in
+                    state.stdoutEOF = true
+                    return state.takeReadyContinuationIfComplete()
+                }
+                if let (cont, exitStatus) = pending {
+                    cont.resume(returning: exitStatus)
+                }
             }
         }
 
+        var processLaunched = false
         defer {
             stdoutPipe.fileHandleForReading.readabilityHandler = nil
             stderrPipe.fileHandleForReading.readabilityHandler = nil
+            let (needCloseStdout, needCloseStderr) = exitLock.withLock { state in
+                (!state.stdoutEOF, !state.stderrEOF)
+            }
+            if needCloseStdout {
+                try? stdoutPipe.fileHandleForReading.close()
+            }
+            if needCloseStderr {
+                try? stderrPipe.fileHandleForReading.close()
+            }
+            if !processLaunched {
+                try? stdoutPipe.fileHandleForWriting.close()
+                try? stderrPipe.fileHandleForWriting.close()
+            }
             controller.detach()
         }
 
         guard controller.attach(process) else { throw CancellationError() }
         try process.run()
+        processLaunched = true
 
         let exitStatus: Int32 = await withCheckedContinuation { continuation in
-            let alreadyExited = exitLock.withLock { state -> Int32? in
-                if let status = state.status { return status }
+            let readyStatus = exitLock.withLock { state -> Int32? in
+                if let status = state.status, state.stdoutEOF, state.stderrEOF {
+                    return status
+                }
                 state.continuation = continuation
                 return nil
             }
-            if let status = alreadyExited {
-                continuation.resume(returning: status)
+            if let readyStatus {
+                continuation.resume(returning: readyStatus)
             }
         }
 

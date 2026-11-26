@@ -4617,6 +4617,182 @@
           }
         }
       }
+    },
+    "Browse in BentoZip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Browse in BentoZip"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 BentoZip 中浏览"
+          }
+        }
+      }
+    },
+    "Choose a destination folder for extraction.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a destination folder for extraction."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择要解压到的目标文件夹。"
+          }
+        }
+      }
+    },
+    "Compress with BentoZip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compress with BentoZip"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 BentoZip 压缩"
+          }
+        }
+      }
+    },
+    "Extract Here with BentoZip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extract Here with BentoZip"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 BentoZip 解压到此处"
+          }
+        }
+      }
+    },
+    "Extract to Folder with BentoZip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extract to Folder with BentoZip"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 BentoZip 解压到文件夹"
+          }
+        }
+      }
+    },
+    "No archive files were provided to browse.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No archive files were provided to browse."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未提供要浏览的归档文件。"
+          }
+        }
+      }
+    },
+    "No archive files were provided to extract.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No archive files were provided to extract."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未提供要解压的归档文件。"
+          }
+        }
+      }
+    },
+    "No files or folders were provided to compress.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No files or folders were provided to compress."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未提供要压缩的文件或文件夹。"
+          }
+        }
+      }
+    },
+    "Allow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许"
+          }
+        }
+      }
+    },
+    "Allow external request to compress %lld item(s)?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow external request to compress %lld item(s)?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "是否允许外部请求压缩 %lld 个项目？"
+          }
+        }
+      }
+    },
+    "Allow external request to extract %lld item(s)?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow external request to extract %lld item(s)?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "是否允许外部请求解压 %lld 个项目？"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

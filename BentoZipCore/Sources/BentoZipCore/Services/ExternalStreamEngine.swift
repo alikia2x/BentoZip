@@ -8,13 +8,18 @@ public struct ExternalStreamEngine: Sendable {
     /// Locate an executable CLI helper, preferring `Contents/Helpers/` before Homebrew and system paths.
     public static func findBinary(named name: String) -> String? {
         let fm = FileManager.default
-        let candidates: [String] = [
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(name)").path,
-            Bundle.main.url(forResource: name, withExtension: nil)?.path,
-            "/opt/homebrew/bin/\(name)",
-            "/usr/local/bin/\(name)",
-            "/usr/bin/\(name)"
-        ].compactMap { $0 }
+        let candidates: [String] = (
+            [
+                Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(name)").path,
+                Bundle.main.url(forResource: name, withExtension: nil)?.path
+            ]
+            + Bento7zProcessRunner.enclosingAppHelperCandidates(fileName: name).map { Optional($0) }
+            + [
+                "/opt/homebrew/bin/\(name)",
+                "/usr/local/bin/\(name)",
+                "/usr/bin/\(name)"
+            ]
+        ).compactMap { $0 }
 
         return candidates.first { fm.isExecutableFile(atPath: $0) }
     }

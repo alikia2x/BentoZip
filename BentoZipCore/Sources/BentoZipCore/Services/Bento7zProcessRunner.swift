@@ -45,14 +45,35 @@ struct Bento7zProcessRunner: Sendable {
 
     // MARK: - Path Discovery
 
-    private static func bundledCandidates(resource: String, ext: String? = nil) -> [String] {
-        let fileName = ext.map { "\(resource).\($0)" } ?? resource
+    static func enclosingAppHelperCandidates(
+        fileName: String,
+        bundleURL: URL = Bundle.main.bundleURL
+    ) -> [String] {
+        guard bundleURL.pathExtension.lowercased() == "appex" else { return [] }
+        let enclosingAppURL = bundleURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
         return [
-            Bundle.main.url(forResource: resource, withExtension: ext)?.path,
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(fileName)").path,
-            Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent(fileName).path,
-            Bundle.main.resourceURL?.appendingPathComponent(fileName).path
-        ].compactMap { $0 }
+            enclosingAppURL.appendingPathComponent("Contents/Helpers/\(fileName)").path,
+            enclosingAppURL.appendingPathComponent("Helpers/\(fileName)").path
+        ]
+    }
+
+    static func bundledCandidates(
+        resource: String,
+        ext: String? = nil,
+        bundle: Bundle = .main
+    ) -> [String] {
+        let fileName = ext.map { "\(resource).\($0)" } ?? resource
+        var candidates: [String?] = [
+            bundle.url(forResource: resource, withExtension: ext)?.path,
+            bundle.bundleURL.appendingPathComponent("Contents/Helpers/\(fileName)").path,
+            bundle.executableURL?.deletingLastPathComponent().appendingPathComponent(fileName).path,
+            bundle.resourceURL?.appendingPathComponent(fileName).path
+        ]
+        candidates.append(contentsOf: enclosingAppHelperCandidates(fileName: fileName, bundleURL: bundle.bundleURL))
+        return candidates.compactMap { $0 }
     }
 
     private static func repoEngineBuildPath(_ fileName: String) -> String {
@@ -68,6 +89,10 @@ struct Bento7zProcessRunner: Sendable {
             .path
     }
 
+    static var isBinaryAvailable: Bool {
+        FileManager.default.isExecutableFile(atPath: defaultBinaryPath())
+    }
+
     static func defaultBinaryPath() -> String {
         let fm = FileManager.default
         if let found = bundledCandidates(resource: "bento7z").first(where: { fm.isExecutableFile(atPath: $0) }) {
@@ -76,6 +101,9 @@ struct Bento7zProcessRunner: Sendable {
         #if DEBUG
         return repoEngineBuildPath("bento7z")
         #else
+        if let enclosingCandidate = enclosingAppHelperCandidates(fileName: "bento7z").first {
+            return enclosingCandidate
+        }
         return Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/bento7z").path
         #endif
     }

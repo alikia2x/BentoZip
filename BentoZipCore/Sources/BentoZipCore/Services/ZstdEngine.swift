@@ -8,13 +8,18 @@ public struct ZstdEngine: Sendable {
     /// Locate a usable `zstd` executable on the system, preferring a bundled helper if present.
     public static func findZstdBinary() -> String? {
         let fm = FileManager.default
-        let candidates: [String] = [
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/zstd").path,
-            Bundle.main.url(forResource: "zstd", withExtension: nil)?.path,
-            "/opt/homebrew/bin/zstd",
-            "/usr/local/bin/zstd",
-            "/usr/bin/zstd"
-        ].compactMap { $0 }
+        let candidates: [String] = (
+            [
+                Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/zstd").path,
+                Bundle.main.url(forResource: "zstd", withExtension: nil)?.path
+            ]
+            + Bento7zProcessRunner.enclosingAppHelperCandidates(fileName: "zstd").map { Optional($0) }
+            + [
+                "/opt/homebrew/bin/zstd",
+                "/usr/local/bin/zstd",
+                "/usr/bin/zstd"
+            ]
+        ).compactMap { $0 }
 
         return candidates.first { fm.isExecutableFile(atPath: $0) }
     }

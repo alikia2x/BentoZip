@@ -89,6 +89,22 @@ public enum PasswordGenerator: Sendable {
     }
 }
 
+/// Errors surfaced when reading or persisting entries in the Keychain password vault.
+public enum PasswordVaultError: LocalizedError, Sendable, Equatable {
+    case encodingFailed
+    case keychainError(OSStatus)
+
+    public var errorDescription: String? {
+        switch self {
+        case .encodingFailed:
+            return String(localized: "Failed to encode password vault entries.", bundle: .module)
+        case .keychainError(let status):
+            let message = (SecCopyErrorMessageString(status, nil) as String?) ?? "OSStatus \(status)"
+            return String(localized: "Keychain operation failed: \(message) (\(status))", bundle: .module)
+        }
+    }
+}
+
 /// Manages saved archive passwords in the macOS Keychain (or an isolated in-memory store for unit tests),
 /// with optional Touch ID / device-owner biometric authentication.
 public final class PasswordVaultService: @unchecked Sendable {
@@ -96,14 +112,31 @@ public final class PasswordVaultService: @unchecked Sendable {
 
     public static let defaultService = "com.bentozip.password-vault"
     public static let defaultAccount = "vault-entries"
+    private static let logger = Logger(subsystem: "com.bentozip.core", category: "PasswordVault")
 
     private enum StorageMode {
         case keychain(service: String, account: String)
         case inMemory
     }
 
+    private struct VaultState {
+        var entries: [PasswordVaultEntry]
+        var lastStatus: OSStatus = errSecSuccess
+        var lastErrorMessage: String?
+    }
+
     private let mode: StorageMode
-    private let lock = OSAllocatedUnfairLock(initialState: [PasswordVaultEntry]())
+    private let lock: OSAllocatedUnfairLock<VaultState>
+
+    /// Most recent Keychain `OSStatus` recorded by this vault instance.
+    public var lastKeychainStatus: OSStatus {
+        lock.withLock { $0.lastStatus }
+    }
+
+    /// Most recent Keychain error message recorded by this vault instance, if any.
+    public var lastError: String? {
+        lock.withLock { $0.lastErrorMessage }
+    }
 
     /// Create a Keychain-backed password vault service.
     public init(
@@ -111,12 +144,13 @@ public final class PasswordVaultService: @unchecked Sendable {
         account: String = PasswordVaultService.defaultAccount
     ) {
         self.mode = .keychain(service: service, account: account)
+        self.lock = OSAllocatedUnfairLock(initialState: VaultState(entries: []))
     }
 
     /// Create an isolated in-memory vault for unit tests without touching the user's Keychain.
     public init(inMemoryEntries: [PasswordVaultEntry]) {
         self.mode = .inMemory
-        self.lock.withLock { $0 = inMemoryEntries }
+        self.lock = OSAllocatedUnfairLock(initialState: VaultState(entries: inMemoryEntries))
     }
 
     /// Convenience factory for an isolated in-memory vault in tests.
@@ -128,10 +162,13 @@ public final class PasswordVaultService: @unchecked Sendable {
     public func loadEntries() -> [PasswordVaultEntry] {
         switch mode {
         case .inMemory:
-            return lock.withLock { $0 }
+            return lock.withLock { $0.entries }
         case .keychain(let service, let account):
-            return lock.withLock { _ in
-                readKeychainEntries(service: service, account: account)
+            return lock.withLock { state in
+                let result = readKeychainEntries(service: service, account: account)
+                state.lastStatus = result.status
+                state.lastErrorMessage = result.errorMessage
+                return result.entries
             }
         }
     }
@@ -148,9 +185,9 @@ public final class PasswordVaultService: @unchecked Sendable {
         return result
     }
 
-    /// Add a new password entry to the vault and persist it.
+    /// Add a new password entry to the vault and persist it, throwing on Keychain write failure.
     @discardableResult
-    public func addEntry(label: String, password: String) -> PasswordVaultEntry {
+    public func saveEntry(label: String, password: String) throws -> PasswordVaultEntry {
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         let entry = PasswordVaultEntry(
             label: trimmedLabel.isEmpty ? "Untitled" : trimmedLabel,
@@ -158,29 +195,78 @@ public final class PasswordVaultService: @unchecked Sendable {
         )
         switch mode {
         case .inMemory:
-            lock.withLock { $0.append(entry) }
+            lock.withLock { state in
+                state.entries.append(entry)
+                state.lastStatus = errSecSuccess
+                state.lastErrorMessage = nil
+            }
         case .keychain(let service, let account):
-            lock.withLock { _ in
-                var entries = readKeychainEntries(service: service, account: account)
+            try lock.withLock { state in
+                var entries = readKeychainEntries(service: service, account: account).entries
                 entries.append(entry)
-                writeKeychainEntries(entries, service: service, account: account)
+                do {
+                    try writeKeychainEntries(entries, service: service, account: account)
+                    state.lastStatus = errSecSuccess
+                    state.lastErrorMessage = nil
+                } catch let error as PasswordVaultError {
+                    if case .keychainError(let status) = error {
+                        state.lastStatus = status
+                    }
+                    state.lastErrorMessage = error.localizedDescription
+                    Self.logger.error("Failed to persist vault entry: \(error.localizedDescription, privacy: .public)")
+                    throw error
+                }
             }
         }
         return entry
     }
 
-    /// Delete the entry matching `id` from the vault.
-    public func deleteEntry(id: UUID) {
+    /// Add a new password entry to the vault and persist it (recording any Keychain error in `lastError`).
+    @discardableResult
+    public func addEntry(label: String, password: String) -> PasswordVaultEntry {
+        do {
+            return try saveEntry(label: label, password: password)
+        } catch {
+            let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            return PasswordVaultEntry(
+                label: trimmedLabel.isEmpty ? "Untitled" : trimmedLabel,
+                password: password
+            )
+        }
+    }
+
+    /// Delete the entry matching `id` from the vault, throwing on Keychain write failure.
+    public func removeEntry(id: UUID) throws {
         switch mode {
         case .inMemory:
-            lock.withLock { $0.removeAll { $0.id == id } }
+            lock.withLock { state in
+                state.entries.removeAll { $0.id == id }
+                state.lastStatus = errSecSuccess
+                state.lastErrorMessage = nil
+            }
         case .keychain(let service, let account):
-            lock.withLock { _ in
-                var entries = readKeychainEntries(service: service, account: account)
+            try lock.withLock { state in
+                var entries = readKeychainEntries(service: service, account: account).entries
                 entries.removeAll { $0.id == id }
-                writeKeychainEntries(entries, service: service, account: account)
+                do {
+                    try writeKeychainEntries(entries, service: service, account: account)
+                    state.lastStatus = errSecSuccess
+                    state.lastErrorMessage = nil
+                } catch let error as PasswordVaultError {
+                    if case .keychainError(let status) = error {
+                        state.lastStatus = status
+                    }
+                    state.lastErrorMessage = error.localizedDescription
+                    Self.logger.error("Failed to remove vault entry: \(error.localizedDescription, privacy: .public)")
+                    throw error
+                }
             }
         }
+    }
+
+    /// Delete the entry matching `id` from the vault (recording any Keychain error in `lastError`).
+    public func deleteEntry(id: UUID) {
+        try? removeEntry(id: id)
     }
 
     /// Check whether `password` is already stored in the vault.
@@ -206,7 +292,10 @@ public final class PasswordVaultService: @unchecked Sendable {
 
     // MARK: - Keychain Persistence
 
-    private func readKeychainEntries(service: String, account: String) -> [PasswordVaultEntry] {
+    private func readKeychainEntries(
+        service: String,
+        account: String
+    ) -> (entries: [PasswordVaultEntry], status: OSStatus, errorMessage: String?) {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -216,14 +305,32 @@ public final class PasswordVaultService: @unchecked Sendable {
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else {
-            return []
+        if status == errSecItemNotFound {
+            return ([], errSecSuccess, nil)
         }
-        return (try? JSONDecoder().decode([PasswordVaultEntry].self, from: data)) ?? []
+        guard status == errSecSuccess else {
+            let err = PasswordVaultError.keychainError(status)
+            Self.logger.warning("Keychain read failed: \(err.localizedDescription, privacy: .public)")
+            return ([], status, err.localizedDescription)
+        }
+        guard let data = result as? Data else {
+            return ([], errSecSuccess, nil)
+        }
+        let decoded = (try? JSONDecoder().decode([PasswordVaultEntry].self, from: data)) ?? []
+        return (decoded, errSecSuccess, nil)
     }
 
-    private func writeKeychainEntries(_ entries: [PasswordVaultEntry], service: String, account: String) {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
+    private func writeKeychainEntries(
+        _ entries: [PasswordVaultEntry],
+        service: String,
+        account: String
+    ) throws {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(entries)
+        } catch {
+            throw PasswordVaultError.encodingFailed
+        }
 
         let baseQuery: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
@@ -240,7 +347,12 @@ public final class PasswordVaultService: @unchecked Sendable {
             var addQuery = baseQuery
             addQuery[kSecValueData] = data
             addQuery[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlocked
-            SecItemAdd(addQuery as CFDictionary, nil)
+            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            guard addStatus == errSecSuccess else {
+                throw PasswordVaultError.keychainError(addStatus)
+            }
+        } else if updateStatus != errSecSuccess {
+            throw PasswordVaultError.keychainError(updateStatus)
         }
     }
 }

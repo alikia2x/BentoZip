@@ -139,6 +139,18 @@ public struct GitHubReleaseInfo: Identifiable, Codable, Sendable, Equatable {
     }
 }
 
+/// Errors raised when validating an update release payload.
+public enum UpdateCheckError: LocalizedError, Sendable, Equatable {
+    case insecureReleaseURL(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .insecureReleaseURL(let urlString):
+            return String(localized: "Update release URL must use HTTPS: \(urlString)", bundle: .module)
+        }
+    }
+}
+
 /// Current state of an update check.
 public enum UpdateCheckStatus: Sendable, Equatable {
     case idle
@@ -255,6 +267,10 @@ public final class UpdateChecker {
 
         let dto = try JSONDecoder().decode(ReleaseDTO.self, from: data)
 
+        guard dto.htmlURL.scheme?.lowercased() == "https" else {
+            throw UpdateCheckError.insecureReleaseURL(dto.htmlURL.absoluteString)
+        }
+
         let publishedDate: Date? = dto.publishedAt.flatMap { raw in
             let withFraction = ISO8601DateFormatter()
             withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -266,9 +282,11 @@ public final class UpdateChecker {
             return standard.date(from: raw)
         }
 
-        let assets = dto.assets ?? []
-        let preferredAsset = assets.first { $0.name.lowercased().hasSuffix(".dmg") }
-            ?? assets.first { $0.name.lowercased().hasSuffix(".zip") }
+        let httpsAssets = (dto.assets ?? []).filter {
+            $0.browserDownloadURL.scheme?.lowercased() == "https"
+        }
+        let preferredAsset = httpsAssets.first { $0.name.lowercased().hasSuffix(".dmg") }
+            ?? httpsAssets.first { $0.name.lowercased().hasSuffix(".zip") }
 
         let displayName = (dto.name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
             ? (dto.name ?? dto.tagName)

@@ -414,6 +414,75 @@ struct Phase3UpdateCheckerTests {
         #expect(zipRelease.downloadURL?.lastPathComponent == "BentoZip-2.4.1.zip")
     }
 
+    @Test func parseRelease_rejectsNonHTTPSUrls() throws {
+        // Non-HTTPS html_url schemes must be rejected
+        for unsafeHTML in [
+            "http://github.com/alikia/BentoZip/releases/tag/v2.4.2",
+            "file:///Applications/BentoZip.app",
+            "bentozip://open/something"
+        ] {
+            let badReleaseJSON = """
+            {
+              "tag_name": "v2.4.2",
+              "html_url": "\(unsafeHTML)",
+              "assets": []
+            }
+            """
+            #expect(throws: (any Error).self) {
+                _ = try UpdateChecker.parseRelease(from: Data(badReleaseJSON.utf8))
+            }
+        }
+
+        // Non-HTTPS asset download URLs must be filtered out while preserving valid HTTPS assets
+        let mixedAssetsJSON = """
+        {
+          "tag_name": "v2.4.2",
+          "html_url": "https://github.com/alikia/BentoZip/releases/tag/v2.4.2",
+          "assets": [
+            {
+              "name": "BentoZip-2.4.2-insecure.dmg",
+              "browser_download_url": "http://example.com/BentoZip-2.4.2.dmg"
+            },
+            {
+              "name": "BentoZip-2.4.2-local.dmg",
+              "browser_download_url": "file:///tmp/BentoZip-2.4.2.dmg"
+            },
+            {
+              "name": "BentoZip-2.4.2-scheme.zip",
+              "browser_download_url": "bentozip://evil/BentoZip-2.4.2.zip"
+            },
+            {
+              "name": "BentoZip-2.4.2-safe.zip",
+              "browser_download_url": "https://github.com/alikia/BentoZip/releases/download/v2.4.2/BentoZip-2.4.2-safe.zip"
+            }
+          ]
+        }
+        """
+        let filteredRelease = try UpdateChecker.parseRelease(from: Data(mixedAssetsJSON.utf8))
+        #expect(filteredRelease.downloadURL?.scheme == "https")
+        #expect(filteredRelease.downloadURL?.lastPathComponent == "BentoZip-2.4.2-safe.zip")
+
+        // When all assets have non-HTTPS URLs, downloadURL must be nil
+        let allUnsafeAssetsJSON = """
+        {
+          "tag_name": "v2.4.3",
+          "html_url": "https://github.com/alikia/BentoZip/releases/tag/v2.4.3",
+          "assets": [
+            {
+              "name": "BentoZip-2.4.3.dmg",
+              "browser_download_url": "http://example.com/BentoZip-2.4.3.dmg"
+            },
+            {
+              "name": "BentoZip-2.4.3.zip",
+              "browser_download_url": "file:///tmp/BentoZip-2.4.3.zip"
+            }
+          ]
+        }
+        """
+        let noDownloadRelease = try UpdateChecker.parseRelease(from: Data(allUnsafeAssetsJSON.utf8))
+        #expect(noDownloadRelease.downloadURL == nil)
+    }
+
     @Test func checkForUpdates_returnsUpdateAvailableUpToDateAndFailed() async throws {
         defer { MockURLProtocol.handlerLock.withLock { $0 = nil } }
 

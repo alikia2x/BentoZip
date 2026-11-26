@@ -125,6 +125,14 @@ ditto "${BUILT_APP}" "${APP_OUT}"
 
 if [ "${DO_CODESIGN}" = "1" ]; then
   echo "==> Step 4: Hardening runtime & signing inside-out"
+  if [ -d "${APP_OUT}/Contents/PlugIns" ]; then
+    while IFS= read -r -d '' appex; do
+      while IFS= read -r -d '' nested_bin; do
+        codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${nested_bin}"
+      done < <(find "${appex}/Contents" -type f \( -name "*.dylib" -o -name "*.so" -o -perm -111 \) ! -path "*/MacOS/*" -print0 2>/dev/null || true)
+      codesign --force --options runtime --timestamp --preserve-metadata=entitlements --sign "${MACOS_DEVELOPER_ID}" "${appex}"
+    done < <(find "${APP_OUT}/Contents/PlugIns" -maxdepth 1 -type d -name "*.appex" -print0 | sort -z)
+  fi
   codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${APP_OUT}/Contents/Helpers/7z.so"
   codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${APP_OUT}/Contents/Helpers/bento7z"
   codesign --force --options runtime --timestamp --preserve-metadata=entitlements --sign "${MACOS_DEVELOPER_ID}" "${APP_OUT}"

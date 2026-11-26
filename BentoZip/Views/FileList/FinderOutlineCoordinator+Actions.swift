@@ -37,10 +37,13 @@ extension FinderOutlineCoordinator {
             appState.navigateInto(node)
             return
         }
+        let isArchiveItem = !node.url.path.hasPrefix("/")
+            ? (!node.name.isEmpty && FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "/tmp/\(node.name)")) != nil)
+            : FormatDetector.isArchiveFile(node.url)
         if appState.mode == .browseArchive,
            appURL == nil,
            !node.isDirectory,
-           FormatDetector.isArchiveFile(URL(fileURLWithPath: node.name)) {
+           isArchiveItem {
             guard !appState.isLoading, !progressState.isOperationInProgress else { return }
             let entry = node.toFileEntry()
             Task {

@@ -1,5 +1,6 @@
 import AppKit
 import BentoZipCore
+import Security
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -29,12 +30,14 @@ final class DocumentWindowRouter {
     private var openingArchivePaths: Set<String> = []
     private var openWorkspaceWindow: ((WorkspaceLaunchRequest) -> Void)?
     private var pendingRequests: [WorkspaceLaunchRequest] = []
-    private var preferencesManager: PreferencesManager?
+    private(set) var preferencesManager: PreferencesManager?
+    private var cachedIPCToken: String?
 
     private init() {}
 
     func configurePreferencesManager(_ manager: PreferencesManager) {
         preferencesManager = manager
+        _ = loadOrCreateIPCToken()
     }
 
     func configureWindowOpener(_ opener: @escaping (WorkspaceLaunchRequest) -> Void) {
@@ -273,9 +276,22 @@ final class DocumentWindowRouter {
         dispatchLaunchRequest(.compressFiles(urls))
     }
 
-    /// Route external file opens (Finder double-click, Open With, Dock drop).
+    /// Route external file opens (Finder double-click, Open With, Dock drop, or `bentozip://` extension URLs).
     func openExternalURLs(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
+
+        let customActionURLs = urls.filter { $0.scheme?.lowercased() == "bentozip" }
+        if !customActionURLs.isEmpty {
+            for customURL in customActionURLs {
+                handleCustomActionURL(customURL)
+            }
+            let remainingFileURLs = urls.filter { $0.isFileURL }
+            if !remainingFileURLs.isEmpty {
+                openExternalURLs(remainingFileURLs)
+            }
+            return
+        }
+
         let optionPressed = NSEvent.modifierFlags.contains(.option)
         let prefs = preferencesManager?.loadPreferences() ?? AppPreferences()
         var action = ArchiveOpenAction(rawValue: prefs.archiveOpenAction) ?? .browse
@@ -306,6 +322,109 @@ final class DocumentWindowRouter {
                 openFilesToCompress(urls)
             }
         }
+    }
+
+    private func handleCustomActionURL(_ url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        let action = components.host?.lowercased()
+        guard action == "compress" || action == "extract" || action == "browse" else { return }
+
+        var fileURLs: [URL] = []
+        for item in components.queryItems ?? [] where item.name == "path" {
+            guard let path = item.value, path.hasPrefix("/") else { continue }
+            fileURLs.append(URL(fileURLWithPath: path).standardizedFileURL)
+        }
+        guard !fileURLs.isEmpty else { return }
+
+        if action == "browse" {
+            for fileURL in fileURLs {
+                openArchive(fileURL)
+            }
+            return
+        }
+
+        let providedToken = (components.queryItems ?? []).first(where: { $0.name == "token" })?.value
+        let expectedToken = loadOrCreateIPCToken()
+        let isAuthorized = providedToken.flatMap { token in
+            expectedToken.map { Self.constantTimeEquals(token, $0) }
+        } ?? false
+
+        if !isAuthorized {
+            guard confirmExternalAction(action ?? "", for: fileURLs) else { return }
+        }
+
+        switch action {
+        case "compress":
+            openFilesToCompress(fileURLs)
+        case "extract":
+            BentoZipServicesProvider.shared.extractArchivesHere(fileURLs)
+        default:
+            return
+        }
+    }
+
+    private func confirmExternalAction(_ action: String, for fileURLs: [URL]) -> Bool {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        if action == "extract" {
+            alert.messageText = String(localized: "Allow external request to extract \(fileURLs.count) item(s)?")
+        } else {
+            alert.messageText = String(localized: "Allow external request to compress \(fileURLs.count) item(s)?")
+        }
+        let previewNames = fileURLs.prefix(3).map(\.lastPathComponent).joined(separator: ", ")
+        alert.informativeText = fileURLs.count > 3 ? "\(previewNames)..." : previewNames
+        alert.addButton(withTitle: String(localized: "Allow"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func loadOrCreateIPCToken() -> String? {
+        if let cachedIPCToken {
+            return cachedIPCToken
+        }
+        guard let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            return nil
+        }
+        let dir = appSupport.appendingPathComponent("BentoZip", isDirectory: true)
+        let tokenURL = dir.appendingPathComponent(".ipc-token", isDirectory: false)
+
+        if let existing = try? String(contentsOf: tokenURL, encoding: .utf8) {
+            let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                cachedIPCToken = trimmed
+                return trimmed
+            }
+        }
+
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            return nil
+        }
+        let token = bytes.map { String(format: "%02x", $0) }.joined()
+        try? FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try? token.write(to: tokenURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
+        cachedIPCToken = token
+        return token
+    }
+
+    private static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
+        let lhsBytes = Array(lhs.utf8)
+        let rhsBytes = Array(rhs.utf8)
+        guard lhsBytes.count == rhsBytes.count else { return false }
+        var diff: UInt8 = 0
+        for (a, b) in zip(lhsBytes, rhsBytes) {
+            diff |= (a ^ b)
+        }
+        return diff == 0
     }
 
     // MARK: - Helpers

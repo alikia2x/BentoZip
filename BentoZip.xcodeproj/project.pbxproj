@@ -9,6 +9,14 @@
 /* Begin PBXBuildFile section */
 		C402B2072FCB3D3D00F97BE8 /* BentoZipCore in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0060000000000000006 /* BentoZipCore */; };
 		C402B2082FCB3D3D00F97BE8 /* BentoZipCore in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0060000000000000006 /* BentoZipCore */; };
+		E4A100050000000000000001 /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A100020000000000000001 /* PreviewProvider.swift */; };
+		E4A100060000000000000001 /* BentoZipCore in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0060000000000000006 /* BentoZipCore */; };
+		E4A100070000000000000001 /* BentoZipQuickLook.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = E4A100010000000000000001 /* BentoZipQuickLook.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		E4A200050000000000000001 /* FinderSyncController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A200020000000000000001 /* FinderSyncController.swift */; };
+		E4A200070000000000000001 /* BentoZipFinderExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = E4A200010000000000000001 /* BentoZipFinderExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		E4A300050000000000000001 /* ImportExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A300020000000000000001 /* ImportExtension.swift */; };
+		E4A300060000000000000001 /* BentoZipCore in Frameworks */ = {isa = PBXBuildFile; productRef = D4E1A0060000000000000006 /* BentoZipCore */; };
+		E4A300070000000000000001 /* BentoZipSpotlight.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = E4A300010000000000000001 /* BentoZipSpotlight.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -26,12 +34,61 @@
 			remoteGlobalIDString = C4A4A7912FC7772E003523FF;
 			remoteInfo = BentoZip;
 		};
+		E4A1000F0000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C4A4A78A2FC7772E003523FF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E4A1000B0000000000000001;
+			remoteInfo = BentoZipQuickLook;
+		};
+		E4A2000F0000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C4A4A78A2FC7772E003523FF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E4A2000B0000000000000001;
+			remoteInfo = BentoZipFinderExtension;
+		};
+		E4A3000F0000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C4A4A78A2FC7772E003523FF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E4A3000B0000000000000001;
+			remoteInfo = BentoZipSpotlight;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		E4A000010000000000000001 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				E4A100070000000000000001 /* BentoZipQuickLook.appex in Embed App Extensions */,
+				E4A200070000000000000001 /* BentoZipFinderExtension.appex in Embed App Extensions */,
+				E4A300070000000000000001 /* BentoZipSpotlight.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		C4A4A7922FC7772E003523FF /* BentoZip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BentoZip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C4A4A7A12FC77730003523FF /* BentoZipTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BentoZipTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C4A4A7AB2FC77730003523FF /* BentoZipUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BentoZipUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E4A100010000000000000001 /* BentoZipQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BentoZipQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E4A100020000000000000001 /* PreviewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
+		E4A100030000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E4A100110000000000000001 /* BentoZipQuickLook.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BentoZipQuickLook.entitlements; sourceTree = "<group>"; };
+		E4A200010000000000000001 /* BentoZipFinderExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BentoZipFinderExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E4A200020000000000000001 /* FinderSyncController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderSyncController.swift; sourceTree = "<group>"; };
+		E4A200030000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E4A200110000000000000001 /* BentoZipFinderExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BentoZipFinderExtension.entitlements; sourceTree = "<group>"; };
+		E4A300010000000000000001 /* BentoZipSpotlight.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BentoZipSpotlight.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E4A300020000000000000001 /* ImportExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportExtension.swift; sourceTree = "<group>"; };
+		E4A300030000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E4A300110000000000000001 /* BentoZipSpotlight.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BentoZipSpotlight.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -89,6 +146,29 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E4A100090000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E4A100060000000000000001 /* BentoZipCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4A200090000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4A300090000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E4A300060000000000000001 /* BentoZipCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -96,6 +176,9 @@
 			isa = PBXGroup;
 			children = (
 				C4A4A7942FC7772E003523FF /* BentoZip */,
+				E4A100040000000000000001 /* BentoZipQuickLook */,
+				E4A200040000000000000001 /* BentoZipFinderExtension */,
+				E4A300040000000000000001 /* BentoZipSpotlight */,
 				C4A4A7A42FC77730003523FF /* BentoZipTests */,
 				C4A4A7AE2FC77730003523FF /* BentoZipUITests */,
 				C4A4A7932FC7772E003523FF /* Products */,
@@ -108,8 +191,41 @@
 				C4A4A7922FC7772E003523FF /* BentoZip.app */,
 				C4A4A7A12FC77730003523FF /* BentoZipTests.xctest */,
 				C4A4A7AB2FC77730003523FF /* BentoZipUITests.xctest */,
+				E4A100010000000000000001 /* BentoZipQuickLook.appex */,
+				E4A200010000000000000001 /* BentoZipFinderExtension.appex */,
+				E4A300010000000000000001 /* BentoZipSpotlight.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		E4A100040000000000000001 /* BentoZipQuickLook */ = {
+			isa = PBXGroup;
+			children = (
+				E4A100020000000000000001 /* PreviewProvider.swift */,
+				E4A100030000000000000001 /* Info.plist */,
+				E4A100110000000000000001 /* BentoZipQuickLook.entitlements */,
+			);
+			path = BentoZipQuickLook;
+			sourceTree = "<group>";
+		};
+		E4A200040000000000000001 /* BentoZipFinderExtension */ = {
+			isa = PBXGroup;
+			children = (
+				E4A200020000000000000001 /* FinderSyncController.swift */,
+				E4A200030000000000000001 /* Info.plist */,
+				E4A200110000000000000001 /* BentoZipFinderExtension.entitlements */,
+			);
+			path = BentoZipFinderExtension;
+			sourceTree = "<group>";
+		};
+		E4A300040000000000000001 /* BentoZipSpotlight */ = {
+			isa = PBXGroup;
+			children = (
+				E4A300020000000000000001 /* ImportExtension.swift */,
+				E4A300030000000000000001 /* Info.plist */,
+				E4A300110000000000000001 /* BentoZipSpotlight.entitlements */,
+			);
+			path = BentoZipSpotlight;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -123,10 +239,14 @@
 				C4A4A78F2FC7772E003523FF /* Frameworks */,
 				C4A4A7902FC7772E003523FF /* Resources */,
 				D4E1B0020000000000000002 /* Bundle bento7z Engine */,
+				E4A000010000000000000001 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				E4A100100000000000000001 /* PBXTargetDependency */,
+				E4A200100000000000000001 /* PBXTargetDependency */,
+				E4A300100000000000000001 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C4A4A7942FC7772E003523FF /* BentoZip */,
@@ -186,6 +306,65 @@
 			productReference = C4A4A7AB2FC77730003523FF /* BentoZipUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		E4A1000B0000000000000001 /* BentoZipQuickLook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E4A1000C0000000000000001 /* Build configuration list for PBXNativeTarget "BentoZipQuickLook" */;
+			buildPhases = (
+				E4A100080000000000000001 /* Sources */,
+				E4A100090000000000000001 /* Frameworks */,
+				E4A1000A0000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BentoZipQuickLook;
+			packageProductDependencies = (
+				D4E1A0060000000000000006 /* BentoZipCore */,
+			);
+			productName = BentoZipQuickLook;
+			productReference = E4A100010000000000000001 /* BentoZipQuickLook.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		E4A2000B0000000000000001 /* BentoZipFinderExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E4A2000C0000000000000001 /* Build configuration list for PBXNativeTarget "BentoZipFinderExtension" */;
+			buildPhases = (
+				E4A200080000000000000001 /* Sources */,
+				E4A200090000000000000001 /* Frameworks */,
+				E4A2000A0000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BentoZipFinderExtension;
+			packageProductDependencies = (
+			);
+			productName = BentoZipFinderExtension;
+			productReference = E4A200010000000000000001 /* BentoZipFinderExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		E4A3000B0000000000000001 /* BentoZipSpotlight */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E4A3000C0000000000000001 /* Build configuration list for PBXNativeTarget "BentoZipSpotlight" */;
+			buildPhases = (
+				E4A300080000000000000001 /* Sources */,
+				E4A300090000000000000001 /* Frameworks */,
+				E4A3000A0000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BentoZipSpotlight;
+			packageProductDependencies = (
+				D4E1A0060000000000000006 /* BentoZipCore */,
+			);
+			productName = BentoZipSpotlight;
+			productReference = E4A300010000000000000001 /* BentoZipSpotlight.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -206,6 +385,15 @@
 					C4A4A7AA2FC77730003523FF = {
 						CreatedOnToolsVersion = 26.1.1;
 						TestTargetID = C4A4A7912FC7772E003523FF;
+					};
+					E4A1000B0000000000000001 = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					E4A2000B0000000000000001 = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					E4A3000B0000000000000001 = {
+						CreatedOnToolsVersion = 26.1.1;
 					};
 				};
 			};
@@ -228,6 +416,9 @@
 			projectRoot = "";
 			targets = (
 				C4A4A7912FC7772E003523FF /* BentoZip */,
+				E4A1000B0000000000000001 /* BentoZipQuickLook */,
+				E4A2000B0000000000000001 /* BentoZipFinderExtension */,
+				E4A3000B0000000000000001 /* BentoZipSpotlight */,
 				C4A4A7A02FC77730003523FF /* BentoZipTests */,
 				C4A4A7AA2FC77730003523FF /* BentoZipUITests */,
 			);
@@ -250,6 +441,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C4A4A7A92FC77730003523FF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4A1000A0000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4A2000A0000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4A3000A0000000000000001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -305,6 +517,30 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E4A100080000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E4A100050000000000000001 /* PreviewProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4A200080000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E4A200050000000000000001 /* FinderSyncController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4A300080000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E4A300050000000000000001 /* ImportExtension.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -317,6 +553,21 @@
 			isa = PBXTargetDependency;
 			target = C4A4A7912FC7772E003523FF /* BentoZip */;
 			targetProxy = C4A4A7AC2FC77730003523FF /* PBXContainerItemProxy */;
+		};
+		E4A100100000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E4A1000B0000000000000001 /* BentoZipQuickLook */;
+			targetProxy = E4A1000F0000000000000001 /* PBXContainerItemProxy */;
+		};
+		E4A200100000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E4A2000B0000000000000001 /* BentoZipFinderExtension */;
+			targetProxy = E4A2000F0000000000000001 /* PBXContainerItemProxy */;
+		};
+		E4A300100000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E4A3000B0000000000000001 /* BentoZipSpotlight */;
+			targetProxy = E4A3000F0000000000000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -581,6 +832,174 @@
 			};
 			name = Release;
 		};
+		E4A1000D0000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = BentoZipQuickLook/BentoZipQuickLook.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BentoZipQuickLook/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alikia.bentozip.QuickLookExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		E4A1000E0000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = BentoZipQuickLook/BentoZipQuickLook.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BentoZipQuickLook/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alikia.bentozip.QuickLookExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		E4A2000D0000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = BentoZipFinderExtension/BentoZipFinderExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BentoZipFinderExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alikia.bentozip.FinderExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		E4A2000E0000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = BentoZipFinderExtension/BentoZipFinderExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BentoZipFinderExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alikia.bentozip.FinderExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		E4A3000D0000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = BentoZipSpotlight/BentoZipSpotlight.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BentoZipSpotlight/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alikia.bentozip.SpotlightExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		E4A3000E0000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = BentoZipSpotlight/BentoZipSpotlight.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BentoZipSpotlight/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alikia.bentozip.SpotlightExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -616,6 +1035,33 @@
 			buildConfigurations = (
 				C4A4A7BC2FC77730003523FF /* Debug */,
 				C4A4A7BD2FC77730003523FF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E4A1000C0000000000000001 /* Build configuration list for PBXNativeTarget "BentoZipQuickLook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E4A1000D0000000000000001 /* Debug */,
+				E4A1000E0000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E4A2000C0000000000000001 /* Build configuration list for PBXNativeTarget "BentoZipFinderExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E4A2000D0000000000000001 /* Debug */,
+				E4A2000E0000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E4A3000C0000000000000001 /* Build configuration list for PBXNativeTarget "BentoZipSpotlight" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E4A3000D0000000000000001 /* Debug */,
+				E4A3000E0000000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

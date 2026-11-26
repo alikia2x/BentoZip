@@ -383,6 +383,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             DragDropManager.shared.cleanupStaleTempDirectories()
             TransferWindowController.shared.startObserving()
+            NSApp.servicesProvider = BentoZipServicesProvider.shared
+            NSUpdateDynamicServices()
         }
     }
 
