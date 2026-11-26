@@ -57,7 +57,7 @@ struct SettingsView: View {
                     Label("Formats", systemImage: "doc.zipper")
                 }
         }
-        .frame(width: 500, height: 470)
+        .frame(width: 500, height: 516)
         .onAppear {
             loadFromPreferences()
             refreshCacheStats()

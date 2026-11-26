@@ -11,8 +11,30 @@ struct StatusBarView: View {
         return formatter
     }()
 
-    private var formattedTotalSize: String {
-        Self.byteFormatter.string(fromByteCount: appState.totalSize)
+    private var isSearching: Bool {
+        !appState.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var contextUncompressedSize: Int64 {
+        _ = appState.nodeUpdateRevision
+        if isSearching {
+            let displayedNodes = appState.displayedNodes
+            let displayedIDs = Set(displayedNodes.map(\.id))
+            return displayedNodes.reduce(Int64(0)) { total, node in
+                var ancestor = node.parent
+                while let current = ancestor {
+                    if displayedIDs.contains(current.id) {
+                        return total
+                    }
+                    ancestor = current.parent
+                }
+                return total + node.archiveTotalSize
+            }
+        }
+        if appState.navigationNodeIDs.isEmpty {
+            return appState.totalSize
+        }
+        return appState.currentFolderNodes.reduce(Int64(0)) { $0 + $1.archiveTotalSize }
     }
 
     private var selectedNodesSize: Int64 {
@@ -43,18 +65,31 @@ struct StatusBarView: View {
             }
             return String(localized: "\(selectedNodes.count) selected, \(selectedSize)")
         }
-        return String(localized: "\(displayedCount) items, \(formattedTotalSize)")
+        if isSearching {
+            switch displayedCount {
+            case 0:
+                return String(localized: "No matches")
+            case 1:
+                return String(localized: "1 match")
+            default:
+                return String(localized: "\(displayedCount) matches")
+            }
+        }
+        let formattedContextSize = Self.byteFormatter.string(fromByteCount: contextUncompressedSize)
+        return String(localized: "\(displayedCount) items, \(formattedContextSize)")
     }
 
     private var packedSummaryText: String? {
         guard appState.mode == .browseArchive,
-              let packed = appState.totalPackedSize,
+              !isSearching,
+              let packed = appState.currentFolderPackedSize,
               packed > 0 else {
             return nil
         }
+        let uncompressed = contextUncompressedSize
         let packedStr = Self.byteFormatter.string(fromByteCount: packed)
-        if appState.totalSize > 0 && packed <= appState.totalSize {
-            let ratio = Int(((Double(appState.totalSize - packed) / Double(appState.totalSize)) * 100).rounded())
+        if uncompressed > 0 && packed <= uncompressed {
+            let ratio = Int(((Double(uncompressed - packed) / Double(uncompressed)) * 100).rounded())
             return String(localized: "Packed \(packedStr) (\(ratio)% saved)")
         }
         return String(localized: "Packed \(packedStr)")

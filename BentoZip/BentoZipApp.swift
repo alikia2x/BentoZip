@@ -29,7 +29,7 @@ struct BentoZipApp: App {
         } defaultValue: {
             .empty
         }
-        .defaultSize(width: 860, height: 540)
+        .defaultSize(width: 960, height: 580)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
@@ -238,7 +238,9 @@ private struct WorkspaceMenuCommands: Commands {
             Button("Find…") {
                 guard let appState = activeAppState,
                       appState.mode == .compress || appState.mode == .browseArchive else { return }
-                appState.isSearchVisible = true
+                withAnimation(.snappy(duration: 0.18)) {
+                    appState.isSearchVisible = true
+                }
                 activeUIState?.requestSearchFocus()
             }
             .keyboardShortcut("f", modifiers: .command)

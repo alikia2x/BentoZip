@@ -9,9 +9,14 @@ final class WorkspaceUIState {
     var showNewFolderSheet: Bool = false
     var renameTargetEntry: FileEntry?
     var searchFocusRequestID: UInt64 = 0
+    var outlineFocusRequestID: UInt64 = 0
 
     func requestSearchFocus() {
         searchFocusRequestID &+= 1
+    }
+
+    func requestOutlineFocus() {
+        outlineFocusRequestID &+= 1
     }
 }
 

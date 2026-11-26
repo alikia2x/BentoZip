@@ -19,12 +19,20 @@ struct ToolbarCommands: ToolbarContent {
         @Bindable var appState = appState
 
         if appState.mode != .empty {
-            ToolbarItem(placement: .navigation) {
+            ToolbarItemGroup(placement: .navigation) {
+                Button {
+                    appState.navigateUp()
+                } label: {
+                    Label("Back", systemImage: "chevron.backward")
+                }
+                .disabled(!appState.canNavigateUp)
+                .help("Back")
+
                 Button {
                     appState.coordinator.detachWindowProgress(progressState)
                     appState.reset()
                 } label: {
-                    Label("Home", systemImage: "chevron.backward")
+                    Label("Home", systemImage: "house")
                 }
                 .help("Back to Home")
             }
@@ -152,20 +160,24 @@ struct ToolbarCommands: ToolbarContent {
             if #available(macOS 26.0, *) {
                 if appState.isSearchVisible {
                     ToolbarItem(placement: .automatic) {
-                        ToolbarSearchField(
+                        ToolbarSearchPill(
                             text: $appState.searchQuery,
                             isPresented: $appState.isSearchVisible,
-                            focusRequestID: uiState.searchFocusRequestID
+                            focusRequestID: uiState.searchFocusRequestID,
+                            onCommitToResults: { uiState.requestOutlineFocus() }
                         )
-                        .frame(width: 210)
+                        .padding(.horizontal, 9)
+                        .frame(minWidth: 164, idealWidth: 196, maxWidth: 224)
+                        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .trailing)))
                     }
-                    .sharedBackgroundVisibility(.hidden)
 
                     ToolbarSpacer(.fixed, placement: .automatic)
                 } else {
                     ToolbarItem(placement: .automatic) {
                         Button {
-                            appState.isSearchVisible = true
+                            withAnimation(.snappy(duration: 0.18)) {
+                                appState.isSearchVisible = true
+                            }
                             uiState.requestSearchFocus()
                         } label: {
                             Label("Find", systemImage: "magnifyingglass")
@@ -176,15 +188,29 @@ struct ToolbarCommands: ToolbarContent {
             } else {
                 ToolbarItem(placement: .automatic) {
                     if appState.isSearchVisible {
-                        ToolbarSearchField(
+                        ToolbarSearchPill(
                             text: $appState.searchQuery,
                             isPresented: $appState.isSearchVisible,
-                            focusRequestID: uiState.searchFocusRequestID
+                            focusRequestID: uiState.searchFocusRequestID,
+                            onCommitToResults: { uiState.requestOutlineFocus() }
                         )
-                        .frame(width: 210)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .frame(minWidth: 164, idealWidth: 196, maxWidth: 224)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.25))
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 0.75)
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .trailing)))
                     } else {
                         Button {
-                            appState.isSearchVisible = true
+                            withAnimation(.snappy(duration: 0.18)) {
+                                appState.isSearchVisible = true
+                            }
                             uiState.requestSearchFocus()
                         } label: {
                             Label("Find", systemImage: "magnifyingglass")
@@ -249,92 +275,85 @@ struct ToolbarCommands: ToolbarContent {
     }
 }
 
-private struct ToolbarSearchField: NSViewRepresentable {
+private struct ToolbarSearchPill: View {
     @Binding var text: String
     @Binding var isPresented: Bool
     let focusRequestID: UInt64
+    let onCommitToResults: () -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, isPresented: $isPresented)
-    }
+    @FocusState private var isFocused: Bool
+    @State private var hasActivatedFocus = false
 
-    func makeNSView(context: Context) -> NSSearchField {
-        let searchField = FocusableToolbarSearchField()
-        searchField.placeholderString = String(localized: "Search")
-        searchField.sendsWholeSearchString = false
-        searchField.sendsSearchStringImmediately = true
-        searchField.centersPlaceholder = false
-        searchField.bezelStyle = .roundedBezel
-        searchField.controlSize = .regular
-        searchField.delegate = context.coordinator
-        searchField.stringValue = text
-        searchField.lastHandledFocusRequestID = focusRequestID
-        return searchField
-    }
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
 
-    func updateNSView(_ nsView: NSSearchField, context: Context) {
-        context.coordinator.text = $text
-        context.coordinator.isPresented = $isPresented
-        if nsView.stringValue != text {
-            nsView.stringValue = text
-        }
-        if let field = nsView as? FocusableToolbarSearchField,
-           field.lastHandledFocusRequestID != focusRequestID {
-            field.lastHandledFocusRequestID = focusRequestID
-            field.focusInWindow()
-        }
-    }
+            TextField("", text: $text, prompt: Text("Search"))
+                .labelsHidden()
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .focused($isFocused)
+                .onSubmit {
+                    onCommitToResults()
+                }
+                .onKeyPress(.downArrow) {
+                    onCommitToResults()
+                    return .handled
+                }
+                .onKeyPress(.escape) {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        text = ""
+                        isPresented = false
+                    }
+                    onCommitToResults()
+                    return .handled
+                }
 
-    @MainActor
-    final class Coordinator: NSObject, NSSearchFieldDelegate {
-        var text: Binding<String>
-        var isPresented: Binding<Bool>
-
-        init(text: Binding<String>, isPresented: Binding<Bool>) {
-            self.text = text
-            self.isPresented = isPresented
-        }
-
-        func controlTextDidChange(_ obj: Notification) {
-            guard let field = obj.object as? NSSearchField else { return }
-            if text.wrappedValue != field.stringValue {
-                text.wrappedValue = field.stringValue
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                    focusField()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Clear")
             }
         }
-
-        func control(
-            _ control: NSControl,
-            textView: NSTextView,
-            doCommandBy commandSelector: Selector
-        ) -> Bool {
-            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-                text.wrappedValue = ""
-                isPresented.wrappedValue = false
-                return true
+        .onAppear {
+            focusField()
+        }
+        .onChange(of: focusRequestID) { _, _ in
+            focusField()
+        }
+        .onChange(of: isFocused) { _, focused in
+            if focused {
+                hasActivatedFocus = true
+            } else if hasActivatedFocus &&
+                        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                DispatchQueue.main.async {
+                    if !isFocused &&
+                        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        withAnimation(.snappy(duration: 0.18)) {
+                            isPresented = false
+                        }
+                    }
+                }
             }
-            return false
         }
     }
 
-    private final class FocusableToolbarSearchField: NSSearchField {
-        private var hasRequestedInitialFocus = false
-        var lastHandledFocusRequestID: UInt64 = 0
-
-        override var intrinsicContentSize: NSSize {
-            NSSize(width: 210, height: super.intrinsicContentSize.height)
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            guard window != nil, !hasRequestedInitialFocus else { return }
-            hasRequestedInitialFocus = true
-            focusInWindow()
-        }
-
-        func focusInWindow() {
-            DispatchQueue.main.async { [weak self] in
-                guard let self, let window = self.window else { return }
-                window.makeFirstResponder(self)
+    private func focusField() {
+        DispatchQueue.main.async {
+            isFocused = true
+            DispatchQueue.main.async {
+                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
             }
         }
     }

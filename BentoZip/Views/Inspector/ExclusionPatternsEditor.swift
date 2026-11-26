@@ -36,11 +36,11 @@ struct ExclusionPatternsEditor: View {
                         .padding(.vertical, 3)
                         .background(
                             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(Color(nsColor: .textBackgroundColor))
+                                .fill(Color.primary.opacity(0.06))
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.75)
+                                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75)
                         )
                     }
                 }
@@ -49,8 +49,18 @@ struct ExclusionPatternsEditor: View {
             HStack(spacing: 6) {
                 TextField("", text: $newPattern, prompt: Text("*.log"))
                     .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .font(.system(size: 12))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3.5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Color(nsColor: .textBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 0.75)
+                    )
                     .onSubmit { add() }
 
                 Button {
@@ -58,7 +68,7 @@ struct ExclusionPatternsEditor: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 22, height: 22)
+                        .frame(width: 14, height: 14)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -69,6 +79,7 @@ struct ExclusionPatternsEditor: View {
                         patterns = Self.defaultPatterns
                         onChanged?()
                     }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(patterns == Self.defaultPatterns)
                 }

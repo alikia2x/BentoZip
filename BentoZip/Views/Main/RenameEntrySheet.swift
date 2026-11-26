@@ -90,7 +90,24 @@ struct RenameEntrySheet: View {
         .onAppear {
             nameInput = entry.name
             isNameFocused = true
+            if let stemLength = stemSelectionUTF16Length {
+                DispatchQueue.main.async {
+                    if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
+                        let clamped = min(stemLength, (editor.string as NSString).length)
+                        editor.selectedRange = NSRange(location: 0, length: clamped)
+                    }
+                }
+            }
         }
+    }
+
+    private var stemSelectionUTF16Length: Int? {
+        guard !entry.isDirectory else { return nil }
+        let name = entry.name
+        guard let lastDot = name.lastIndex(of: "."), lastDot > name.startIndex else {
+            return nil
+        }
+        return (String(name[..<lastDot]) as NSString).length
     }
 
     private func submit() {

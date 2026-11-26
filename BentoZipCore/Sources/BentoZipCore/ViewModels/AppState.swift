@@ -147,9 +147,10 @@ public class AppState {
     }
 
     // Search, encoding, conflict prompt, and test result state
+    @ObservationIgnored private var suppressSearchRevisionBump = false
     public var searchQuery: String = "" {
         didSet {
-            if searchQuery != oldValue {
+            if searchQuery != oldValue && !suppressSearchRevisionBump {
                 bumpTreeStructureRevision()
             }
         }
@@ -219,6 +220,44 @@ public class AppState {
             raw = rootNodes
         }
         return showHiddenFiles ? raw : raw.filter { !$0.isHidden }
+    }
+
+    /// Context-accurate packed size for the current view (root archive, subfolder, or search results).
+    public var currentFolderPackedSize: Int64? {
+        _ = treeStructureRevision
+        _ = nodeUpdateRevision
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if navigationNodes.isEmpty && trimmedQuery.isEmpty {
+            return totalPackedSize
+        }
+        if !navigationNodes.isEmpty && trimmedQuery.isEmpty {
+            let sum = Self.recursivePackedSize(of: currentFolderNodes)
+            return sum > 0 ? sum : nil
+        }
+        let matched = displayedNodes
+        let matchedIDs = Set(matched.map(\.id))
+        let topMatches = matched.filter { node in
+            var ancestor = node.parent
+            while let current = ancestor {
+                if matchedIDs.contains(current.id) { return false }
+                ancestor = current.parent
+            }
+            return true
+        }
+        let sum = Self.recursivePackedSize(of: topMatches)
+        return sum > 0 ? sum : nil
+    }
+
+    private static func recursivePackedSize(of nodes: [FileNode]) -> Int64 {
+        var total: Int64 = 0
+        for node in nodes {
+            if node.isDirectory, let children = node.children {
+                total += recursivePackedSize(of: children)
+            } else if let packed = node.packedSize, packed > 0 {
+                total += packed
+            }
+        }
+        return total
     }
 
     /// Visible immediate children of `node`, respecting `showHiddenFiles`.
@@ -458,19 +497,25 @@ public class AppState {
     }
 
     func pushNavigationNode(id: UUID) {
+        clearSearchWithoutRevisionBump()
         navigationNodeIDs.append(id)
         selectedEntryIDs.removeAll()
         bumpTreeStructureRevision()
     }
 
     func popNavigationNode() {
-        guard !navigationNodeIDs.isEmpty else { return }
-        navigationNodeIDs.removeLast()
+        let hadSearch = !searchQuery.isEmpty || isSearchVisible
+        guard !navigationNodeIDs.isEmpty || hadSearch else { return }
+        clearSearchWithoutRevisionBump()
+        if !navigationNodeIDs.isEmpty {
+            navigationNodeIDs.removeLast()
+        }
         selectedEntryIDs.removeAll()
         bumpTreeStructureRevision()
     }
 
     func truncateNavigation(to level: Int) {
+        clearSearchWithoutRevisionBump()
         if level <= 0 {
             navigationNodeIDs.removeAll()
         } else {
@@ -478,6 +523,17 @@ public class AppState {
         }
         selectedEntryIDs.removeAll()
         bumpTreeStructureRevision()
+    }
+
+    private func clearSearchWithoutRevisionBump() {
+        suppressSearchRevisionBump = true
+        defer { suppressSearchRevisionBump = false }
+        if !searchQuery.isEmpty {
+            searchQuery = ""
+        }
+        if isSearchVisible {
+            isSearchVisible = false
+        }
     }
 
     func clearNavigationAndSelection() {

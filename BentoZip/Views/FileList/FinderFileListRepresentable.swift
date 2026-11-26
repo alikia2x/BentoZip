@@ -12,6 +12,7 @@ struct FinderFileListRepresentable: NSViewRepresentable {
     let treeStructureRevision: UInt64
     let nodeUpdateRevision: UInt64
     let isSearchVisible: Bool
+    let outlineFocusRequestID: UInt64
     let selectedEntryIDs: Set<UUID>
     let onRequestArchiveDelete: ([FileEntry]) -> Void
 
@@ -29,7 +30,7 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         let coordinator = context.coordinator
 
         outlineView.style = .inset
-        outlineView.usesAlternatingRowBackgroundColors = true
+        outlineView.usesAlternatingRowBackgroundColors = false
         outlineView.allowsMultipleSelection = true
         outlineView.allowsEmptySelection = true
         outlineView.rowHeight = 22

@@ -24,6 +24,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
     private var lastArchiveURL: URL?
     private var lastShowInspector: Bool?
     private var lastSearchVisible: Bool = false
+    private var lastOutlineFocusRequestID: UInt64 = 0
     private var isUpdatingSelectionFromModel = false
     private var needsInitialWindowFocus = true
     private var hasScheduledDeferredFocusCheck = false
@@ -115,6 +116,11 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
         let searchDismissed = (lastSearchVisible && !appState.isSearchVisible)
         lastSearchVisible = appState.isSearchVisible
 
+        let outlineFocusRequested = (lastOutlineFocusRequestID != uiState.outlineFocusRequestID)
+        if outlineFocusRequested {
+            lastOutlineFocusRequestID = uiState.outlineFocusRequestID
+        }
+
         if modeOrArchiveChanged {
             needsInitialWindowFocus = true
             QuickLookHelper.shared.closeIfVisible(for: outlineView)
@@ -127,7 +133,11 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
             lastNodeUpdateRevision = appState.nodeUpdateRevision
             rebuildRootsAndReload(in: outlineView)
             syncSelectionFromModel(in: outlineView)
-            claimFirstResponderIfAppropriate()
+            if outlineFocusRequested {
+                focusOutlineAndSelectFirstRowIfNeeded(in: outlineView)
+            } else {
+                claimFirstResponderIfAppropriate()
+            }
             return
         }
 
@@ -139,8 +149,20 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
 
         syncSelectionFromModel(in: outlineView)
 
-        if inspectorOpenedInCompress || searchDismissed {
+        if outlineFocusRequested {
+            focusOutlineAndSelectFirstRowIfNeeded(in: outlineView)
+        } else if inspectorOpenedInCompress || searchDismissed {
             claimFirstResponderIfAppropriate()
+        }
+    }
+
+    private func focusOutlineAndSelectFirstRowIfNeeded(in outlineView: NSOutlineView) {
+        outlineView.window?.makeFirstResponder(outlineView)
+        if outlineView.selectedRowIndexes.isEmpty,
+           outlineView.numberOfRows > 0,
+           let firstNode = outlineView.item(atRow: 0) as? FileNode {
+            outlineView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            appState.selectedEntryIDs = [firstNode.id]
         }
     }
 
@@ -325,7 +347,13 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
               let node = item as? FileNode else {
             return nil
         }
-        return FinderOutlineCellFactory.makeView(for: columnID, node: node, in: outlineView)
+        let isSearching = !appState.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return FinderOutlineCellFactory.makeView(
+            for: columnID,
+            node: node,
+            in: outlineView,
+            isSearching: isSearching
+        )
     }
 
     func outlineViewItemWillExpand(_ notification: Notification) {

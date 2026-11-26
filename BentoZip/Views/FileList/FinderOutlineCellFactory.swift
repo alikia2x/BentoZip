@@ -20,7 +20,8 @@ enum FinderOutlineCellFactory {
     static func makeView(
         for columnID: NSUserInterfaceItemIdentifier,
         node: FileNode,
-        in outlineView: NSOutlineView
+        in outlineView: NSOutlineView,
+        isSearching: Bool = false
     ) -> NSView? {
         switch columnID {
         case FinderColumnID.name:
@@ -29,7 +30,7 @@ enum FinderOutlineCellFactory {
                 identifier: columnID,
                 in: outlineView
             )
-            cell.configure(node: node, lockImage: lockImage)
+            cell.configure(node: node, lockImage: lockImage, isSearching: isSearching)
             return cell
 
         case FinderColumnID.date:
@@ -117,6 +118,7 @@ enum FinderOutlineCellFactory {
 private final class FinderNameCellView: NSTableCellView {
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
+    private let locationField = NSTextField(labelWithString: "")
     private let lockView = NSImageView()
 
     override init(frame frameRect: NSRect) {
@@ -139,7 +141,17 @@ private final class FinderNameCellView: NSTableCellView {
         titleField.maximumNumberOfLines = 1
         titleField.cell?.truncatesLastVisibleLine = true
         titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleField.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         titleField.translatesAutoresizingMaskIntoConstraints = false
+
+        locationField.font = NSFont.systemFont(ofSize: 11.5)
+        locationField.textColor = .tertiaryLabelColor
+        locationField.lineBreakMode = .byTruncatingMiddle
+        locationField.maximumNumberOfLines = 1
+        locationField.cell?.truncatesLastVisibleLine = true
+        locationField.isHidden = true
+        locationField.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        locationField.translatesAutoresizingMaskIntoConstraints = false
 
         lockView.contentTintColor = .secondaryLabelColor
         lockView.imageScaling = .scaleProportionallyDown
@@ -148,7 +160,7 @@ private final class FinderNameCellView: NSTableCellView {
         lockView.setContentCompressionResistancePriority(.required, for: .horizontal)
         lockView.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [iconView, titleField, lockView])
+        let stack = NSStackView(views: [iconView, titleField, locationField, lockView])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 6
@@ -169,11 +181,28 @@ private final class FinderNameCellView: NSTableCellView {
         self.textField = titleField
     }
 
-    func configure(node: FileNode, lockImage: NSImage?) {
+    func configure(node: FileNode, lockImage: NSImage?, isSearching: Bool) {
         iconView.image = FileIconCache.icon(for: node)
         titleField.stringValue = node.name
+        if isSearching, let parent = Self.parentLocation(for: node) {
+            locationField.stringValue = parent
+            locationField.isHidden = false
+        } else {
+            locationField.stringValue = ""
+            locationField.isHidden = true
+        }
         lockView.image = lockImage
         lockView.isHidden = !node.isEncrypted
+    }
+
+    private static func parentLocation(for node: FileNode) -> String? {
+        guard let rawPath = node.archiveRelativePath else { return nil }
+        var normalized = rawPath.replacingOccurrences(of: "\\", with: "/")
+        while normalized.hasPrefix("./") { normalized.removeFirst(2) }
+        while normalized.hasPrefix("/") { normalized.removeFirst() }
+        while normalized.hasSuffix("/") { normalized.removeLast() }
+        let parent = (normalized as NSString).deletingLastPathComponent
+        return (parent.isEmpty || parent == ".") ? nil : parent
     }
 }
 

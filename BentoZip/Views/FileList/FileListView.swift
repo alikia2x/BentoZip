@@ -41,6 +41,7 @@ struct FileListView: View {
             treeStructureRevision: appState.treeStructureRevision,
             nodeUpdateRevision: appState.nodeUpdateRevision,
             isSearchVisible: appState.isSearchVisible,
+            outlineFocusRequestID: uiState.outlineFocusRequestID,
             selectedEntryIDs: appState.selectedEntryIDs
         ) { entries in
             pendingDeleteEntries = entries

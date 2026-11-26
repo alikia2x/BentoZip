@@ -36,6 +36,7 @@ struct CompressInspectorView: View {
                     .labelsHidden()
                     .multilineTextAlignment(.trailing)
                     .textFieldStyle(.plain)
+                    .modifier(InspectorInputWellModifier())
                 }
 
                 if supportsPasswordEncryption {
@@ -80,6 +81,7 @@ struct CompressInspectorView: View {
                             .accessibilityLabel(Text(showPassword ? "Hide Password" : "Show Password"))
                             .help(showPassword ? "Hide Password" : "Show Password")
                         }
+                        .modifier(InspectorInputWellModifier())
                     }
 
                     if appState.compressionSettings.format == .zip && !(appState.compressionSettings.password ?? "").isEmpty {
@@ -187,5 +189,21 @@ struct CompressInspectorView: View {
             get: { appState.compressionSettings.password ?? "" },
             set: { appState.compressionSettings.password = $0.isEmpty ? nil : $0 }
         )
+    }
+}
+
+private struct InspectorInputWellModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(0.055))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75)
+            )
     }
 }

@@ -9,33 +9,34 @@ struct EmptyStateView: View {
     @State private var hoveredActionID: String?
 
     var body: some View {
-        ZStack {
-            HStack(spacing: 0) {
+        HStack(spacing: 0) {
+            ZStack {
                 brandPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
 
-                Divider()
-                    .ignoresSafeArea()
-
-                RecentArchivesSidebar()
-                    .frame(width: 296)
-                    .frame(maxHeight: .infinity)
-                    .ignoresSafeArea(.container, edges: .top)
-                    .background(VisualEffectBackground(material: .sidebar).ignoresSafeArea())
+                if isTargeted {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.05))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Color.accentColor.opacity(0.75), lineWidth: 2)
+                        )
+                        .padding(12)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
 
-            if isTargeted {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.75), lineWidth: 2)
-                    )
-                    .padding(10)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
+            Divider()
+                .ignoresSafeArea()
+
+            RecentArchivesSidebar()
+                .frame(width: 296)
+                .frame(maxHeight: .infinity)
+                .ignoresSafeArea(.container, edges: .top)
+                .background(VisualEffectBackground(material: .sidebar).ignoresSafeArea())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -98,6 +99,11 @@ struct EmptyStateView: View {
                 }
             }
             .frame(width: 248)
+
+            Text("Drop files or archives anywhere to start")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 14)
 
             Spacer()
             Spacer().frame(height: 16)
