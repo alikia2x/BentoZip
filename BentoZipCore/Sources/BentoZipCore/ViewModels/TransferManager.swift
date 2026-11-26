@@ -11,6 +11,9 @@ public final class TransferTask: Identifiable {
         case extract
         case addEntries
         case removeEntries
+        case rename
+        case createFolder
+        case test
     }
 
     public let id: UUID

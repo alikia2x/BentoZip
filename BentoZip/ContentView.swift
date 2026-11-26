@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(ProgressState.self) private var progressState
+    @Environment(WorkspaceUIState.self) private var uiState
 
     @State private var showErrorAlert = false
     @State private var showToolbarDeleteConfirmation = false
@@ -44,6 +45,7 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var appState = appState
+        @Bindable var uiState = uiState
 
         Group {
             switch appState.mode {
@@ -56,6 +58,8 @@ struct ContentView: View {
         .background(
             WindowDocumentBridge(
                 appState: appState,
+                progressState: progressState,
+                uiState: uiState,
                 mode: appState.mode,
                 sourceArchiveURL: appState.sourceArchiveURL
             )
@@ -90,6 +94,51 @@ struct ContentView: View {
             .environment(appState)
             .interactiveDismissDisabled(appState.isLoading)
         }
+        .sheet(item: $appState.activeConflictPrompt, onDismiss: {
+            appState.activeConflictPrompt?.cancel()
+            appState.activeConflictPrompt = nil
+        }) { prompt in
+            ConflictResolutionSheet(prompt: prompt)
+        }
+        .sheet(item: $uiState.renameTargetEntry) { entry in
+            RenameEntrySheet(entry: entry) { newName in
+                Task {
+                    await appState.coordinator.renameEntry(
+                        appState: appState,
+                        entry: entry,
+                        newName: newName,
+                        progressState: progressState
+                    )
+                }
+            }
+        }
+        .sheet(isPresented: $uiState.showNewFolderSheet) {
+            NewFolderSheet(currentSubfolderPath: appState.currentSubfolderPath) { name in
+                Task {
+                    await appState.coordinator.createFolder(
+                        appState: appState,
+                        name: name,
+                        progressState: progressState
+                    )
+                }
+            }
+        }
+        .alert(
+            testArchiveAlertTitle,
+            isPresented: Binding(
+                get: { appState.testArchiveResult != nil },
+                set: { if !$0 { appState.testArchiveResult = nil } }
+            ),
+            presenting: appState.testArchiveResult
+        ) { _ in
+            Button("OK") { appState.testArchiveResult = nil }
+        } message: { result in
+            if result.passed {
+                Text("\"\(result.archiveName)\" passed integrity verification (\(result.itemsCount) items).")
+            } else {
+                Text(result.errorMessage ?? String(localized: "The archive failed integrity verification."))
+            }
+        }
         .alert("Operation Failed", isPresented: $showErrorAlert) {
             Button("OK") { appState.lastError = nil }
         } message: {
@@ -116,6 +165,13 @@ struct ContentView: View {
         }
     }
 
+    private var testArchiveAlertTitle: String {
+        guard let result = appState.testArchiveResult else { return "" }
+        return result.passed
+            ? String(localized: "Archive Verified")
+            : String(localized: "Archive Integrity Failed")
+    }
+
     private func workspaceView(showInspector: Binding<Bool>) -> some View {
         VStack(spacing: 0) {
             FileListView()
@@ -130,10 +186,12 @@ struct ContentView: View {
                 appState.addEntries(from: items)
                 return true
             } else if appState.isWritableArchive {
+                let targetPrefix = appState.currentSubfolderPath
                 Task {
                     await appState.coordinator.addEntries(
                         appState: appState,
                         urls: items,
+                        targetPrefix: targetPrefix,
                         progressState: progressState
                     )
                 }

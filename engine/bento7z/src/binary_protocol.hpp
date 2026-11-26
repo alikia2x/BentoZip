@@ -19,6 +19,8 @@ enum class BinaryMsgType : uint8_t {
     Delete = 5,
     Cancel = 6,
     Ping = 7,
+    Rename = 8,
+    Test = 9,
 
     // Responses
     Progress = 101,
@@ -39,10 +41,11 @@ struct BinaryFrameHeader {
 };
 
 struct BinaryListRecord {
-    uint8_t flags = 0; // bit0=is_dir, bit1=is_encrypted, bit2=has_modified_at
+    uint8_t flags = 0; // bit0=is_dir, bit1=is_encrypted, bit2=has_modified_at, bit3=has_crc
     uint64_t size = 0;
     uint64_t packed_size = 0;
     int64_t modified_at = 0;
+    uint32_t crc = 0;
     std::string path;
     std::string name;
 };
@@ -91,6 +94,8 @@ bool decode_extract_request(const std::vector<uint8_t>& payload, ExtractParams& 
 bool decode_compress_request(const std::vector<uint8_t>& payload, CompressParams& out);
 bool decode_add_request(const std::vector<uint8_t>& payload, AddParams& out);
 bool decode_delete_request(const std::vector<uint8_t>& payload, DeleteParams& out);
+bool decode_rename_request(const std::vector<uint8_t>& payload, RenameParams& out);
+bool decode_test_request(const std::vector<uint8_t>& payload, TestParams& out);
 
 std::vector<uint8_t> encode_progress_frame(uint64_t req_id,
                                            uint8_t stage,

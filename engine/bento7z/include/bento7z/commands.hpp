@@ -62,6 +62,16 @@ OperationOutcome run_delete(const bit7z::Bit7zLibrary& lib,
                             const ProgressSink* progress_sink,
                             std::atomic<bool>* cancel_flag);
 
+OperationOutcome run_rename(const bit7z::Bit7zLibrary& lib,
+                            const RenameParams& params,
+                            const ProgressSink* progress_sink,
+                            std::atomic<bool>* cancel_flag);
+
+OperationOutcome run_test(const bit7z::Bit7zLibrary& lib,
+                          const TestParams& params,
+                          const ProgressSink* progress_sink,
+                          std::atomic<bool>* cancel_flag);
+
 /// Handler for JSONL archive operations. All callbacks write JSONL to stdout.
 class CommandHandler {
 public:
@@ -76,6 +86,8 @@ private:
     void handle_extract(const Request& req);
     void handle_add(const Request& req);
     void handle_delete(const Request& req);
+    void handle_rename(const Request& req);
+    void handle_test(const Request& req);
 
     bit7z::Bit7zLibrary lib_;
 };

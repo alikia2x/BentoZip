@@ -9,6 +9,8 @@ public enum Bento7zError: LocalizedError, Equatable {
     case fileNotFound(String)
     case missingVolume(String)
     case splitNotFirstVolume(String)
+    case corruptArchive(String)
+    case conflict(String)
     case passwordRequired
     case wrongPassword
 
@@ -28,6 +30,10 @@ public enum Bento7zError: LocalizedError, Equatable {
             return detail
         case .splitNotFirstVolume(let detail):
             return detail
+        case .corruptArchive(let detail):
+            return detail
+        case .conflict(let detail):
+            return detail
         case .passwordRequired:
             return String(localized: "This archive is password protected.", bundle: .module)
         case .wrongPassword:
@@ -41,6 +47,18 @@ public enum Bento7zError: LocalizedError, Equatable {
         }
         if code == "WRONG_PASSWORD" {
             return .wrongPassword
+        }
+        if code == "CORRUPT_ARCHIVE" {
+            let detail = message.isEmpty
+                ? String(localized: "The archive appears to be corrupt or incomplete.", bundle: .module)
+                : message
+            return .corruptArchive(detail)
+        }
+        if code == "CONFLICT" || code == "ALREADY_EXISTS" {
+            let detail = message.isEmpty
+                ? String(localized: "Destination already exists.", bundle: .module)
+                : message
+            return .conflict(detail)
         }
         if code == "MISSING_VOLUME" {
             let prefix = "Missing archive volume: "

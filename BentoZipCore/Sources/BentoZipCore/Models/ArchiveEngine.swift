@@ -42,10 +42,25 @@ public struct ArchiveProgress: Sendable, Equatable {
 public struct ArchiveListResult: Sendable, Equatable {
     public let entries: [FileEntry]
     public let archivePackedSize: Int64?
+    public let unwrappedRootPath: String?
 
-    public init(entries: [FileEntry], archivePackedSize: Int64? = nil) {
+    public init(
+        entries: [FileEntry],
+        archivePackedSize: Int64? = nil,
+        unwrappedRootPath: String? = nil
+    ) {
         self.entries = entries
         self.archivePackedSize = archivePackedSize
+        self.unwrappedRootPath = unwrappedRootPath
+    }
+}
+
+/// Result of verifying archive integrity via engine test operation.
+public struct ArchiveTestResult: Sendable, Equatable {
+    public let itemsCount: Int
+
+    public init(itemsCount: Int) {
+        self.itemsCount = itemsCount
     }
 }
 
@@ -61,11 +76,28 @@ public protocol ArchiveEngine: Sendable {
         onProgress: (@Sendable (ArchiveProgress) -> Void)?
     ) async throws -> ArchiveListResult
 
+    func listArchive(
+        in archiveURL: URL,
+        password: String?,
+        encoding: String?,
+        unwrapSingleTopDirectory: Bool,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveListResult
+
     func extract(
         archiveURL: URL,
         entries: [FileEntry]?,
         to destinationURL: URL,
         password: String?,
+        onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+    ) async throws
+
+    func extract(
+        archiveURL: URL,
+        entries: [FileEntry]?,
+        to destinationURL: URL,
+        password: String?,
+        encoding: String?,
         onProgress: @escaping @Sendable (ArchiveProgress) -> Void
     ) async throws
 
@@ -84,6 +116,35 @@ public protocol ArchiveEngine: Sendable {
         password: String?,
         onProgress: @escaping @Sendable (ArchiveProgress) -> Void
     ) async throws
+
+    func addEntries(
+        to archiveURL: URL,
+        from sourceURLs: [URL],
+        targetPrefix: String?,
+        password: String?,
+        onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+    ) async throws
+
+    func renameEntry(
+        in archiveURL: URL,
+        from oldPath: String,
+        to newPath: String,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws
+
+    func createFolder(
+        in archiveURL: URL,
+        path: String,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws
+
+    func testArchive(
+        at archiveURL: URL,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveTestResult
 }
 
 public extension ArchiveEngine {
@@ -104,8 +165,50 @@ public extension ArchiveEngine {
         try await listArchive(in: archiveURL, password: password)
     }
 
+    func listArchive(
+        in archiveURL: URL,
+        password: String?,
+        encoding: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveListResult {
+        try await listArchive(
+            in: archiveURL,
+            password: password,
+            encoding: encoding,
+            unwrapSingleTopDirectory: true,
+            onProgress: onProgress
+        )
+    }
+
+    func listArchive(
+        in archiveURL: URL,
+        password: String?,
+        encoding: String?,
+        unwrapSingleTopDirectory: Bool,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveListResult {
+        try await listArchive(in: archiveURL, password: password, onProgress: onProgress)
+    }
+
     func listArchive(in archiveURL: URL) async throws -> ArchiveListResult {
         try await listArchive(in: archiveURL, password: nil)
+    }
+
+    func extract(
+        archiveURL: URL,
+        entries: [FileEntry]?,
+        to destinationURL: URL,
+        password: String?,
+        encoding: String?,
+        onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+    ) async throws {
+        try await extract(
+            archiveURL: archiveURL,
+            entries: entries,
+            to: destinationURL,
+            password: password,
+            onProgress: onProgress
+        )
     }
 
     func extract(
@@ -144,6 +247,21 @@ public extension ArchiveEngine {
     func addEntries(
         to archiveURL: URL,
         from sourceURLs: [URL],
+        targetPrefix: String?,
+        password: String?,
+        onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+    ) async throws {
+        try await addEntries(
+            to: archiveURL,
+            from: sourceURLs,
+            password: password,
+            onProgress: onProgress
+        )
+    }
+
+    func addEntries(
+        to archiveURL: URL,
+        from sourceURLs: [URL],
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
         try await addEntries(
@@ -151,6 +269,62 @@ public extension ArchiveEngine {
             from: sourceURLs,
             password: nil,
             onProgress: { progress($0.fractionCompleted) }
+        )
+    }
+
+    func renameEntry(
+        in archiveURL: URL,
+        from oldPath: String,
+        to newPath: String,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws {
+        throw Bento7zError.operationFailed(
+            String(localized: "Renaming entries is not supported by this engine.", bundle: .module),
+            "UNSUPPORTED_OPERATION"
+        )
+    }
+
+    func createFolder(
+        in archiveURL: URL,
+        path: String,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws {
+        let safePath = try Bento7zPathSafety.validatedRelativePath(path)
+        let components = safePath.split(separator: "/").map(String.init)
+        guard let folderName = components.last, !folderName.isEmpty else {
+            throw Bento7zError.operationFailed(
+                String(localized: "Invalid folder path: \(path)", bundle: .module),
+                "INVALID_PATH"
+            )
+        }
+        let parentPrefix = components.count > 1 ? components.dropLast().joined(separator: "/") : nil
+
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("BentoZip_mkdir_\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tempDir) }
+
+        let folderURL = tempDir.appendingPathComponent(folderName, isDirectory: true)
+        try fm.createDirectory(at: folderURL, withIntermediateDirectories: true)
+
+        try await addEntries(
+            to: archiveURL,
+            from: [folderURL],
+            targetPrefix: parentPrefix,
+            password: password,
+            onProgress: onProgress ?? { _ in }
+        )
+    }
+
+    func testArchive(
+        at archiveURL: URL,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveTestResult {
+        throw Bento7zError.operationFailed(
+            String(localized: "Testing archives is not supported by this engine.", bundle: .module),
+            "UNSUPPORTED_OPERATION"
         )
     }
 }

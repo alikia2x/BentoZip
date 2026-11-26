@@ -15,6 +15,11 @@ final class Bento7zBinaryClient: @unchecked Sendable {
         let onComplete: @Sendable (Result<Bento7zBinaryProtocol.ResultPayload, Error>) -> Void
     }
 
+    private final class RequestSlot: @unchecked Sendable {
+        var isRegistered = false
+        var isCancelled = false
+    }
+
     private struct ConnectionState {
         var process: Process?
         var socketFD: Int32 = -1
@@ -64,6 +69,7 @@ final class Bento7zBinaryClient: @unchecked Sendable {
         }
 
         let frame = Bento7zBinaryProtocol.encodeFrame(type: type, requestID: requestID, payload: payload)
+        let slot = RequestSlot()
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -76,23 +82,26 @@ final class Bento7zBinaryClient: @unchecked Sendable {
                     }
                 )
 
-                let fd: Int32 = lock.withLock { state in
-                    guard !state.isClosed, state.socketFD >= 0 else {
-                        return -1
+                let preflightError: Error? = lock.withLock { state in
+                    if Task.isCancelled || slot.isCancelled {
+                        slot.isCancelled = true
+                        return CancellationError()
                     }
+                    guard !state.isClosed, state.socketFD >= 0 else {
+                        return Bento7zError.processError("Binary worker connection closed")
+                    }
+                    slot.isRegistered = true
                     state.pending[requestID] = handlers
-                    return state.socketFD
+                    enqueueWrite(frame, on: state.socketFD, requestID: requestID)
+                    return nil
                 }
 
-                guard fd >= 0 else {
-                    continuation.resume(throwing: Bento7zError.processError("Binary worker connection closed"))
-                    return
+                if let preflightError {
+                    continuation.resume(throwing: preflightError)
                 }
-
-                enqueueWrite(frame, on: fd, requestID: requestID)
             }
         } onCancel: { [weak self] in
-            self?.cancelRequest(requestID: requestID, hardKillFallback: hardKillOnCancel)
+            self?.cancelRequest(requestID: requestID, slot: slot, hardKillFallback: hardKillOnCancel)
         }
     }
 
@@ -425,13 +434,17 @@ final class Bento7zBinaryClient: @unchecked Sendable {
         }
     }
 
-    private func cancelRequest(requestID: UInt64, hardKillFallback: Bool) {
-        let fd = lock.withLock { $0.socketFD }
-        if fd >= 0 {
+    private func cancelRequest(requestID: UInt64, slot: RequestSlot, hardKillFallback: Bool) {
+        let shouldScheduleHardKill = lock.withLock { state -> Bool in
+            slot.isCancelled = true
+            guard slot.isRegistered, state.pending[requestID] != nil, !state.isClosed, state.socketFD >= 0 else {
+                return false
+            }
             let cancelFrame = Bento7zBinaryProtocol.encodeFrame(type: .cancel, requestID: requestID)
-            enqueueWrite(cancelFrame, on: fd, requestID: nil)
+            enqueueWrite(cancelFrame, on: state.socketFD, requestID: nil)
+            return hardKillFallback
         }
-        if hardKillFallback {
+        if shouldScheduleHardKill {
             ioQueue.asyncAfter(deadline: .now() + .milliseconds(450)) { [weak self] in
                 guard let self else { return }
                 let stillPending = self.lock.withLock { $0.pending[requestID] != nil }

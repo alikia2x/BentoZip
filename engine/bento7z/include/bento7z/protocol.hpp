@@ -16,6 +16,7 @@ struct ListParams {
     std::string password;       // empty = no password
     std::string format;         // empty or "auto" = auto-detect
     std::string tar_cache_path; // optional persistent .tar cache path for compound .tar.*
+    std::string encoding;       // empty or "auto" = auto-detect
 };
 
 struct CompressParams {
@@ -37,6 +38,7 @@ struct ExtractParams {
     std::string format;         // empty or "auto" = auto-detect
     std::string tar_cache_path; // optional persistent .tar cache path for compound .tar.*
     std::vector<std::string> entries;
+    std::string encoding;       // empty or "auto" = auto-detect
 };
 
 struct AddParams {
@@ -44,6 +46,7 @@ struct AddParams {
     std::string password; // empty = no password
     std::string format;   // empty or "auto" = auto-detect
     std::vector<std::string> paths;
+    std::string target_prefix; // empty = archive root
 };
 
 struct DeleteParams {
@@ -51,6 +54,21 @@ struct DeleteParams {
     std::string password; // empty = no password
     std::string format;   // empty or "auto" = auto-detect
     std::vector<std::string> entries;
+};
+
+struct RenameParams {
+    std::string archive;
+    std::string password; // empty = no password
+    std::string format;   // empty or "auto" = auto-detect
+    std::string old_path;
+    std::string new_path;
+};
+
+struct TestParams {
+    std::string archive;
+    std::string password;       // empty = no password
+    std::string format;         // empty or "auto" = auto-detect
+    std::string tar_cache_path; // optional persistent .tar cache path for compound .tar.*
 };
 
 struct Request {
@@ -64,6 +82,8 @@ struct Request {
     std::optional<ExtractParams> as_extract() const;
     std::optional<AddParams> as_add() const;
     std::optional<DeleteParams> as_delete() const;
+    std::optional<RenameParams> as_rename() const;
+    std::optional<TestParams> as_test() const;
 };
 
 struct ArchiveItem {
@@ -107,6 +127,7 @@ inline void to_json(json& j, const ListParams& p) {
     if (!p.password.empty()) j["password"] = p.password;
     if (!p.format.empty()) j["format"] = p.format;
     if (!p.tar_cache_path.empty()) j["tar_cache_path"] = p.tar_cache_path;
+    if (!p.encoding.empty()) j["encoding"] = p.encoding;
 }
 inline void from_json(const json& j, ListParams& p) {
     j.at("archive").get_to(p.archive);
@@ -118,6 +139,9 @@ inline void from_json(const json& j, ListParams& p) {
     }
     if (j.contains("tar_cache_path") && !j["tar_cache_path"].is_null()) {
         j.at("tar_cache_path").get_to(p.tar_cache_path);
+    }
+    if (j.contains("encoding") && !j["encoding"].is_null()) {
+        j.at("encoding").get_to(p.encoding);
     }
 }
 
@@ -162,6 +186,7 @@ inline void to_json(json& j, const ExtractParams& p) {
     if (!p.format.empty()) j["format"] = p.format;
     if (!p.tar_cache_path.empty()) j["tar_cache_path"] = p.tar_cache_path;
     if (!p.entries.empty()) j["entries"] = p.entries;
+    if (!p.encoding.empty()) j["encoding"] = p.encoding;
 }
 inline void from_json(const json& j, ExtractParams& p) {
     j.at("archive").get_to(p.archive);
@@ -178,12 +203,16 @@ inline void from_json(const json& j, ExtractParams& p) {
     if (j.contains("entries") && !j["entries"].is_null()) {
         j.at("entries").get_to(p.entries);
     }
+    if (j.contains("encoding") && !j["encoding"].is_null()) {
+        j.at("encoding").get_to(p.encoding);
+    }
 }
 
 inline void to_json(json& j, const AddParams& p) {
     j = json{{"archive", p.archive}, {"paths", p.paths}};
     if (!p.password.empty()) j["password"] = p.password;
     if (!p.format.empty()) j["format"] = p.format;
+    if (!p.target_prefix.empty()) j["target_prefix"] = p.target_prefix;
 }
 inline void from_json(const json& j, AddParams& p) {
     j.at("archive").get_to(p.archive);
@@ -193,6 +222,9 @@ inline void from_json(const json& j, AddParams& p) {
     }
     if (j.contains("format") && !j["format"].is_null()) {
         j.at("format").get_to(p.format);
+    }
+    if (j.contains("target_prefix") && !j["target_prefix"].is_null()) {
+        j.at("target_prefix").get_to(p.target_prefix);
     }
 }
 
@@ -209,6 +241,42 @@ inline void from_json(const json& j, DeleteParams& p) {
     }
     if (j.contains("format") && !j["format"].is_null()) {
         j.at("format").get_to(p.format);
+    }
+}
+
+inline void to_json(json& j, const RenameParams& p) {
+    j = json{{"archive", p.archive}, {"old_path", p.old_path}, {"new_path", p.new_path}};
+    if (!p.password.empty()) j["password"] = p.password;
+    if (!p.format.empty()) j["format"] = p.format;
+}
+inline void from_json(const json& j, RenameParams& p) {
+    j.at("archive").get_to(p.archive);
+    j.at("old_path").get_to(p.old_path);
+    j.at("new_path").get_to(p.new_path);
+    if (j.contains("password") && !j["password"].is_null()) {
+        j.at("password").get_to(p.password);
+    }
+    if (j.contains("format") && !j["format"].is_null()) {
+        j.at("format").get_to(p.format);
+    }
+}
+
+inline void to_json(json& j, const TestParams& p) {
+    j = json{{"archive", p.archive}};
+    if (!p.password.empty()) j["password"] = p.password;
+    if (!p.format.empty()) j["format"] = p.format;
+    if (!p.tar_cache_path.empty()) j["tar_cache_path"] = p.tar_cache_path;
+}
+inline void from_json(const json& j, TestParams& p) {
+    j.at("archive").get_to(p.archive);
+    if (j.contains("password") && !j["password"].is_null()) {
+        j.at("password").get_to(p.password);
+    }
+    if (j.contains("format") && !j["format"].is_null()) {
+        j.at("format").get_to(p.format);
+    }
+    if (j.contains("tar_cache_path") && !j["tar_cache_path"].is_null()) {
+        j.at("tar_cache_path").get_to(p.tar_cache_path);
     }
 }
 

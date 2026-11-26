@@ -17,7 +17,7 @@ enum FileUtils {
         guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
+            options: []
         ) else { return 0 }
         for case let fileURL as URL in enumerator {
             let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
@@ -46,7 +46,7 @@ enum FileUtils {
         guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles]
+            options: []
         ) else {
             return Int64(0)
         }
@@ -118,7 +118,7 @@ enum FileUtils {
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .localizedNameKey],
-            options: [.skipsHiddenFiles]
+            options: []
         )) ?? []
         return contents
             .map { makeShallowEntry(for: $0) }

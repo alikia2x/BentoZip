@@ -5,6 +5,7 @@
 
 #include <iconv.h>
 
+#include <cctype>
 #include <cerrno>
 #include <cstdint>
 #include <limits>
@@ -14,6 +15,44 @@
 namespace bento7z {
 
 namespace {
+
+std::string normalize_forced_encoding(std::string_view enc) {
+    while (!enc.empty() && std::isspace(static_cast<unsigned char>(enc.front()))) {
+        enc.remove_prefix(1);
+    }
+    while (!enc.empty() && std::isspace(static_cast<unsigned char>(enc.back()))) {
+        enc.remove_suffix(1);
+    }
+    if (enc.empty()) {
+        return {};
+    }
+
+    std::string lower;
+    lower.reserve(enc.size());
+    for (unsigned char c : enc) {
+        lower.push_back(static_cast<char>(std::tolower(c)));
+    }
+    if (lower == "auto") {
+        return {};
+    }
+    if (lower == "utf-8" || lower == "utf8") return "UTF-8";
+    if (lower == "gb18030" || lower == "gbk" || lower == "gb2312" || lower == "cp936") return "GB18030";
+    if (lower == "big5" || lower == "big-5" || lower == "big-five" || lower == "cp950") return "BIG5";
+    if (lower == "shift_jis" || lower == "shift-jis" || lower == "sjis" || lower == "cp932") return "SHIFT_JIS";
+    if (lower == "euc-kr" || lower == "euckr" || lower == "cp949" || lower == "ks_c_5601-1987") return "EUC-KR";
+    if (lower == "cp437" || lower == "ibm437" || lower == "437") return "CP437";
+    if (lower == "cp850" || lower == "ibm850" || lower == "850") return "CP850";
+    if (lower == "windows-1252" || lower == "cp1252" || lower == "1252") return "WINDOWS-1252";
+    if (lower == "windows-1251" || lower == "cp1251" || lower == "1251") return "WINDOWS-1251";
+    if (lower == "iso-8859-1" || lower == "latin1") return "ISO-8859-1";
+
+    std::string upper;
+    upper.reserve(enc.size());
+    for (unsigned char c : enc) {
+        upper.push_back(static_cast<char>(std::toupper(c)));
+    }
+    return upper;
+}
 
 std::optional<std::string> extract_latin1_raw_bytes(std::string_view utf8_str, bool& saw_non_ascii) {
     saw_non_ascii = false;
@@ -207,7 +246,19 @@ bool looks_like_latin1_mojibake(std::string_view utf8_str) {
     return extract_latin1_raw_bytes(utf8_str, saw_non_ascii).has_value() && saw_non_ascii;
 }
 
-ZipEncodingResolver::ZipEncodingResolver(const bit7z::BitArchiveReader& reader) {
+ZipEncodingResolver::ZipEncodingResolver(const bit7z::BitArchiveReader& reader,
+                                         std::string_view forced_encoding) {
+    const std::string normalized_forced = normalize_forced_encoding(forced_encoding);
+    if (!normalized_forced.empty()) {
+        iconv_t test_cd = ::iconv_open("UTF-8", normalized_forced.c_str());
+        if (test_cd != reinterpret_cast<iconv_t>(-1)) {
+            ::iconv_close(test_cd);
+            charset_ = normalized_forced;
+            forced_ = true;
+        }
+        return;
+    }
+
     if (reader.detectedFormat() != bit7z::BitFormat::Zip) {
         return;
     }
@@ -273,11 +324,18 @@ std::string ZipEncodingResolver::decode(std::string_view utf8_str) const {
     }
     bool saw_non_ascii = false;
     auto raw = extract_latin1_raw_bytes(utf8_str, saw_non_ascii);
-    if (!saw_non_ascii || !raw.has_value()) {
-        return std::string(utf8_str);
+    if (raw.has_value()) {
+        if (!saw_non_ascii) {
+            return std::string(utf8_str);
+        }
+        auto converted = iconv_convert(charset_.c_str(), *raw);
+        return converted.value_or(std::string(utf8_str));
     }
-    auto converted = iconv_convert(charset_.c_str(), *raw);
-    return converted.value_or(std::string(utf8_str));
+    if (forced_) {
+        auto converted = iconv_convert(charset_.c_str(), utf8_str);
+        return converted.value_or(std::string(utf8_str));
+    }
+    return std::string(utf8_str);
 }
 
 } // namespace bento7z

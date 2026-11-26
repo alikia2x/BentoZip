@@ -14,6 +14,8 @@ enum Bento7zBinaryProtocol {
         case delete = 5
         case cancel = 6
         case ping = 7
+        case rename = 8
+        case test = 9
     }
 
     enum ResponseType: UInt8 {
@@ -71,13 +73,15 @@ enum Bento7zBinaryProtocol {
         archivePath: String,
         password: String?,
         format: String?,
-        tarCachePath: String?
+        tarCachePath: String?,
+        encoding: String? = nil
     ) -> Data {
         var payload = Data()
         appendString(archivePath, to: &payload)
         appendString(password ?? "", to: &payload)
         appendString(format ?? "", to: &payload)
         appendString(tarCachePath ?? "", to: &payload)
+        appendString(encoding ?? "", to: &payload)
         return payload
     }
 
@@ -87,7 +91,8 @@ enum Bento7zBinaryProtocol {
         password: String?,
         format: String?,
         tarCachePath: String?,
-        entries: [String]
+        entries: [String],
+        encoding: String? = nil
     ) -> Data {
         var payload = Data()
         appendString(archivePath, to: &payload)
@@ -96,6 +101,7 @@ enum Bento7zBinaryProtocol {
         appendString(format ?? "", to: &payload)
         appendString(tarCachePath ?? "", to: &payload)
         appendStringArray(entries, to: &payload)
+        appendString(encoding ?? "", to: &payload)
         return payload
     }
 
@@ -127,13 +133,15 @@ enum Bento7zBinaryProtocol {
         archivePath: String,
         password: String?,
         format: String?,
-        paths: [String]
+        paths: [String],
+        targetPrefix: String? = nil
     ) -> Data {
         var payload = Data()
         appendString(archivePath, to: &payload)
         appendString(password ?? "", to: &payload)
         appendString(format ?? "", to: &payload)
         appendStringArray(paths, to: &payload)
+        appendString(targetPrefix ?? "", to: &payload)
         return payload
     }
 
@@ -148,6 +156,36 @@ enum Bento7zBinaryProtocol {
         appendString(password ?? "", to: &payload)
         appendString(format ?? "", to: &payload)
         appendStringArray(entries, to: &payload)
+        return payload
+    }
+
+    static func encodeRenameRequest(
+        archivePath: String,
+        password: String?,
+        format: String?,
+        oldPath: String,
+        newPath: String
+    ) -> Data {
+        var payload = Data()
+        appendString(archivePath, to: &payload)
+        appendString(password ?? "", to: &payload)
+        appendString(format ?? "", to: &payload)
+        appendString(oldPath, to: &payload)
+        appendString(newPath, to: &payload)
+        return payload
+    }
+
+    static func encodeTestRequest(
+        archivePath: String,
+        password: String?,
+        format: String?,
+        tarCachePath: String?
+    ) -> Data {
+        var payload = Data()
+        appendString(archivePath, to: &payload)
+        appendString(password ?? "", to: &payload)
+        appendString(format ?? "", to: &payload)
+        appendString(tarCachePath ?? "", to: &payload)
         return payload
     }
 
@@ -195,6 +233,8 @@ enum Bento7zBinaryProtocol {
             let size = Int64(bitPattern: try cursor.readUInt64())
             let packedSize = Int64(bitPattern: try cursor.readUInt64())
             let modifiedAtRaw = try cursor.readInt64()
+            let hasCRC = (flags & 0x08) != 0
+            let crc: UInt32? = hasCRC ? try cursor.readUInt32() : nil
             let path = try cursor.readString()
             let name = try cursor.readString()
 
@@ -212,6 +252,7 @@ enum Bento7zBinaryProtocol {
                 size: max(0, size),
                 packedSize: packedSize > 0 ? packedSize : nil,
                 modificationDate: modDate,
+                crc: crc,
                 isEncrypted: isEncrypted
             ))
         }

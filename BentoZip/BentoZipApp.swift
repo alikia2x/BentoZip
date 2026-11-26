@@ -17,6 +17,7 @@ struct BentoZipApp: App {
         self.preferencesManager = manager
         self.sharedModelContainer = container
         _menuRecents = State(initialValue: RecentMenuModel(preferencesManager: manager))
+        DocumentWindowRouter.shared.configurePreferencesManager(manager)
     }
 
     var body: some Scene {
@@ -81,6 +82,8 @@ struct BentoZipApp: App {
                 }
                 .keyboardShortcut("p", modifiers: [.command, .option])
             }
+
+            WorkspaceMenuCommands(preferencesManager: preferencesManager)
         }
         .modelContainer(sharedModelContainer)
 
@@ -115,12 +118,17 @@ private struct WindowRootView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var appState = AppState()
     @State private var progressState = ProgressState()
+    @State private var uiState = WorkspaceUIState()
     @State private var hasAppliedInitialRequest = false
 
     var body: some View {
         ContentView()
             .environment(appState)
             .environment(progressState)
+            .environment(uiState)
+            .focusedSceneValue(\.activeAppState, appState)
+            .focusedSceneValue(\.activeProgressState, progressState)
+            .focusedSceneValue(\.activeWorkspaceUIState, uiState)
             .frame(minWidth: 700, minHeight: 440)
             .onAppear {
                 DocumentWindowRouter.shared.configureWindowOpener { request in
@@ -140,12 +148,18 @@ private struct WindowRootView: View {
                 case .openArchive(let url):
                     Task {
                         await appState.coordinator.browseArchive(at: url, appState: appState)
+                        DocumentWindowRouter.shared.finishOpeningArchive(url)
                     }
                 case .compressFiles(let urls):
                     appState.loadFiles(from: urls)
                 }
             }
             .onDisappear {
+                appState.activeConflictPrompt?.cancel()
+                appState.activeConflictPrompt = nil
+                if case .openArchive(let url) = initialRequest {
+                    DocumentWindowRouter.shared.finishOpeningArchive(url)
+                }
                 appState.cancelBackgroundTasks()
             }
     }
@@ -185,9 +199,143 @@ private final class RecentMenuModel {
     }
 }
 
+private struct WorkspaceMenuCommands: Commands {
+    let preferencesManager: PreferencesManager
+
+    @FocusedValue(\.activeAppState) private var focusedAppState
+    @FocusedValue(\.activeProgressState) private var focusedProgressState
+    @FocusedValue(\.activeWorkspaceUIState) private var focusedUIState
+
+    private var activeAppState: AppState? {
+        focusedAppState ?? DocumentWindowRouter.shared.activeWindowAppState
+    }
+
+    private var activeProgressState: ProgressState? {
+        focusedProgressState ?? DocumentWindowRouter.shared.activeWindowProgressState
+    }
+
+    private var activeUIState: WorkspaceUIState? {
+        focusedUIState ?? DocumentWindowRouter.shared.activeWindowUIState
+    }
+
+    private var canSearch: Bool {
+        guard let appState = activeAppState else { return false }
+        return appState.mode == .compress || appState.mode == .browseArchive
+    }
+
+    private var isBrowsingArchive: Bool {
+        activeAppState?.mode == .browseArchive
+    }
+
+    private var isBusy: Bool {
+        (activeAppState?.isLoading ?? false) || (activeProgressState?.isOperationInProgress ?? false)
+    }
+
+    var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            Divider()
+
+            Button("Find…") {
+                guard let appState = activeAppState,
+                      appState.mode == .compress || appState.mode == .browseArchive else { return }
+                if !appState.isSearchVisible {
+                    appState.isSearchVisible = true
+                }
+                activeUIState?.requestSearchFocus()
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .disabled(!canSearch)
+        }
+
+        CommandGroup(after: .sidebar) {
+            Divider()
+
+            Toggle("Show Hidden Files", isOn: Binding(
+                get: {
+                    activeAppState?.showHiddenFiles ?? preferencesManager.loadPreferences().showHiddenFiles
+                },
+                set: { newValue in
+                    if let appState = activeAppState {
+                        appState.showHiddenFiles = newValue
+                    }
+                    preferencesManager.updatePreferences { prefs in
+                        prefs.showHiddenFiles = newValue
+                    }
+                }
+            ))
+            .keyboardShortcut(".", modifiers: [.command, .shift])
+        }
+
+        CommandMenu("Archive") {
+            Button("Extract Here") {
+                guard let appState = activeAppState, let progressState = activeProgressState else { return }
+                Task {
+                    await appState.coordinator.extract(
+                        appState: appState,
+                        progressState: progressState,
+                        chooseDestination: false
+                    )
+                }
+            }
+            .keyboardShortcut("e", modifiers: .command)
+            .disabled(!isBrowsingArchive || isBusy)
+
+            Button("Extract To…") {
+                guard let appState = activeAppState, let progressState = activeProgressState else { return }
+                Task {
+                    await appState.coordinator.extract(
+                        appState: appState,
+                        progressState: progressState,
+                        chooseDestination: true
+                    )
+                }
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(!isBrowsingArchive || isBusy)
+
+            Button("Test Archive") {
+                guard let appState = activeAppState, let progressState = activeProgressState else { return }
+                Task {
+                    await appState.coordinator.testArchive(
+                        appState: appState,
+                        progressState: progressState
+                    )
+                }
+            }
+            .keyboardShortcut("t", modifiers: .command)
+            .disabled(!isBrowsingArchive || isBusy)
+
+            Divider()
+
+            Button("New Folder…") {
+                activeUIState?.showNewFolderSheet = true
+            }
+            .disabled(!(isBrowsingArchive && activeAppState?.isWritableArchive == true) || isBusy)
+
+            Divider()
+
+            Menu("Filename Encoding") {
+                ForEach(FilenameEncodingOption.allCases) { option in
+                    Toggle(option.displayName, isOn: Binding(
+                        get: { activeAppState?.selectedEncoding == option },
+                        set: { _ in
+                            guard let appState = activeAppState else { return }
+                            Task {
+                                await appState.coordinator.reloadWithEncoding(option, appState: appState)
+                            }
+                        }
+                    ))
+                }
+            }
+            .disabled(!isBrowsingArchive || isBusy)
+        }
+    }
+}
+
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
+            DragDropManager.shared.cleanupStaleTempDirectories()
             TransferWindowController.shared.startObserving()
         }
     }

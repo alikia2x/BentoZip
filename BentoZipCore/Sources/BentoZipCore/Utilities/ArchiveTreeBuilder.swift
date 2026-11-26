@@ -11,6 +11,7 @@ public enum ArchiveTreeBuilder {
         public let size: Int64
         public let packedSize: Int64?
         public let modificationDate: Date?
+        public let crc: UInt32?
         public let isEncrypted: Bool
 
         public init(
@@ -20,6 +21,7 @@ public enum ArchiveTreeBuilder {
             size: Int64,
             packedSize: Int64? = nil,
             modificationDate: Date? = nil,
+            crc: UInt32? = nil,
             isEncrypted: Bool = false
         ) {
             self.path = path
@@ -28,12 +30,53 @@ public enum ArchiveTreeBuilder {
             self.size = size
             self.packedSize = packedSize
             self.modificationDate = modificationDate
+            self.crc = crc
             self.isEncrypted = isEncrypted
         }
     }
 
+    /// Result of building a hierarchical archive tree, including any stripped single top-level directory path.
+    public struct BuildResult: Sendable {
+        public let entries: [FileEntry]
+        public let unwrappedRootPath: String?
+
+        public init(entries: [FileEntry], unwrappedRootPath: String? = nil) {
+            self.entries = entries
+            self.unwrappedRootPath = unwrappedRootPath
+        }
+    }
+
     /// Build a sorted tree of `FileEntry` from flat entries, creating intermediate directories as needed.
-    public static func build(from flatEntries: [FlatEntry]) -> [FileEntry] {
+    public static func build(
+        from flatEntries: [FlatEntry],
+        unwrapSingleTopDirectory: Bool = true
+    ) -> [FileEntry] {
+        buildTreeWithMetadata(
+            from: flatEntries,
+            archiveURL: nil,
+            unwrapSingleTopDirectory: unwrapSingleTopDirectory
+        ).entries
+    }
+
+    /// Build a sorted tree of `FileEntry` from flat entries with configurable single top-level directory unwrapping.
+    public static func buildTree(
+        from flatEntries: [FlatEntry],
+        archiveURL: URL? = nil,
+        unwrapSingleTopDirectory: Bool = true
+    ) -> [FileEntry] {
+        buildTreeWithMetadata(
+            from: flatEntries,
+            archiveURL: archiveURL,
+            unwrapSingleTopDirectory: unwrapSingleTopDirectory
+        ).entries
+    }
+
+    /// Build a sorted tree of `FileEntry` and also report any unwrapped single top-level directory prefix.
+    public static func buildTreeWithMetadata(
+        from flatEntries: [FlatEntry],
+        archiveURL: URL? = nil,
+        unwrapSingleTopDirectory: Bool = true
+    ) -> BuildResult {
         final class Node {
             var name: String
             var relativePath: String
@@ -42,6 +85,7 @@ public enum ArchiveTreeBuilder {
             var size: Int64
             var packedSize: Int64?
             var modificationDate: Date?
+            var crc: UInt32?
             var isEncrypted: Bool
             var children: [String: Node] = [:]
 
@@ -53,6 +97,7 @@ public enum ArchiveTreeBuilder {
                 size: Int64 = 0,
                 packedSize: Int64? = nil,
                 modificationDate: Date? = nil,
+                crc: UInt32? = nil,
                 isEncrypted: Bool = false
             ) {
                 self.name = name
@@ -62,6 +107,7 @@ public enum ArchiveTreeBuilder {
                 self.size = size
                 self.packedSize = packedSize
                 self.modificationDate = modificationDate
+                self.crc = crc
                 self.isEncrypted = isEncrypted
             }
         }
@@ -122,6 +168,7 @@ public enum ArchiveTreeBuilder {
                 existingNode.size = entry.size
                 existingNode.packedSize = entry.packedSize
                 existingNode.modificationDate = entry.modificationDate
+                existingNode.crc = entry.crc
                 existingNode.isEncrypted = entry.isEncrypted
             } else {
                 current.children[leafName] = Node(
@@ -132,6 +179,7 @@ public enum ArchiveTreeBuilder {
                     size: entry.size,
                     packedSize: entry.packedSize,
                     modificationDate: entry.modificationDate,
+                    crc: entry.crc,
                     isEncrypted: entry.isEncrypted
                 )
             }
@@ -149,6 +197,7 @@ public enum ArchiveTreeBuilder {
                     size: child.size,
                     packedSize: child.packedSize,
                     modificationDate: child.modificationDate,
+                    crc: child.crc,
                     isEncrypted: child.isEncrypted,
                     isFromArchive: true,
                     archiveRelativePath: child.archivePath,
@@ -162,14 +211,32 @@ public enum ArchiveTreeBuilder {
             }
         }
 
-        func unwrapSingleDirectory(_ entries: [FileEntry]) -> [FileEntry] {
+        func unwrapSingleDirectory(
+            _ entries: [FileEntry],
+            currentRoot: String? = nil
+        ) -> (entries: [FileEntry], unwrappedRootPath: String?) {
             if entries.count == 1, let first = entries.first, first.isDirectory, let children = first.children {
-                return unwrapSingleDirectory(children)
+                let rawRoot = first.archiveRelativePath ?? first.name
+                let cleanRoot = normalizedRelativePath(rawRoot)
+                return unwrapSingleDirectory(children, currentRoot: cleanRoot.isEmpty ? currentRoot : cleanRoot)
             }
-            return entries
+            return (entries, currentRoot)
         }
 
-        return unwrapSingleDirectory(convert(node: root))
+        let converted = convert(node: root)
+        if unwrapSingleTopDirectory {
+            let unwrapped = unwrapSingleDirectory(converted)
+            return BuildResult(entries: unwrapped.entries, unwrappedRootPath: unwrapped.unwrappedRootPath)
+        }
+        return BuildResult(entries: converted, unwrappedRootPath: nil)
+    }
+
+    private static func normalizedRelativePath(_ rawPath: String) -> String {
+        var s = rawPath.replacingOccurrences(of: "\\", with: "/")
+        while s.hasPrefix("./") { s.removeFirst(2) }
+        while s.hasPrefix("/") { s.removeFirst() }
+        while s.hasSuffix("/") { s.removeLast() }
+        return s == "." ? "" : s
     }
 
     private static func sanitizedDisplayName(_ rawName: String, fallback: String) -> String {

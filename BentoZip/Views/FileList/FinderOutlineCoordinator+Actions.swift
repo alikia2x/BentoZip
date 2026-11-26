@@ -13,11 +13,7 @@ extension FinderOutlineCoordinator {
               let node = outlineView.item(atRow: clickedRow) as? FileNode else {
             return
         }
-        if node.isDirectory {
-            appState.navigateInto(node)
-        } else {
-            previewNodes([node])
-        }
+        openNode(node)
     }
 
     func handleSpaceKey() {
@@ -33,10 +29,25 @@ extension FinderOutlineCoordinator {
     func handleOpenKey() {
         let targets = selectedNodes()
         guard targets.count == 1, let node = targets.first else { return }
-        if node.isDirectory {
+        openNode(node)
+    }
+
+    func openNode(_ node: FileNode, withApplicationAt appURL: URL? = nil) {
+        if node.isDirectory && appURL == nil {
             appState.navigateInto(node)
-        } else {
-            previewNodes([node])
+            return
+        }
+        let entry = node.toFileEntry()
+        let archiveURL = appState.sourceArchiveURL
+        let password = appState.archivePassword
+        Task {
+            await appState.coordinator.extractEntryForOpen(
+                entry,
+                archiveURL: archiveURL,
+                password: password,
+                appURL: appURL,
+                appState: appState
+            )
         }
     }
 
@@ -47,6 +58,7 @@ extension FinderOutlineCoordinator {
     }
 
     func handleDeleteKey() {
+        guard !appState.isLoading, !progressState.isOperationInProgress else { return }
         let targets = selectedNodes()
         guard !targets.isEmpty else { return }
         if appState.mode == .compress {
@@ -59,6 +71,9 @@ extension FinderOutlineCoordinator {
     func handleEscapeKey() {
         if QuickLookHelper.shared.isVisible {
             QuickLookHelper.shared.closeIfVisible()
+        } else if appState.isSearchVisible || !appState.searchQuery.isEmpty {
+            appState.searchQuery = ""
+            appState.isSearchVisible = false
         } else if appState.canNavigateUp {
             appState.navigateUp()
         } else {
@@ -66,17 +81,50 @@ extension FinderOutlineCoordinator {
         }
     }
 
+    func handleCopyNames() {
+        copyNames(selectedNodes())
+    }
+
+    func handleCopyPaths() {
+        copyPaths(selectedNodes())
+    }
+
+    func copyNames(_ nodes: [FileNode]) {
+        guard !nodes.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(nodes.map(\.name).joined(separator: "\n"), forType: .string)
+    }
+
+    func copyPaths(_ nodes: [FileNode]) {
+        guard !nodes.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(
+            nodes.map { $0.archiveRelativePath ?? $0.url.path }.joined(separator: "\n"),
+            forType: .string
+        )
+    }
+
     func previewNodes(_ nodes: [FileNode]) {
         if let outlineView {
             outlineView.window?.makeFirstResponder(outlineView)
         }
+        let previewEntries = nodes
+            .filter { !$0.isDirectory || !$0.isFromArchive }
+            .map { $0.toFileEntry() }
         QuickLookHelper.shared.preview(
             nodes: nodes,
             sourceArchiveURL: appState.sourceArchiveURL,
-            password: appState.archivePassword
+            password: appState.archivePassword,
+            encoding: appState.selectedEncoding.iconvName
         ) { [weak self] error in
             guard let self else { return }
-            FileListTreeSupport.handleExtractionError(error, appState: self.appState)
+            FileListTreeSupport.handleExtractionError(
+                error,
+                appState: self.appState,
+                retryAction: previewEntries.isEmpty ? nil : .preview(previewEntries)
+            )
         }
     }
 
@@ -91,11 +139,24 @@ extension FinderOutlineCoordinator {
         if (info.draggingSource as? NSView) === outlineView {
             return []
         }
-        guard appState.mode == .compress || appState.isWritableArchive else {
+        guard !appState.isLoading,
+              !progressState.isOperationInProgress,
+              appState.mode == .compress || appState.isWritableArchive else {
             return []
         }
         let urls = droppedFileURLs(from: info.draggingPasteboard)
         guard !urls.isEmpty else { return [] }
+
+        if appState.isWritableArchive, let node = item as? FileNode {
+            let folderNode = node.isDirectory ? node : node.parent
+            if let folderNode {
+                let row = outlineView.row(forItem: folderNode)
+                if row >= 0 {
+                    outlineView.setDropRow(row, dropOperation: .on)
+                    return .copy
+                }
+            }
+        }
 
         outlineView.setDropRow(-1, dropOperation: .on)
         return .copy
@@ -110,7 +171,9 @@ extension FinderOutlineCoordinator {
         if (info.draggingSource as? NSView) === outlineView {
             return false
         }
-        guard appState.mode == .compress || appState.isWritableArchive else {
+        guard !appState.isLoading,
+              !progressState.isOperationInProgress,
+              appState.mode == .compress || appState.isWritableArchive else {
             return false
         }
         let urls = droppedFileURLs(from: info.draggingPasteboard)
@@ -120,16 +183,33 @@ extension FinderOutlineCoordinator {
             appState.addEntries(from: urls)
             return true
         } else if appState.isWritableArchive {
+            let targetPrefix: String
+            if let node = item as? FileNode,
+               let folderNode = node.isDirectory ? node : node.parent,
+               let relPath = folderNode.archiveRelativePath {
+                targetPrefix = normalizedRelativePrefix(relPath)
+            } else {
+                targetPrefix = appState.currentSubfolderPath
+            }
             Task {
                 await appState.coordinator.addEntries(
                     appState: appState,
                     urls: urls,
+                    targetPrefix: targetPrefix,
                     progressState: progressState
                 )
             }
             return true
         }
         return false
+    }
+
+    private func normalizedRelativePrefix(_ raw: String) -> String {
+        var s = raw.replacingOccurrences(of: "\\", with: "/")
+        while s.hasPrefix("./") { s.removeFirst(2) }
+        while s.hasPrefix("/") { s.removeFirst() }
+        while s.hasSuffix("/") { s.removeLast() }
+        return s == "." ? "" : s
     }
 
     private func droppedFileURLs(from pasteboard: NSPasteboard) -> [URL] {
@@ -159,7 +239,8 @@ extension FinderOutlineCoordinator {
         provider.userInfo = FilePromisePayload(
             entry: node.toFileEntry(),
             sourceArchiveURL: appState.sourceArchiveURL,
-            password: appState.archivePassword
+            password: appState.archivePassword,
+            encoding: appState.selectedEncoding.iconvName
         )
         return provider
     }
@@ -203,7 +284,8 @@ extension FinderOutlineCoordinator: NSFilePromiseProviderDelegate {
                 let extractedURL = try await DragDropManager.shared.prepareForDragThrowing(
                     payload.entry,
                     sourceArchiveURL: payload.sourceArchiveURL,
-                    password: payload.password
+                    password: payload.password,
+                    encoding: payload.encoding
                 )
                 resultBox.result = .success(extractedURL)
             } catch {
@@ -236,7 +318,14 @@ extension FinderOutlineCoordinator: NSFilePromiseProviderDelegate {
         } catch {
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                FileListTreeSupport.handleExtractionError(error, appState: self.appState)
+                let retryAction: PendingPasswordAction? = payload.sourceArchiveURL.map {
+                    .extract($0, entries: [payload.entry], chooseDestination: true)
+                }
+                FileListTreeSupport.handleExtractionError(
+                    error,
+                    appState: self.appState,
+                    retryAction: retryAction
+                )
             }
             completionHandler(error)
         }

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Coordinates drag-out extraction of archive entries to temporary local URLs.
@@ -10,6 +11,7 @@ public final class DragDropManager {
         let modificationTimestamp: TimeInterval?
         let fileSize: Int64?
         let entryPath: String
+        let encoding: String?
     }
 
     private struct InFlightKey: Hashable {
@@ -26,11 +28,45 @@ public final class DragDropManager {
     private var extractedFiles: [CacheKey: URL] = [:]
     private var inFlightExtractions: [InFlightKey: InFlightEntry] = [:]
     private let engine = Bento7zEngine()
+    private static let trackedTransferThresholdBytes: Int64 = 5 * 1024 * 1024
 
     private init() {
+        let pid = ProcessInfo.processInfo.processIdentifier
         sessionTempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("BentoZip-drag-\(UUID().uuidString)")
+            .appendingPathComponent("BentoZip-drag-\(pid)-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: sessionTempDir, withIntermediateDirectories: true)
+    }
+
+    /// Reap orphaned `BentoZip-drag-*` directories left behind in `NSTemporaryDirectory()` by dead processes.
+    public func cleanupStaleTempDirectories() {
+        let tempRoot = FileManager.default.temporaryDirectory
+        let currentSessionName = sessionTempDir.lastPathComponent
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            guard let contents = try? fm.contentsOfDirectory(
+                at: tempRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: []
+            ) else {
+                return
+            }
+            let prefix = "BentoZip-drag-"
+            for item in contents {
+                let name = item.lastPathComponent
+                guard name.hasPrefix(prefix), name != currentSessionName else { continue }
+                let suffix = name.dropFirst(prefix.count)
+                guard let firstSegment = suffix.split(separator: "-").first,
+                      let pid = pid_t(firstSegment),
+                      pid > 0,
+                      pid != currentPID else {
+                    continue
+                }
+                if Darwin.kill(pid, 0) == -1 && errno == ESRCH {
+                    try? fm.removeItem(at: item)
+                }
+            }
+        }
     }
 
     /// Prepare a local URL for dragging an entry out of the window, propagating backend or path errors.
@@ -39,7 +75,8 @@ public final class DragDropManager {
     public func prepareForDragThrowing(
         _ entry: FileEntry,
         sourceArchiveURL: URL?,
-        password: String? = nil
+        password: String? = nil,
+        encoding: String? = nil
     ) async throws -> URL? {
         if !entry.isFromArchive {
             return entry.url
@@ -51,7 +88,7 @@ public final class DragDropManager {
 
         let safeName = try sanitizedEntryFileName(entry.name)
         let archivePath = entry.archiveRelativePath ?? extractArchivePath(from: entry)
-        let cacheKey = makeCacheKey(for: archiveURL, entryPath: archivePath)
+        let cacheKey = makeCacheKey(for: archiveURL, entryPath: archivePath, encoding: encoding)
 
         if let cached = extractedFiles[cacheKey],
            FileManager.default.fileExists(atPath: cached.path) {
@@ -74,16 +111,42 @@ public final class DragDropManager {
             )
         }
 
+        let shouldTrackTransfer = entry.isDirectory || entry.size >= Self.trackedTransferThresholdBytes
+        let transferTask: TransferTask?
+        if shouldTrackTransfer {
+            let tracked = TransferTask(
+                kind: .extract,
+                title: String(localized: "Extracting \(entry.name)…", bundle: .module),
+                totalBytes: max(0, entry.size),
+                totalFiles: entry.isDirectory ? nil : 1,
+                destinationURL: tempURL,
+                sourceArchiveURL: archiveURL
+            )
+            TransferManager.shared.register(tracked)
+            transferTask = tracked
+        } else {
+            transferTask = nil
+        }
+
         let engine = self.engine
         let tokenID = UUID()
         let task = Task.detached(priority: .userInitiated) { () throws -> URL in
             try FileManager.default.createDirectory(at: extractionDir, withIntermediateDirectories: true)
             do {
+                let progressHandler: (@Sendable (ArchiveProgress) -> Void)? = transferTask.map { tracked in
+                    { @Sendable update in
+                        Task { @MainActor in
+                            tracked.apply(update)
+                        }
+                    }
+                }
                 try await engine.extractEntry(
                     from: archiveURL,
                     entryPath: archivePath,
                     to: tempURL,
-                    password: password
+                    password: password,
+                    encoding: encoding,
+                    onProgress: progressHandler
                 )
                 return tempURL
             } catch {
@@ -91,7 +154,17 @@ public final class DragDropManager {
                 throw error
             }
         }
+        transferTask?.onCancel = {
+            task.cancel()
+        }
         inFlightExtractions[inFlightKey] = InFlightEntry(id: tokenID, task: task)
+
+        defer {
+            if let transferTask {
+                transferTask.markCompleted()
+                TransferManager.shared.remove(id: transferTask.id)
+            }
+        }
 
         do {
             let extractedURL = try await task.value
@@ -113,12 +186,14 @@ public final class DragDropManager {
     public func prepareForDrag(
         _ entry: FileEntry,
         sourceArchiveURL: URL?,
-        password: String? = nil
+        password: String? = nil,
+        encoding: String? = nil
     ) async -> URL? {
         try? await prepareForDragThrowing(
             entry,
             sourceArchiveURL: sourceArchiveURL,
-            password: password
+            password: password,
+            encoding: encoding
         )
     }
 
@@ -145,7 +220,7 @@ public final class DragDropManager {
         try? FileManager.default.createDirectory(at: sessionTempDir, withIntermediateDirectories: true)
     }
 
-    private func makeCacheKey(for archiveURL: URL, entryPath: String) -> CacheKey {
+    private func makeCacheKey(for archiveURL: URL, entryPath: String, encoding: String?) -> CacheKey {
         let standardizedPath = archiveURL.standardizedFileURL.path
         let attrs = try? FileManager.default.attributesOfItem(atPath: standardizedPath)
         let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate
@@ -154,7 +229,8 @@ public final class DragDropManager {
             archivePath: standardizedPath,
             modificationTimestamp: mtime,
             fileSize: fileSize,
-            entryPath: entryPath
+            entryPath: entryPath,
+            encoding: encoding
         )
     }
 

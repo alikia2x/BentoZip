@@ -604,4 +604,237 @@ struct AppStateTests {
         #expect(appState.rootNodes.map(\.name) == ["Project"])
         #expect(appState.totalSize == 100)
     }
+
+    // MARK: - P0 State, Tree & Preferences
+
+    @Test func archiveTreeBuilder_unwrapSingleTopDirectory_controlsTopWrapperPreservation() {
+        let flat = [
+            ArchiveTreeBuilder.FlatEntry(path: "Wrapper", name: "Wrapper", isDirectory: true, size: 0),
+            ArchiveTreeBuilder.FlatEntry(path: "Wrapper/readme.txt", name: "readme.txt", isDirectory: false, size: 42),
+            ArchiveTreeBuilder.FlatEntry(path: "Wrapper/src/main.swift", name: "main.swift", isDirectory: false, size: 120)
+        ]
+
+        let wrapped = ArchiveTreeBuilder.buildTree(from: flat, unwrapSingleTopDirectory: false)
+        #expect(wrapped.count == 1)
+        #expect(wrapped[0].name == "Wrapper")
+        #expect(wrapped[0].isDirectory)
+        #expect(wrapped[0].children?.map(\.name) == ["src", "readme.txt"])
+
+        let unwrapped = ArchiveTreeBuilder.buildTree(from: flat, unwrapSingleTopDirectory: true)
+        #expect(unwrapped.map(\.name) == ["src", "readme.txt"])
+    }
+
+    @Test func searchQuery_andShowHiddenFiles_filterRecursivelyAcrossCompressAndBrowseModes() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        // 1. Compress mode: dotfiles vs normal files in nested structure
+        let projectDir = dir.appendingPathComponent("Box")
+        let subDir = projectDir.appendingPathComponent("Src")
+        let hiddenDir = projectDir.appendingPathComponent(".git")
+        try fm.createDirectory(at: subDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: hiddenDir, withIntermediateDirectories: true)
+
+        try "readme".write(to: projectDir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try "env".write(to: projectDir.appendingPathComponent(".env"), atomically: true, encoding: .utf8)
+        try "swift".write(to: subDir.appendingPathComponent("helper.swift"), atomically: true, encoding: .utf8)
+        try "git".write(to: hiddenDir.appendingPathComponent("secret"), atomically: true, encoding: .utf8)
+
+        let appState = AppState()
+        await appState.loadFilesAsync(from: [projectDir])
+        let projectNode = try #require(appState.rootNodes.first(where: { $0.name == "Box" }))
+        await appState.loadChildrenIfNeededAsync(for: projectNode)
+        let sourcesNode = try #require(projectNode.children?.first(where: { $0.name == "Src" }))
+        let hiddenDirNode = try #require(projectNode.children?.first(where: { $0.name == ".git" }))
+        await appState.loadChildrenIfNeededAsync(for: sourcesNode)
+        await appState.loadChildrenIfNeededAsync(for: hiddenDirNode)
+
+        // Default showHiddenFiles == false hides dotfiles inside navigated folder and during recursive search
+        #expect(!appState.showHiddenFiles)
+        appState.navigateInto(projectNode)
+        #expect(appState.displayedNodes.map(\.name) == ["Src", "README.md"])
+
+        appState.searchQuery = "e" // matches README.md, helper.swift, .env, .git/secret (if unhidden)
+        #expect(Set(appState.displayedNodes.map(\.name)) == ["README.md", "helper.swift"])
+
+        appState.showHiddenFiles = true
+        #expect(Set(appState.displayedNodes.map(\.name)) == ["README.md", "helper.swift", ".env", "secret"])
+
+        appState.searchQuery = ""
+        #expect(Set(appState.displayedNodes.map(\.name)) == [".git", "Src", ".env", "README.md"])
+
+        // 2. Browse archive mode: consistent hidden-file & recursive search behavior
+        let browseState = AppState()
+        browseState.mode = .browseArchive
+        browseState.sourceArchiveURL = URL(fileURLWithPath: "/tmp/sample.zip")
+        let archiveEntries = ArchiveTreeBuilder.buildTree(from: [
+            ArchiveTreeBuilder.FlatEntry(path: "docs/guide.txt", name: "guide.txt", isDirectory: false, size: 10),
+            ArchiveTreeBuilder.FlatEntry(path: "docs/.hidden_note.txt", name: ".hidden_note.txt", isDirectory: false, size: 5),
+            ArchiveTreeBuilder.FlatEntry(path: ".secret/token.txt", name: "token.txt", isDirectory: false, size: 8)
+        ], unwrapSingleTopDirectory: false)
+        browseState.setEntries(archiveEntries)
+
+        #expect(!browseState.showHiddenFiles)
+        #expect(browseState.displayedNodes.map(\.name) == ["docs"])
+
+        browseState.searchQuery = "txt"
+        #expect(browseState.displayedNodes.map(\.name) == ["guide.txt"])
+
+        browseState.showHiddenFiles = true
+        #expect(Set(browseState.displayedNodes.map(\.name)) == ["guide.txt", ".hidden_note.txt", "token.txt"])
+    }
+
+    @Test func pendingPasswordAction_preservesPreviewAndOpenFileActions() {
+        let appState = AppState()
+        let archiveURL = URL(fileURLWithPath: "/tmp/encrypted.zip")
+        let entry = FileEntry(
+            url: URL(fileURLWithPath: "/archive-root/secret.pdf"),
+            name: "secret.pdf",
+            size: 512,
+            isEncrypted: true,
+            isFromArchive: true,
+            archiveRelativePath: "secret.pdf"
+        )
+        let customApp = URL(fileURLWithPath: "/System/Applications/Preview.app")
+
+        appState.pendingPasswordArchiveURL = archiveURL
+        appState.pendingPasswordAction = .preview([entry])
+        appState.needsPasswordPrompt = true
+
+        #expect(appState.pendingPasswordAction == .preview([entry]))
+        if case .preview(let items) = appState.pendingPasswordAction {
+            #expect(items == [entry])
+        } else {
+            Issue.record("Expected .preview pending password action")
+        }
+
+        appState.pendingPasswordAction = .openFile(entry, appURL: customApp)
+        #expect(appState.pendingPasswordAction == .openFile(entry, appURL: customApp))
+        if case .openFile(let targetEntry, let targetApp) = appState.pendingPasswordAction {
+            #expect(targetEntry == entry)
+            #expect(targetApp == customApp)
+        } else {
+            Issue.record("Expected .openFile pending password action")
+        }
+
+        appState.cancelPasswordPrompt()
+        #expect(!appState.needsPasswordPrompt)
+        #expect(appState.pendingPasswordArchiveURL == nil)
+        #expect(appState.pendingPasswordAction == nil)
+    }
+
+    @Test func appPreferences_persistsAndRoundTripsAllP0Fields() throws {
+        let schema = Schema([AppPreferences.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+
+        let manager = PreferencesManager()
+        manager.configure(with: container.mainContext)
+
+        manager.updatePreferences { prefs in
+            prefs.archiveOpenAction = ArchiveOpenAction.extract.rawValue
+            prefs.extractDestinationMode = ExtractDestinationMode.customFolder.rawValue
+            prefs.customExtractDirectory = "/tmp/CustomExtracts"
+            prefs.extractConflictPolicy = ExtractConflictPolicy.rename.rawValue
+            prefs.moveArchiveToTrashAfterExtract = true
+            prefs.closeWindowAfterExtract = true
+            prefs.showHiddenFiles = true
+            prefs.sortColumnKey = "size"
+            prefs.sortAscending = false
+        }
+
+        // Verify direct SwiftData fetch round-trip
+        let fetched = manager.loadPreferences()
+        #expect(fetched.archiveOpenAction == ArchiveOpenAction.extract.rawValue)
+        #expect(fetched.extractDestinationMode == ExtractDestinationMode.customFolder.rawValue)
+        #expect(fetched.customExtractDirectory == "/tmp/CustomExtracts")
+        #expect(fetched.extractConflictPolicy == ExtractConflictPolicy.rename.rawValue)
+        #expect(fetched.moveArchiveToTrashAfterExtract)
+        #expect(fetched.closeWindowAfterExtract)
+        #expect(fetched.showHiddenFiles)
+        #expect(fetched.sortColumnKey == "size")
+        #expect(!fetched.sortAscending)
+
+        // Verify AppState syncs synced P0 fields and writes changes back via savePreferences()
+        let appState = AppState()
+        appState.preferencesManager = manager
+        #expect(appState.extractConflictPolicy == .rename)
+        #expect(appState.moveArchiveToTrashAfterExtract)
+        #expect(appState.closeWindowAfterExtract)
+        #expect(appState.showHiddenFiles)
+
+        appState.extractConflictPolicy = .overwrite
+        appState.moveArchiveToTrashAfterExtract = false
+        appState.closeWindowAfterExtract = false
+        appState.showHiddenFiles = false
+        appState.savePreferences()
+
+        let afterSave = manager.loadPreferences()
+        #expect(afterSave.extractConflictPolicy == ExtractConflictPolicy.overwrite.rawValue)
+        #expect(!afterSave.moveArchiveToTrashAfterExtract)
+        #expect(!afterSave.closeWindowAfterExtract)
+        #expect(!afterSave.showHiddenFiles)
+    }
+
+    @Test func currentSubfolderPath_preservesUnwrappedRootPath_andCancelBackgroundTasksCancelsConflictPrompt() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let wrapperDir = dir.appendingPathComponent("Wrapper")
+        let nestedDir = wrapperDir.appendingPathComponent("Sub")
+        try fm.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+        try "root-file".write(to: wrapperDir.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+        try "nested-file".write(to: nestedDir.appendingPathComponent("inner.txt"), atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let zipURL = dir.appendingPathComponent("wrapped.zip")
+        try await engine.create(from: [wrapperDir], to: zipURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let appState = AppState()
+        appState.unwrapSingleTopDirectory = true
+        let coordinator = CompressionCoordinator(engine: engine)
+        appState.coordinator = coordinator
+
+        await coordinator.browseArchive(at: zipURL, appState: appState)
+        #expect(appState.unwrappedRootPath == "Wrapper")
+        #expect(appState.currentSubfolderPath == "Wrapper")
+
+        // Creating a folder at unwrapped archive root must land inside "Wrapper/" rather than archive root
+        let progressState = ProgressState()
+        await coordinator.createFolder(appState: appState, name: "NewDir", progressState: progressState)
+        #expect(appState.lastError == nil)
+
+        let rawListed = try await engine.listArchive(
+            in: zipURL,
+            password: nil,
+            encoding: nil,
+            unwrapSingleTopDirectory: false,
+            onProgress: nil
+        )
+        #expect(rawListed.entries.map(\.name) == ["Wrapper"])
+        let wrapperEntry = try #require(rawListed.entries.first)
+        let wrapperChildNames = Set((wrapperEntry.children ?? []).map(\.name))
+        #expect(wrapperChildNames.contains("NewDir"))
+
+        // Navigating into a subfolder under the unwrapped root uses that subfolder's full archive path
+        let subNode = try #require(appState.rootNodes.first(where: { $0.name == "Sub" }))
+        appState.navigateInto(subNode)
+        #expect(appState.currentSubfolderPath == "Wrapper/Sub")
+
+        // cancelBackgroundTasks() must cancel any active ExtractConflictPrompt and clear it
+        var resolvedResult: ExtractConflictResolution? = .overwrite
+        var callbackCount = 0
+        appState.activeConflictPrompt = ExtractConflictPrompt(
+            sourceName: "readme.txt",
+            destinationURL: dir.appendingPathComponent("readme.txt"),
+            isDirectory: false
+        ) { resolution, _ in
+            resolvedResult = resolution
+            callbackCount += 1
+        }
+        appState.cancelBackgroundTasks()
+        #expect(callbackCount == 1)
+        #expect(resolvedResult == nil)
+        #expect(appState.activeConflictPrompt == nil)
+    }
 }

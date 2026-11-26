@@ -1,6 +1,69 @@
 import SwiftUI
 import Observation
 
+/// Resolution selected by the user for a single extraction filename collision.
+public enum ExtractConflictResolution: Sendable, Equatable {
+    case overwrite
+    case skip
+    case rename
+}
+
+/// Interactive conflict prompt presented when `ExtractConflictPolicy.ask` encounters an existing item.
+public struct ExtractConflictPrompt: Identifiable, Sendable {
+    public let id: UUID
+    public let sourceName: String
+    public let destinationURL: URL
+    public let isDirectory: Bool
+    private let resolver: @MainActor @Sendable (ExtractConflictResolution?, Bool) -> Void
+
+    public init(
+        id: UUID = UUID(),
+        sourceName: String,
+        destinationURL: URL,
+        isDirectory: Bool,
+        resolver: @escaping @MainActor @Sendable (ExtractConflictResolution?, Bool) -> Void
+    ) {
+        self.id = id
+        self.sourceName = sourceName
+        self.destinationURL = destinationURL
+        self.isDirectory = isDirectory
+        self.resolver = resolver
+    }
+
+    @MainActor
+    public func resolve(_ resolution: ExtractConflictResolution, applyToAll: Bool = false) {
+        resolver(resolution, applyToAll)
+    }
+
+    @MainActor
+    public func cancel() {
+        resolver(nil, false)
+    }
+}
+
+/// Result of testing archive integrity presented in the UI.
+public struct TestArchiveResult: Identifiable, Sendable, Equatable {
+    public let id: UUID
+    public let archiveName: String
+    public let itemsCount: Int
+    public let passed: Bool
+    public let errorMessage: String?
+
+    public init(
+        id: UUID = UUID(),
+        archiveName: String,
+        itemsCount: Int,
+        passed: Bool,
+        errorMessage: String? = nil
+    ) {
+        self.id = id
+        self.archiveName = archiveName
+        self.itemsCount = itemsCount
+        self.passed = passed
+        self.errorMessage = errorMessage
+    }
+}
+
 /// Owns a `NotificationCenter` observer token and unregisters it automatically on deallocation.
 private final class NotificationObserverToken: @unchecked Sendable {
     private let token: NSObjectProtocol
@@ -72,6 +135,32 @@ public class AppState {
     // User preferences synced with PreferencesManager when available
     public var revealInFinderAfterExtract: Bool = true
     public var unwrapSingleTopDirectory: Bool = true
+    public var extractConflictPolicy: ExtractConflictPolicy = .ask
+    public var moveArchiveToTrashAfterExtract: Bool = false
+    public var closeWindowAfterExtract: Bool = false
+    public var showHiddenFiles: Bool = false {
+        didSet {
+            if showHiddenFiles != oldValue {
+                bumpTreeStructureRevision()
+            }
+        }
+    }
+
+    // Search, encoding, conflict prompt, and test result state
+    public var searchQuery: String = "" {
+        didSet {
+            if searchQuery != oldValue {
+                bumpTreeStructureRevision()
+            }
+        }
+    }
+    public var isSearchVisible: Bool = false
+    public var selectedEncoding: FilenameEncodingOption = .auto
+    public internal(set) var unwrappedRootPath: String?
+    public var activeConflictPrompt: ExtractConflictPrompt?
+    public var testArchiveResult: TestArchiveResult?
+    @ObservationIgnored public var onRequestCloseWindow: (() -> Void)?
+    @ObservationIgnored public var onResumePreview: (([FileEntry]) -> Void)?
 
     public var coordinator = CompressionCoordinator()
     public var preferencesManager: PreferencesManager? {
@@ -107,13 +196,67 @@ public class AppState {
 
     public var navigationNodes: [FileNode] { navigationNodeIDs.compactMap { nodesByID[$0] } }
 
-    public var displayedNodes: [FileNode] {
+    /// Current archive-relative subfolder path based on the deepest active navigation node,
+    /// or the unwrapped single top-level directory prefix when viewing an unwrapped archive root.
+    public var currentSubfolderPath: String {
+        if let raw = navigationNodes.last?.archiveRelativePath {
+            return Self.normalizedArchiveRelativePath(raw)
+        }
+        if let unwrappedRootPath, !unwrappedRootPath.isEmpty {
+            return Self.normalizedArchiveRelativePath(unwrappedRootPath)
+        }
+        return ""
+    }
+
+    /// Nodes inside the currently navigated folder (respecting `showHiddenFiles`), ignoring active search.
+    public var currentFolderNodes: [FileNode] {
         _ = treeStructureRevision
+        let raw: [FileNode]
         if let currentID = navigationNodeIDs.last, let current = nodesByID[currentID] {
             _ = nodeUpdateRevision
-            return current.children ?? []
+            raw = current.children ?? []
+        } else {
+            raw = rootNodes
         }
-        return rootNodes
+        return showHiddenFiles ? raw : raw.filter { !$0.isHidden }
+    }
+
+    /// Visible immediate children of `node`, respecting `showHiddenFiles`.
+    public func visibleChildren(of node: FileNode) -> [FileNode] {
+        _ = nodeUpdateRevision
+        let raw = node.children ?? []
+        return showHiddenFiles ? raw : raw.filter { !$0.isHidden }
+    }
+
+    public var displayedNodes: [FileNode] {
+        _ = treeStructureRevision
+        _ = nodeUpdateRevision
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedQuery.isEmpty {
+            return matchingNodes(for: trimmedQuery)
+        }
+        return currentFolderNodes
+    }
+
+    private func matchingNodes(for query: String) -> [FileNode] {
+        var matches: [FileNode] = []
+        func walk(_ nodes: [FileNode]) {
+            for node in nodes {
+                if !showHiddenFiles && node.isHidden {
+                    continue
+                }
+                let nameMatched = node.name.localizedCaseInsensitiveContains(query)
+                let pathMatched = node.archiveRelativePath?.localizedCaseInsensitiveContains(query) ?? false
+                if nameMatched || pathMatched {
+                    matches.append(node)
+                }
+                if let children = node.children {
+                    walk(children)
+                }
+            }
+        }
+        walk(rootNodes)
+        return matches
     }
 
     public var selectedNodes: [FileNode] { selectedEntryIDs.compactMap { nodesByID[$0] } }
@@ -123,7 +266,11 @@ public class AppState {
     // MARK: - Value-Type Compatibility Bridges
 
     /// Replace the root tree from value-type `FileEntry` snapshots (e.g. engine listings or tests).
-    public func setEntries(_ entries: [FileEntry]) {
+    public func setEntries(_ entries: [FileEntry], unwrappedRootPath: String? = nil) {
+        self.unwrappedRootPath = unwrappedRootPath.flatMap {
+            let clean = Self.normalizedArchiveRelativePath($0)
+            return clean.isEmpty ? nil : clean
+        }
         replaceRootNodes(entries.map { FileNode(entry: $0) })
     }
 
@@ -337,6 +484,42 @@ public class AppState {
         navigationNodeIDs.removeAll()
         selectedEntryIDs.removeAll()
         bumpTreeStructureRevision()
+    }
+
+    /// Restore navigation stack to the folder matching `targetPath` after refreshing an archive tree.
+    func restoreNavigationPath(matchingArchiveRelativePath targetPath: String) {
+        let cleanTarget = Self.normalizedArchiveRelativePath(targetPath)
+        guard !cleanTarget.isEmpty else {
+            clearNavigationAndSelection()
+            return
+        }
+
+        var pathIDs: [UUID] = []
+        var searchPool = rootNodes
+        while let match = searchPool.first(where: { node in
+            guard node.isDirectory, let rel = node.archiveRelativePath else { return false }
+            let cleanNode = Self.normalizedArchiveRelativePath(rel)
+            return cleanTarget == cleanNode || cleanTarget.hasPrefix(cleanNode + "/")
+        }) {
+            pathIDs.append(match.id)
+            let cleanNode = Self.normalizedArchiveRelativePath(match.archiveRelativePath ?? "")
+            if cleanNode == cleanTarget {
+                break
+            }
+            searchPool = match.children ?? []
+        }
+
+        navigationNodeIDs = pathIDs
+        selectedEntryIDs.removeAll()
+        bumpTreeStructureRevision()
+    }
+
+    private static func normalizedArchiveRelativePath(_ raw: String) -> String {
+        var s = raw.replacingOccurrences(of: "\\", with: "/")
+        while s.hasPrefix("./") { s.removeFirst(2) }
+        while s.hasPrefix("/") { s.removeFirst() }
+        while s.hasSuffix("/") { s.removeLast() }
+        return s == "." ? "" : s
     }
 
     /// Returns all incremental node updates after `revision`, or `nil` if the buffer overflowed

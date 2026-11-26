@@ -159,20 +159,36 @@ std::vector<uint8_t> BinaryFrameBuilder::finalize(BinaryMsgType msg_type, uint64
 
 bool decode_list_request(const std::vector<uint8_t>& payload, ListParams& out) {
     BinaryReader r(payload.data(), payload.size());
-    return r.read_string(out.archive) &&
-           r.read_string(out.password) &&
-           r.read_string(out.format) &&
-           r.read_string(out.tar_cache_path);
+    if (!r.read_string(out.archive) ||
+        !r.read_string(out.password) ||
+        !r.read_string(out.format) ||
+        !r.read_string(out.tar_cache_path)) {
+        return false;
+    }
+    if (r.remaining() > 0) {
+        if (!r.read_string(out.encoding)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool decode_extract_request(const std::vector<uint8_t>& payload, ExtractParams& out) {
     BinaryReader r(payload.data(), payload.size());
-    return r.read_string(out.archive) &&
-           r.read_string(out.output) &&
-           r.read_string(out.password) &&
-           r.read_string(out.format) &&
-           r.read_string(out.tar_cache_path) &&
-           r.read_string_array(out.entries);
+    if (!r.read_string(out.archive) ||
+        !r.read_string(out.output) ||
+        !r.read_string(out.password) ||
+        !r.read_string(out.format) ||
+        !r.read_string(out.tar_cache_path) ||
+        !r.read_string_array(out.entries)) {
+        return false;
+    }
+    if (r.remaining() > 0) {
+        if (!r.read_string(out.encoding)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool decode_compress_request(const std::vector<uint8_t>& payload, CompressParams& out) {
@@ -199,10 +215,18 @@ bool decode_compress_request(const std::vector<uint8_t>& payload, CompressParams
 
 bool decode_add_request(const std::vector<uint8_t>& payload, AddParams& out) {
     BinaryReader r(payload.data(), payload.size());
-    return r.read_string(out.archive) &&
-           r.read_string(out.password) &&
-           r.read_string(out.format) &&
-           r.read_string_array(out.paths);
+    if (!r.read_string(out.archive) ||
+        !r.read_string(out.password) ||
+        !r.read_string(out.format) ||
+        !r.read_string_array(out.paths)) {
+        return false;
+    }
+    if (r.remaining() > 0) {
+        if (!r.read_string(out.target_prefix)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool decode_delete_request(const std::vector<uint8_t>& payload, DeleteParams& out) {
@@ -211,6 +235,23 @@ bool decode_delete_request(const std::vector<uint8_t>& payload, DeleteParams& ou
            r.read_string(out.password) &&
            r.read_string(out.format) &&
            r.read_string_array(out.entries);
+}
+
+bool decode_rename_request(const std::vector<uint8_t>& payload, RenameParams& out) {
+    BinaryReader r(payload.data(), payload.size());
+    return r.read_string(out.archive) &&
+           r.read_string(out.password) &&
+           r.read_string(out.format) &&
+           r.read_string(out.old_path) &&
+           r.read_string(out.new_path);
+}
+
+bool decode_test_request(const std::vector<uint8_t>& payload, TestParams& out) {
+    BinaryReader r(payload.data(), payload.size());
+    return r.read_string(out.archive) &&
+           r.read_string(out.password) &&
+           r.read_string(out.format) &&
+           r.read_string(out.tar_cache_path);
 }
 
 std::vector<uint8_t> encode_progress_frame(uint64_t req_id,
@@ -245,7 +286,8 @@ std::vector<uint8_t> encode_list_chunk_frame(uint64_t req_id,
                                              const std::vector<BinaryListRecord>& records) {
     size_t est_size = 4;
     for (const auto& rec : records) {
-        est_size += 1 + 8 + 8 + 8 + 4 + rec.path.size() + 4 + rec.name.size();
+        est_size += 1 + 8 + 8 + 8 + ((rec.flags & 0x08u) ? 4 : 0) +
+                    4 + rec.path.size() + 4 + rec.name.size();
     }
     BinaryFrameBuilder b(est_size);
     b.write_u32(static_cast<uint32_t>(records.size()));
@@ -254,6 +296,9 @@ std::vector<uint8_t> encode_list_chunk_frame(uint64_t req_id,
         b.write_u64(rec.size);
         b.write_u64(rec.packed_size);
         b.write_i64(rec.modified_at);
+        if ((rec.flags & 0x08u) != 0u) {
+            b.write_u32(rec.crc);
+        }
         b.write_string(rec.path);
         b.write_string(rec.name);
     }

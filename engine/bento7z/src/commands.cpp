@@ -24,6 +24,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 namespace bento7z {
 
 namespace fs = std::filesystem;
@@ -100,6 +104,59 @@ std::string decoded_item_name(const ZipEncodingResolver& resolver,
     return resolver.decode(raw_name);
 }
 
+bool is_same_lstat_entry(const fs::path& a, const fs::path& b) {
+#ifndef _WIN32
+    struct stat sa{};
+    struct stat sb{};
+    if (::lstat(a.c_str(), &sa) == 0 && ::lstat(b.c_str(), &sb) == 0) {
+        return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+    }
+#else
+    std::error_code ec;
+    if (fs::equivalent(a, b, ec) && !ec) {
+        return true;
+    }
+#endif
+    return false;
+}
+
+bool ensure_real_dir_under_base(const fs::path& base,
+                                const fs::path& target_dir,
+                                std::string& error_msg) {
+    const fs::path rel = target_dir.lexically_relative(base);
+    if (rel.empty() || starts_with(rel.generic_string(), "..")) {
+        error_msg = "Unsafe decoded ZIP parent path";
+        return false;
+    }
+
+    fs::path cur = base;
+    for (const auto& comp : rel) {
+        const std::string comp_str = comp.string();
+        if (comp_str.empty() || comp_str == ".") {
+            continue;
+        }
+        cur /= comp;
+        std::error_code ec;
+        const fs::file_status st = fs::symlink_status(cur, ec);
+        if (!ec && fs::exists(st)) {
+            if (fs::is_symlink(st) || !fs::is_directory(st)) {
+                error_msg = "Unsafe symlink or non-directory in output path: " + cur.string();
+                return false;
+            }
+        } else if (!ec || ec == std::errc::no_such_file_or_directory) {
+            std::error_code mk_ec;
+            if (!fs::create_directory(cur, mk_ec) && mk_ec) {
+                error_msg = "Failed to create output directory: " + mk_ec.message();
+                return false;
+            }
+        } else {
+            error_msg = "Failed to inspect output directory: " + ec.message();
+            return false;
+        }
+    }
+    return true;
+}
+
 bool rename_extracted_zip_paths(const fs::path& output_dir,
                                 const std::vector<std::pair<std::string, std::string>>& remaps,
                                 const std::vector<std::pair<std::string, std::string>>& dir_remaps,
@@ -131,12 +188,27 @@ bool rename_extracted_zip_paths(const fs::path& output_dir,
             error_msg = "Unsafe decoded ZIP filename path: " + decoded_rel;
             return false;
         }
-        if (!fs::exists(*src_opt, ec) || *src_opt == *dst_opt) {
+        const fs::file_status src_status = fs::symlink_status(*src_opt, ec);
+        if (ec || !fs::exists(src_status) || *src_opt == *dst_opt) {
             continue;
         }
+
         if (dst_opt->has_parent_path()) {
-            fs::create_directories(dst_opt->parent_path(), ec);
+            if (!ensure_real_dir_under_base(base, dst_opt->parent_path(), error_msg)) {
+                return false;
+            }
         }
+
+        const fs::file_status dst_status = fs::symlink_status(*dst_opt, ec);
+        if (ec && ec != std::errc::no_such_file_or_directory) {
+            error_msg = "Failed to inspect destination path: " + ec.message();
+            return false;
+        }
+        if (!ec && fs::exists(dst_status) && !is_same_lstat_entry(*src_opt, *dst_opt)) {
+            error_msg = "Destination already exists while restoring filename encoding: " + decoded_rel;
+            return false;
+        }
+
         fs::rename(*src_opt, *dst_opt, ec);
         if (ec) {
             error_msg = "Failed to restore ZIP filename encoding: " + ec.message();
@@ -156,10 +228,22 @@ bool rename_extracted_zip_paths(const fs::path& output_dir,
             error_msg = "Unsafe decoded ZIP directory path: " + decoded_rel;
             return false;
         }
-        if (!fs::exists(*dst_opt, ec)) {
-            fs::create_directories(*dst_opt, ec);
+        const fs::file_status dst_status = fs::symlink_status(*dst_opt, ec);
+        if (ec && ec != std::errc::no_such_file_or_directory) {
+            error_msg = "Failed to inspect decoded directory path: " + ec.message();
+            return false;
         }
-        if (fs::exists(*src_opt, ec)) {
+        if (!ec && fs::exists(dst_status)) {
+            if (fs::is_symlink(dst_status) || !fs::is_directory(dst_status)) {
+                error_msg = "Unsafe non-directory at decoded directory path: " + decoded_rel;
+                return false;
+            }
+        } else if (!ensure_real_dir_under_base(base, *dst_opt, error_msg)) {
+            return false;
+        }
+
+        const fs::file_status src_status = fs::symlink_status(*src_opt, ec);
+        if (!ec && fs::exists(src_status) && !fs::is_symlink(src_status) && fs::is_directory(src_status)) {
             cleanup_dirs.push_back(*src_opt);
         }
     }
@@ -170,7 +254,9 @@ bool rename_extracted_zip_paths(const fs::path& output_dir,
     cleanup_dirs.erase(std::unique(cleanup_dirs.begin(), cleanup_dirs.end()), cleanup_dirs.end());
 
     for (const auto& dir : cleanup_dirs) {
-        if (fs::exists(dir, ec) && fs::is_directory(dir, ec) && fs::is_empty(dir, ec)) {
+        const fs::file_status dir_status = fs::symlink_status(dir, ec);
+        if (!ec && fs::exists(dir_status) && !fs::is_symlink(dir_status) &&
+            fs::is_directory(dir_status) && fs::is_empty(dir, ec)) {
             fs::remove(dir, ec);
         }
     }
@@ -207,7 +293,8 @@ bool match_entry_in_set(std::string_view norm_item,
 nlohmann::json build_list_result(const bit7z::BitArchiveReader& reader,
                                  const std::string& archive_path,
                                  std::optional<uint64_t> override_packed_size,
-                                 bool used_tar_cache) {
+                                 bool used_tar_cache,
+                                 std::string_view forced_encoding = "") {
     nlohmann::json result;
     result["archive"] = archive_path;
     result["items_count"] = reader.itemsCount();
@@ -218,7 +305,7 @@ nlohmann::json build_list_result(const bit7z::BitArchiveReader& reader,
     result["used_tar_cache"] = used_tar_cache;
 
     nlohmann::json items_arr = nlohmann::json::array();
-    const ZipEncodingResolver zip_encoding(reader);
+    const ZipEncodingResolver zip_encoding(reader, forced_encoding);
     for (const auto& item : reader) {
         const std::string raw_path = item.path();
         const std::string decoded_path = zip_encoding.has_remapping() ? zip_encoding.decode(raw_path) : raw_path;
@@ -325,7 +412,7 @@ bool extract_from_reader(bit7z::BitArchiveReader& reader,
         return false;
     }
 
-    const ZipEncodingResolver zip_encoding(reader);
+    const ZipEncodingResolver zip_encoding(reader, params.encoding);
 
     auto collect_zip_remaps = [&](const std::unordered_set<uint32_t>* only_indices,
                                   std::vector<std::pair<std::string, std::string>>& file_remaps,
@@ -623,6 +710,14 @@ OperationOutcome run_add(const bit7z::Bit7zLibrary& lib,
         return out;
     }
 
+    std::string norm_prefix;
+    std::string prefix_err;
+    if (!normalize_strict_archive_path(params.target_prefix, /*allow_empty=*/true, norm_prefix, prefix_err)) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Invalid target_prefix: " + prefix_err;
+        return out;
+    }
+
     const bit7z::BitInOutFormat* fmt = resolve_inplace_format(
         lib, params.archive, params.format, params.password, out.error_code, out.error_msg);
     if (!fmt) {
@@ -659,7 +754,7 @@ OperationOutcome run_add(const bit7z::Bit7zLibrary& lib,
         add_as_compress.preserve_paths = true;
 
         std::string missing_path;
-        if (!add_paths_to_writer(editor, add_as_compress, missing_path, cancel_flag)) {
+        if (!add_paths_to_writer(editor, add_as_compress, missing_path, cancel_flag, norm_prefix)) {
             out.error_code = "PATH_NOT_FOUND";
             out.error_msg = "Path not found: " + missing_path;
             return out;
@@ -753,11 +848,20 @@ OperationOutcome run_delete(const bit7z::Bit7zLibrary& lib,
         std::vector<uint32_t> matched_indices;
         {
             bit7z::BitArchiveReader reader(lib, params.archive, *fmt, params.password);
+            const ZipEncodingResolver zip_encoding(reader);
             total_items = reader.itemsCount();
             for (const auto& item : reader) {
-                const std::string norm_item = normalize_archive_path(item.path());
-                if (norm_item.empty()) continue;
-                if (match_entry_in_set(norm_item, target_set)) {
+                const std::string norm_raw = normalize_archive_path(item.path());
+                if (norm_raw.empty()) continue;
+
+                bool matched = match_entry_in_set(norm_raw, target_set);
+                if (!matched && zip_encoding.has_remapping()) {
+                    const std::string norm_decoded = normalize_archive_path(zip_encoding.decode(item.path()));
+                    if (!norm_decoded.empty()) {
+                        matched = match_entry_in_set(norm_decoded, target_set);
+                    }
+                }
+                if (matched) {
                     matched_indices.push_back(item.index());
                 }
             }
@@ -786,23 +890,8 @@ OperationOutcome run_delete(const bit7z::Bit7zLibrary& lib,
         bit7z::BitArchiveEditor editor(lib, params.archive, *fmt, params.password);
         editor.setThreadsCount(hardware_threads_or_one());
 
-        bool deleted_any = false;
-        for (const auto& entry : norm_entries) {
-            try {
-                editor.deleteItem(entry, bit7z::DeletePolicy::RecurseDirs);
-                deleted_any = true;
-            } catch (const bit7z::BitException& ex) {
-                if (ex.code() != std::errc::no_such_file_or_directory &&
-                    ex.code() != bit7z::BitError::ItemMarkedAsDeleted) {
-                    throw;
-                }
-            }
-        }
-
-        if (!deleted_any) {
-            for (uint32_t idx : matched_indices) {
-                editor.deleteItem(idx, bit7z::DeletePolicy::ItemOnly);
-            }
+        for (uint32_t idx : matched_indices) {
+            editor.deleteItem(idx, bit7z::DeletePolicy::ItemOnly);
         }
 
         ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
@@ -849,6 +938,394 @@ OperationOutcome run_delete(const bit7z::Bit7zLibrary& lib,
     }
 }
 
+OperationOutcome run_rename(const bit7z::Bit7zLibrary& lib,
+                            const RenameParams& params,
+                            const ProgressSink* progress_sink,
+                            std::atomic<bool>* cancel_flag) {
+    OperationOutcome out;
+    if (params.archive.empty() || params.old_path.empty() || params.new_path.empty()) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Invalid 'rename' parameters";
+        return out;
+    }
+
+    std::string old_norm;
+    std::string new_norm;
+    std::string path_err;
+    if (!normalize_strict_archive_path(params.old_path, /*allow_empty=*/false, old_norm, path_err)) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Invalid old_path: " + path_err;
+        return out;
+    }
+    if (!normalize_strict_archive_path(params.new_path, /*allow_empty=*/false, new_norm, path_err)) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Invalid new_path: " + path_err;
+        return out;
+    }
+    if (starts_with(new_norm, old_norm + "/")) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Cannot rename an entry into its own descendant path";
+        return out;
+    }
+
+    const bit7z::BitInOutFormat* fmt = resolve_inplace_format(
+        lib, params.archive, params.format, params.password, out.error_code, out.error_msg);
+    if (!fmt) {
+        return out;
+    }
+
+    std::error_code ec;
+    if (!fs::exists(params.archive, ec)) {
+        out.error_code = "PATH_NOT_FOUND";
+        out.error_msg = "Archive not found: " + params.archive;
+        return out;
+    }
+
+    const bool password_provided = !params.password.empty();
+    try {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return out;
+        }
+
+        struct RenameTarget {
+            uint32_t index;
+            std::string orig_norm;
+            std::string new_norm;
+            bool is_dir;
+            bool is_symlink;
+        };
+        std::vector<RenameTarget> renames;
+        std::vector<uint32_t> matched_list;
+        ScopedTempDir tar_temp_dir;
+        {
+            bit7z::BitArchiveReader reader(lib, params.archive, *fmt, params.password);
+            const ZipEncodingResolver zip_encoding(reader);
+            std::unordered_set<uint32_t> matched_indices;
+            const std::string old_prefix = old_norm + "/";
+
+            for (const auto& item : reader) {
+                const std::string raw_norm = normalize_archive_path(item.path());
+                if (raw_norm.empty()) continue;
+
+                const std::string decoded_norm = zip_encoding.has_remapping()
+                    ? normalize_archive_path(zip_encoding.decode(item.path()))
+                    : raw_norm;
+
+                std::optional<std::string> updated_path;
+                if (raw_norm == old_norm) {
+                    updated_path = new_norm;
+                } else if (starts_with(raw_norm, old_prefix)) {
+                    updated_path = new_norm + raw_norm.substr(old_norm.size());
+                } else if (zip_encoding.has_remapping() && !decoded_norm.empty()) {
+                    if (decoded_norm == old_norm) {
+                        updated_path = new_norm;
+                    } else if (starts_with(decoded_norm, old_prefix)) {
+                        updated_path = new_norm + decoded_norm.substr(old_norm.size());
+                    }
+                }
+
+                if (updated_path.has_value()) {
+                    matched_indices.insert(item.index());
+                    matched_list.push_back(item.index());
+                    renames.push_back(RenameTarget{
+                        item.index(), raw_norm, std::move(*updated_path), item.isDir(), item.isSymLink()});
+                }
+            }
+
+            if (renames.empty()) {
+                out.error_code = "PATH_NOT_FOUND";
+                out.error_msg = "Path not found in archive: " + old_norm;
+                return out;
+            }
+
+            if (old_norm == new_norm) {
+                out.ok = true;
+                out.archive_deleted = false;
+                out.output_size = file_size_or_zero(params.archive);
+                return out;
+            }
+
+            const std::string new_prefix = new_norm + "/";
+            for (const auto& item : reader) {
+                if (matched_indices.find(item.index()) != matched_indices.end()) {
+                    continue;
+                }
+                const std::string other_raw = normalize_archive_path(item.path());
+                if (other_raw.empty()) continue;
+                const std::string other_decoded = zip_encoding.has_remapping()
+                    ? normalize_archive_path(zip_encoding.decode(item.path()))
+                    : other_raw;
+
+                auto conflicts = [&](const std::string& candidate) -> bool {
+                    if (candidate.empty()) return false;
+                    return candidate == new_norm ||
+                           starts_with(candidate, new_prefix) ||
+                           (!item.isDir() && starts_with(new_norm, candidate + "/"));
+                };
+
+                if (conflicts(other_raw) || (zip_encoding.has_remapping() && conflicts(other_decoded))) {
+                    out.error_code = "CONFLICT";
+                    out.error_msg = "Target path already exists in archive: " + new_norm;
+                    return out;
+                }
+            }
+
+            if (*fmt == bit7z::BitFormat::Tar) {
+                for (const auto& t : renames) {
+                    if (t.is_symlink) {
+                        out.error_code = "UNSUPPORTED_INPLACE";
+                        out.error_msg = "In-place rename of symbolic links in TAR archives is not supported";
+                        return out;
+                    }
+                }
+                std::string safety_err;
+                if (!validate_selected_items_safe(reader, matched_list, tar_temp_dir.string(), safety_err)) {
+                    out.error_code = "PATH_TRAVERSAL";
+                    out.error_msg = safety_err;
+                    return out;
+                }
+                reader.extractTo(tar_temp_dir.string(), matched_list);
+                if (is_cancelled(cancel_flag)) {
+                    out.error_code = "CANCELLED";
+                    out.error_msg = "Operation cancelled";
+                    return out;
+                }
+            }
+        }
+
+        // bit7z's BitArchiveEditor::renameItem fails on TAR because 7-Zip's TAR handler
+        // does not expose BitProperty::Attrib (kpidAttrib). Delete matched items and
+        // re-add the extracted items under the new paths.
+        if (*fmt == bit7z::BitFormat::Tar) {
+            for (const auto& t : renames) {
+                const fs::path extracted = tar_temp_dir.path() / fs::path(t.orig_norm);
+                std::error_code item_ec;
+                const fs::file_status st = fs::symlink_status(extracted, item_ec);
+                if (!item_ec && fs::exists(st) && fs::is_symlink(st)) {
+                    out.error_code = "UNSUPPORTED_INPLACE";
+                    out.error_msg = "In-place rename of symbolic links in TAR archives is not supported";
+                    return out;
+                }
+            }
+
+            bit7z::BitArchiveEditor editor(lib, params.archive, *fmt, params.password);
+            editor.setThreadsCount(hardware_threads_or_one());
+            editor.setRetainDirectories(false);
+            for (uint32_t idx : matched_list) {
+                editor.deleteItem(idx, bit7z::DeletePolicy::ItemOnly);
+            }
+            for (const auto& t : renames) {
+                const fs::path extracted = tar_temp_dir.path() / fs::path(t.orig_norm);
+                std::error_code item_ec;
+                const fs::file_status st = fs::symlink_status(extracted, item_ec);
+                if (item_ec || !fs::exists(st) || fs::is_symlink(st)) {
+                    continue;
+                }
+                if (!t.is_dir) {
+                    editor.addFile(extracted.string(), t.new_norm);
+                } else if (fs::is_empty(extracted, item_ec)) {
+                    editor.addItems(std::vector<std::pair<std::string, std::string>>{
+                        {extracted.string(), t.new_norm}
+                    });
+                }
+            }
+
+            ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
+            ProgressAdapter progress(std::move(sink), ProgressStage::Normal, cancel_flag);
+            progress.attach(editor);
+
+            editor.applyChanges();
+            if (is_cancelled(cancel_flag)) {
+                out.error_code = "CANCELLED";
+                out.error_msg = "Operation cancelled";
+                return out;
+            }
+            progress.flush();
+
+            out.ok = true;
+            out.archive_deleted = false;
+            out.output_size = file_size_or_zero(params.archive);
+            return out;
+        }
+
+        bit7z::BitArchiveEditor editor(lib, params.archive, *fmt, params.password);
+        editor.setThreadsCount(hardware_threads_or_one());
+        for (const auto& t : renames) {
+            editor.renameItem(t.index, t.new_norm);
+        }
+
+        ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
+        ProgressAdapter progress(std::move(sink), ProgressStage::Normal, cancel_flag);
+        progress.attach(editor);
+
+        editor.applyChanges();
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return out;
+        }
+        progress.flush();
+
+        out.ok = true;
+        out.archive_deleted = false;
+        out.output_size = file_size_or_zero(params.archive);
+        return out;
+    } catch (const OperationCancelled&) {
+        out.error_code = "CANCELLED";
+        out.error_msg = "Operation cancelled";
+        return out;
+    } catch (const bit7z::BitException& ex) {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+        } else if (is_inplace_unsupported_error(ex)) {
+            out.error_code = "UNSUPPORTED_INPLACE";
+            out.error_msg = ex.what();
+        } else {
+            out.error_code = classify_bit7z_error(ex, password_provided);
+            out.error_msg = ex.what();
+        }
+        return out;
+    } catch (const std::exception& ex) {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+        } else {
+            out.error_code = "INTERNAL_ERROR";
+            out.error_msg = ex.what();
+        }
+        return out;
+    }
+}
+
+OperationOutcome run_test(const bit7z::Bit7zLibrary& lib,
+                          const TestParams& params,
+                          const ProgressSink* progress_sink,
+                          std::atomic<bool>* cancel_flag) {
+    OperationOutcome out;
+    if (params.archive.empty()) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Invalid 'test' parameters";
+        return out;
+    }
+
+    const std::string fmt_lower = to_lower_ascii(params.format);
+    const bit7z::BitInFormat* outer_fmt = resolve_outer_in_format(fmt_lower);
+    if (!outer_fmt) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Unsupported archive format: " + params.format;
+        return out;
+    }
+
+    std::string split_err_code;
+    std::string split_err_msg;
+    if (!validate_split_archive_volumes(params.archive, split_err_code, split_err_msg)) {
+        out.error_code = split_err_code;
+        out.error_msg = split_err_msg;
+        return out;
+    }
+
+    std::error_code ec;
+    if (!fs::exists(params.archive, ec)) {
+        out.error_code = "PATH_NOT_FOUND";
+        out.error_msg = "Archive not found: " + params.archive;
+        return out;
+    }
+
+    const bool password_provided = !params.password.empty();
+    try {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return out;
+        }
+
+        bit7z::BitArchiveReader outer_reader(lib, params.archive, *outer_fmt, params.password);
+        with_resolved_reader(
+            lib, outer_reader, params.archive, fmt_lower, params.tar_cache_path,
+            progress_sink, cancel_flag,
+            [&](bit7z::BitArchiveReader& reader, std::optional<uint64_t> outer_pack_size, bool used_tar_cache) {
+                if (used_tar_cache) {
+                    ScopedHandlerCallbacks outer_cb(outer_reader);
+                    ProgressSink outer_sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
+                    ProgressAdapter outer_progress(
+                        std::move(outer_sink),
+                        ProgressStage::UnpackingOuter,
+                        cancel_flag,
+                        outer_pack_size.value_or(0));
+                    outer_progress.attach(outer_reader);
+                    outer_reader.test();
+                    if (is_cancelled(cancel_flag)) {
+                        throw OperationCancelled();
+                    }
+                    outer_progress.complete();
+                }
+
+                const uint8_t stage = outer_pack_size.has_value()
+                    ? ProgressStage::ExtractingInner
+                    : ProgressStage::Normal;
+                ScopedHandlerCallbacks cb_guard(reader);
+                ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
+                ProgressAdapter progress(std::move(sink), stage, cancel_flag, reader.size());
+                progress.attach(reader);
+
+                reader.test();
+                if (is_cancelled(cancel_flag)) {
+                    throw OperationCancelled();
+                }
+                progress.complete();
+
+                out.output_size = reader.itemsCount();
+            });
+
+        out.ok = true;
+        out.archive_deleted = false;
+        return out;
+    } catch (const OperationCancelled&) {
+        out.error_code = "CANCELLED";
+        out.error_msg = "Operation cancelled";
+        return out;
+    } catch (const bit7z::BitException& ex) {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+        } else if (ex.code() == bit7z::BitFailureSource::WrongPassword) {
+            out.error_code = password_provided ? "WRONG_PASSWORD" : "PASSWORD_REQUIRED";
+            out.error_msg = ex.what();
+        } else if (ex.code() == bit7z::BitFailureSource::CRCError ||
+                   ex.code() == bit7z::BitFailureSource::DataError ||
+                   ex.code() == bit7z::BitFailureSource::HeadersError ||
+                   ex.code() == bit7z::BitFailureSource::UnexpectedEnd ||
+                   ex.code() == bit7z::BitFailureSource::UnavailableData ||
+                   ex.code() == bit7z::BitFailureSource::InvalidArchive ||
+                   ex.code() == bit7z::BitFailureSource::DataAfterEnd) {
+            out.error_code = "CORRUPT_ARCHIVE";
+            out.error_msg = ex.what();
+        } else {
+            const std::string missing_vol = find_missing_next_volume(params.archive);
+            if (!missing_vol.empty()) {
+                out.error_code = "MISSING_VOLUME";
+                out.error_msg = "Missing archive volume: " + missing_vol;
+            } else {
+                out.error_code = "BIT7Z_ERROR";
+                out.error_msg = ex.what();
+            }
+        }
+        return out;
+    } catch (const std::exception& ex) {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+        } else {
+            out.error_code = "INTERNAL_ERROR";
+            out.error_msg = ex.what();
+        }
+        return out;
+    }
+}
+
 CommandHandler::CommandHandler(const std::string& lib_path)
     : lib_(lib_path) {}
 
@@ -864,6 +1341,10 @@ void CommandHandler::execute(const Request& req) {
             handle_add(req);
         } else if (req.command == "delete") {
             handle_delete(req);
+        } else if (req.command == "rename") {
+            handle_rename(req);
+        } else if (req.command == "test") {
+            handle_test(req);
         } else {
             make_error(req.id, "Unknown command: " + req.command, "UNKNOWN_COMMAND")
                 .write(std::cout);
@@ -903,7 +1384,8 @@ void CommandHandler::handle_list(const Request& req) {
         with_resolved_reader(
             lib_, outer_reader, params->archive, fmt_lower, params->tar_cache_path, &sink, nullptr,
             [&](bit7z::BitArchiveReader& reader, std::optional<uint64_t> outer_pack_size, bool used_tar_cache) {
-                auto result = build_list_result(reader, params->archive, outer_pack_size, used_tar_cache);
+                auto result = build_list_result(
+                    reader, params->archive, outer_pack_size, used_tar_cache, params->encoding);
                 make_result(req.id, std::move(result)).write(std::cout);
             });
     } catch (const bit7z::BitException& ex) {
@@ -1040,6 +1522,49 @@ void CommandHandler::handle_delete(const Request& req) {
     nlohmann::json result;
     result["archive"] = params->archive;
     result["archive_deleted"] = out.archive_deleted;
+    result["output_size"] = out.output_size;
+    make_result(req.id, std::move(result)).write(std::cout);
+}
+
+void CommandHandler::handle_rename(const Request& req) {
+    auto params = req.as_rename();
+    if (!params) {
+        make_error(req.id, "Invalid 'rename' parameters", "INVALID_PARAMS").write(std::cout);
+        return;
+    }
+
+    const ProgressSink sink = make_jsonl_progress_sink(req.id);
+    const OperationOutcome out = run_rename(lib_, *params, &sink, nullptr);
+    if (!out.ok) {
+        make_error(req.id, out.error_msg, out.error_code).write(std::cout);
+        return;
+    }
+
+    nlohmann::json result;
+    result["archive"] = params->archive;
+    result["old_path"] = params->old_path;
+    result["new_path"] = params->new_path;
+    result["output_size"] = out.output_size;
+    make_result(req.id, std::move(result)).write(std::cout);
+}
+
+void CommandHandler::handle_test(const Request& req) {
+    auto params = req.as_test();
+    if (!params) {
+        make_error(req.id, "Invalid 'test' parameters", "INVALID_PARAMS").write(std::cout);
+        return;
+    }
+
+    const ProgressSink sink = make_jsonl_progress_sink(req.id);
+    const OperationOutcome out = run_test(lib_, *params, &sink, nullptr);
+    if (!out.ok) {
+        make_error(req.id, out.error_msg, out.error_code).write(std::cout);
+        return;
+    }
+
+    nlohmann::json result;
+    result["archive"] = params->archive;
+    result["items_tested"] = out.output_size;
     result["output_size"] = out.output_size;
     make_result(req.id, std::move(result)).write(std::cout);
 }

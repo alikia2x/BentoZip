@@ -71,6 +71,7 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         nodes: [FileNode],
         sourceArchiveURL: URL?,
         password: String?,
+        encoding: String? = nil,
         onError: ((Error) -> Void)? = nil
     ) {
         let previewable = nodes.filter { !$0.isDirectory || !$0.isFromArchive }
@@ -91,6 +92,7 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
             snapshots: snapshots,
             sourceArchiveURL: sourceArchiveURL,
             password: password,
+            encoding: encoding,
             requestID: currentRequestID,
             makeKeyIfHidden: true,
             onError: onError
@@ -101,6 +103,7 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         nodes: [FileNode],
         sourceArchiveURL: URL?,
         password: String?,
+        encoding: String? = nil,
         onError: ((Error) -> Void)? = nil
     ) {
         if isVisible {
@@ -111,6 +114,7 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
             nodes: nodes,
             sourceArchiveURL: sourceArchiveURL,
             password: password,
+            encoding: encoding,
             onError: onError
         )
     }
@@ -119,6 +123,7 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         nodes: [FileNode],
         sourceArchiveURL: URL?,
         password: String?,
+        encoding: String? = nil,
         onError: ((Error) -> Void)? = nil
     ) {
         guard isVisible else { return }
@@ -144,6 +149,7 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
             snapshots: snapshots,
             sourceArchiveURL: sourceArchiveURL,
             password: password,
+            encoding: encoding,
             requestID: currentRequestID,
             makeKeyIfHidden: false,
             onError: onError
@@ -154,6 +160,7 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         snapshots: [FileEntry],
         sourceArchiveURL: URL?,
         password: String?,
+        encoding: String?,
         requestID currentRequestID: UInt64,
         makeKeyIfHidden: Bool,
         onError: ((Error) -> Void)?
@@ -167,7 +174,8 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
                     if let url = try await DragDropManager.shared.prepareForDragThrowing(
                         entry,
                         sourceArchiveURL: sourceArchiveURL,
-                        password: password
+                        password: password,
+                        encoding: encoding
                     ) {
                         resolvedURLs.append(url)
                     }

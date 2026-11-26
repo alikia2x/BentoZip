@@ -60,6 +60,29 @@ ScopedTempFile::~ScopedTempFile() {
     }
 }
 
+ScopedTempDir::ScopedTempDir() {
+    static std::atomic<uint64_t> counter{0};
+    std::error_code ec;
+    fs::path dir = fs::temp_directory_path(ec);
+    if (ec || dir.empty()) {
+        dir = fs::current_path();
+    }
+    const auto pid = current_pid();
+    const auto seq = counter.fetch_add(1, std::memory_order_relaxed);
+    const auto ticks = static_cast<uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    path_ = dir / ("bento7z_dir_" + std::to_string(pid) + "_" +
+                   std::to_string(seq) + "_" + std::to_string(ticks));
+    fs::create_directories(path_, ec);
+}
+
+ScopedTempDir::~ScopedTempDir() {
+    if (!path_.empty()) {
+        std::error_code ec;
+        fs::remove_all(path_, ec);
+    }
+}
+
 uint32_t hardware_threads_or_one() {
     const uint32_t count = std::thread::hardware_concurrency();
     return count > 0 ? count : 1;
@@ -241,7 +264,8 @@ void with_resolved_reader(
 bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
                          const CompressParams& params,
                          std::string& missing_path,
-                         std::atomic<bool>* cancel_flag) {
+                         std::atomic<bool>* cancel_flag,
+                         const std::string& target_prefix) {
     for (const auto& p : params.paths) {
         if (is_cancelled(cancel_flag)) {
             throw OperationCancelled();
@@ -254,7 +278,7 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
     }
 
     const CompiledExcludes compiled_excludes = compile_excludes(params.exclude);
-    const bool fast_path = params.preserve_paths && compiled_excludes.empty();
+    const bool fast_path = params.preserve_paths && compiled_excludes.empty() && target_prefix.empty();
 
     for (const auto& p : params.paths) {
         if (is_cancelled(cancel_flag)) {
@@ -285,7 +309,12 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
         }
 
         if (!is_dir) {
-            if (!params.preserve_paths && !clean_name.empty()) {
+            if (!target_prefix.empty()) {
+                const std::string archive_name = clean_name.empty()
+                    ? p
+                    : (target_prefix + "/" + clean_name);
+                writer.addFile(p, archive_name);
+            } else if (!params.preserve_paths && !clean_name.empty()) {
                 writer.addFile(p, clean_name);
             } else {
                 writer.addFile(p);
@@ -294,8 +323,11 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
         }
 
         if (params.preserve_paths && fs::is_empty(norm_src, ec) && !clean_name.empty()) {
+            const std::string archive_dir = target_prefix.empty()
+                ? clean_name
+                : (target_prefix + "/" + clean_name);
             writer.addItems(std::vector<std::pair<std::string, std::string>>{
-                {norm_src.string(), clean_name}
+                {norm_src.string(), archive_dir}
             });
             continue;
         }
@@ -317,13 +349,40 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
 
             const auto& entry = *it;
             const fs::path rel = entry.path().lexically_relative(norm_src);
-            const fs::path archive_rel = clean_name.empty() ? rel : (fs::path(clean_name) / rel);
+            const std::string rel_generic = rel.generic_string();
+            if (rel_generic.empty() || rel_generic == "." || starts_with(rel_generic, "..")) {
+                continue;
+            }
 
             std::error_code entry_ec;
             const bool entry_is_dir = entry.is_directory(entry_ec);
 
+            if (entry.is_symlink(entry_ec)) {
+                std::error_code sym_ec;
+                const fs::path sym_target = fs::read_symlink(entry.path(), sym_ec);
+                if (sym_ec || sym_target.is_absolute()) {
+                    if (entry_is_dir) {
+                        it.disable_recursion_pending();
+                    }
+                    continue;
+                }
+                const fs::path resolved = (entry.path().parent_path() / sym_target).lexically_normal();
+                const fs::path rel_to_root = resolved.lexically_relative(norm_src);
+                if (rel_to_root.empty() || starts_with(rel_to_root.generic_string(), "..")) {
+                    if (entry_is_dir) {
+                        it.disable_recursion_pending();
+                    }
+                    continue;
+                }
+            }
+
+            const fs::path base_rel = clean_name.empty() ? rel : (fs::path(clean_name) / rel);
+            const fs::path archive_rel = target_prefix.empty()
+                ? base_rel
+                : (fs::path(target_prefix) / base_rel);
+
             if (!compiled_excludes.empty() &&
-                is_excluded(entry.path(), archive_rel, compiled_excludes)) {
+                is_excluded(entry.path(), base_rel, compiled_excludes)) {
                 if (entry_is_dir) {
                     it.disable_recursion_pending();
                 }
@@ -340,7 +399,10 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
                 if (params.preserve_paths) {
                     writer.addFile(entry.path().string(), archive_rel.generic_string());
                 } else {
-                    writer.addFile(entry.path().string(), entry.path().filename().string());
+                    const std::string flat_name = target_prefix.empty()
+                        ? entry.path().filename().string()
+                        : (target_prefix + "/" + entry.path().filename().string());
+                    writer.addFile(entry.path().string(), flat_name);
                 }
             }
         }

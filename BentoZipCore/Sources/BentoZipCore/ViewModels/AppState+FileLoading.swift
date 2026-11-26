@@ -11,6 +11,8 @@ extension AppState {
         coordinator.cancelBrowse()
         recentValidationTask?.cancel()
         recentValidationTask = nil
+        activeConflictPrompt?.cancel()
+        activeConflictPrompt = nil
         isLoading = false
         browseProgress = nil
         browseStage = .normal

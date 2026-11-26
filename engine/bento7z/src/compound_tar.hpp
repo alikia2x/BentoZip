@@ -35,6 +35,21 @@ private:
     std::filesystem::path path_;
 };
 
+class ScopedTempDir {
+public:
+    ScopedTempDir();
+    ~ScopedTempDir();
+
+    ScopedTempDir(const ScopedTempDir&) = delete;
+    ScopedTempDir& operator=(const ScopedTempDir&) = delete;
+
+    const std::filesystem::path& path() const { return path_; }
+    std::string string() const { return path_.string(); }
+
+private:
+    std::filesystem::path path_;
+};
+
 uint32_t hardware_threads_or_one();
 
 bool should_unwrap_compound_tar(const bit7z::BitArchiveReader& outer_reader,
@@ -66,7 +81,8 @@ void with_resolved_reader(
 bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
                          const CompressParams& params,
                          std::string& missing_path,
-                         std::atomic<bool>* cancel_flag = nullptr);
+                         std::atomic<bool>* cancel_flag = nullptr,
+                         const std::string& target_prefix = {});
 
 bool compress_compound_tar(const bit7z::Bit7zLibrary& lib,
                            CompoundTarType compound,

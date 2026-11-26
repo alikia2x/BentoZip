@@ -16,6 +16,8 @@ public struct RecentArchiveItem: Identifiable, Hashable, Sendable {
 public enum PendingPasswordAction: Sendable, Equatable {
     case browse(URL)
     case extract(URL, entries: [FileEntry]?, chooseDestination: Bool)
+    case preview([FileEntry])
+    case openFile(FileEntry, appURL: URL?)
 }
 
 extension AppState {
@@ -57,6 +59,13 @@ extension AppState {
 
     public func reset() {
         cancelBackgroundTasks()
+        activeConflictPrompt?.cancel()
+        activeConflictPrompt = nil
+        unwrappedRootPath = nil
+        testArchiveResult = nil
+        searchQuery = ""
+        isSearchVisible = false
+        selectedEncoding = .auto
         mode = .empty
         clearNavigationAndSelection()
         replaceRootNodes([])
@@ -86,6 +95,10 @@ extension AppState {
         preferencesManager?.applyDefaults(to: &compressionSettings, from: prefs)
         revealInFinderAfterExtract = prefs.revealInFinderAfterExtract
         unwrapSingleTopDirectory = prefs.unwrapSingleTopDirectory
+        extractConflictPolicy = ExtractConflictPolicy(rawValue: prefs.extractConflictPolicy) ?? .ask
+        moveArchiveToTrashAfterExtract = prefs.moveArchiveToTrashAfterExtract
+        closeWindowAfterExtract = prefs.closeWindowAfterExtract
+        showHiddenFiles = prefs.showHiddenFiles
     }
 
     /// Persist current compression settings and behavior toggles to `AppPreferences`.
@@ -96,6 +109,10 @@ extension AppState {
             prefs.exclusionPatterns = compressionSettings.exclusionPatterns
             prefs.revealInFinderAfterExtract = revealInFinderAfterExtract
             prefs.unwrapSingleTopDirectory = unwrapSingleTopDirectory
+            prefs.extractConflictPolicy = extractConflictPolicy.rawValue
+            prefs.moveArchiveToTrashAfterExtract = moveArchiveToTrashAfterExtract
+            prefs.closeWindowAfterExtract = closeWindowAfterExtract
+            prefs.showHiddenFiles = showHiddenFiles
         }
     }
 
@@ -103,6 +120,10 @@ extension AppState {
         guard let prefs = preferencesManager?.loadPreferences() else { return }
         revealInFinderAfterExtract = prefs.revealInFinderAfterExtract
         unwrapSingleTopDirectory = prefs.unwrapSingleTopDirectory
+        extractConflictPolicy = ExtractConflictPolicy(rawValue: prefs.extractConflictPolicy) ?? .ask
+        moveArchiveToTrashAfterExtract = prefs.moveArchiveToTrashAfterExtract
+        closeWindowAfterExtract = prefs.closeWindowAfterExtract
+        showHiddenFiles = prefs.showHiddenFiles
         if mode == .empty {
             preferencesManager?.applyDefaults(to: &compressionSettings, from: prefs)
         }

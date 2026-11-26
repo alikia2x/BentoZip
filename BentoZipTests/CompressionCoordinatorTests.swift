@@ -1,6 +1,7 @@
+import Darwin
 import Foundation
 import Testing
-import BentoZipCore
+@testable import BentoZipCore
 
 @Suite(.serialized) @MainActor
 struct CompressionCoordinatorTests {
@@ -822,5 +823,306 @@ struct CompressionCoordinatorTests {
         let expectedOutput = tmp.appendingPathComponent("detached.zip")
         #expect(fm.fileExists(atPath: expectedOutput.path))
         #expect(!manager.hasActiveTasks)
+    }
+
+    // MARK: - P0 Coordinator, Conflict Resolution & Cleanup
+
+    @Test func extract_selectiveEntries_extractsDirectlyWithoutArchiveStemWrapper() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let srcDir = tmp.appendingPathComponent("src")
+        let nestedDir = srcDir.appendingPathComponent("folder")
+        try fm.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+        let fileA = nestedDir.appendingPathComponent("a.txt")
+        let fileB = srcDir.appendingPathComponent("b.txt")
+        try "alpha".write(to: fileA, atomically: true, encoding: .utf8)
+        try "bravo".write(to: fileB, atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let archiveURL = tmp.appendingPathComponent("bundle_selective.zip")
+        try await engine.create(
+            from: [nestedDir, fileB],
+            to: archiveURL,
+            settings: CompressionSettings(format: .zip)
+        ) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: engine)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        await coordinator.browseArchive(at: archiveURL, appState: appState)
+
+        let entryB = try #require(appState.fileEntries.first(where: { $0.name == "b.txt" }))
+        let progressState = ProgressState()
+        await coordinator.extract(appState: appState, progressState: progressState, entries: [entryB])
+
+        #expect(appState.lastError == nil)
+        // Must extract directly into tmp/b.txt without wrapping inside tmp/bundle_selective/
+        let directURL = tmp.appendingPathComponent("b.txt")
+        let wrappedURL = tmp.appendingPathComponent("bundle_selective/b.txt")
+        #expect(fm.fileExists(atPath: directURL.path))
+        #expect(try String(contentsOf: directURL, encoding: .utf8) == "bravo")
+        #expect(!fm.fileExists(atPath: wrappedURL.path))
+    }
+
+    @Test func extract_conflictPolicies_overwriteSkipAndRename() async throws {
+        let policies: [ExtractConflictPolicy] = [.overwrite, .skip, .rename]
+        let engine = Bento7zEngine()
+
+        for policy in policies {
+            let tmp = try makeTempDir()
+            defer { try? fm.removeItem(at: tmp) }
+
+            let srcFile = tmp.appendingPathComponent("file.txt")
+            try "incoming".write(to: srcFile, atomically: true, encoding: .utf8)
+
+            let archiveDir = tmp.appendingPathComponent("archives")
+            try fm.createDirectory(at: archiveDir, withIntermediateDirectories: true)
+            let archiveURL = archiveDir.appendingPathComponent("conflict.zip")
+            try await engine.create(from: [srcFile], to: archiveURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+            // Pre-create conflicting file.txt inside destination directory (archiveDir)
+            let existingFile = archiveDir.appendingPathComponent("file.txt")
+            try "existing".write(to: existingFile, atomically: true, encoding: .utf8)
+
+            let coordinator = CompressionCoordinator(engine: engine)
+            let appState = AppState()
+            appState.revealInFinderAfterExtract = false
+            appState.extractConflictPolicy = policy
+            await coordinator.browseArchive(at: archiveURL, appState: appState)
+
+            let entry = try #require(appState.fileEntries.first(where: { $0.name == "file.txt" }))
+            let progressState = ProgressState()
+            await coordinator.extract(appState: appState, progressState: progressState, entries: [entry])
+
+            #expect(appState.lastError == nil)
+            switch policy {
+            case .overwrite:
+                #expect(try String(contentsOf: existingFile, encoding: .utf8) == "incoming")
+                #expect(!fm.fileExists(atPath: archiveDir.appendingPathComponent("file 2.txt").path))
+            case .skip:
+                #expect(try String(contentsOf: existingFile, encoding: .utf8) == "existing")
+                #expect(!fm.fileExists(atPath: archiveDir.appendingPathComponent("file 2.txt").path))
+            case .rename:
+                let renamedFile = archiveDir.appendingPathComponent("file 2.txt")
+                #expect(try String(contentsOf: existingFile, encoding: .utf8) == "existing")
+                #expect(fm.fileExists(atPath: renamedFile.path))
+                #expect(try String(contentsOf: renamedFile, encoding: .utf8) == "incoming")
+            case .ask:
+                break
+            }
+        }
+    }
+
+    @Test func extract_moveArchiveToTrashAfterExtract_trashesSourceArchiveOnFullExtract() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let srcFile = tmp.appendingPathComponent("payload.txt")
+        try "trash-after-extract".write(to: srcFile, atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let archiveName = "trashme_\(UUID().uuidString).zip"
+        let archiveURL = tmp.appendingPathComponent(archiveName)
+        try await engine.create(from: [srcFile], to: archiveURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: engine)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        appState.moveArchiveToTrashAfterExtract = true
+        await coordinator.browseArchive(at: archiveURL, appState: appState)
+
+        let progressState = ProgressState()
+        await coordinator.extract(appState: appState, progressState: progressState)
+
+        let stem = archiveURL.deletingPathExtension().lastPathComponent
+        let extractedFile = tmp.appendingPathComponent("\(stem)/payload.txt")
+        #expect(fm.fileExists(atPath: extractedFile.path))
+        #expect(try String(contentsOf: extractedFile, encoding: .utf8) == "trash-after-extract")
+        #expect(!fm.fileExists(atPath: archiveURL.path))
+        #expect(appState.mode == .empty)
+    }
+
+    @Test func testArchive_coordinatorSetsTestArchiveResultOnSuccessAndFailure() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let fileA = tmp.appendingPathComponent("a.txt")
+        let fileB = tmp.appendingPathComponent("b.txt")
+        try "aaa".write(to: fileA, atomically: true, encoding: .utf8)
+        try "bbb".write(to: fileB, atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let archiveURL = tmp.appendingPathComponent("verify.zip")
+        try await engine.create(from: [fileA, fileB], to: archiveURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: engine)
+        let appState = AppState()
+        await coordinator.browseArchive(at: archiveURL, appState: appState)
+
+        let progressState = ProgressState()
+        await coordinator.testArchive(appState: appState, progressState: progressState)
+
+        let result = try #require(appState.testArchiveResult)
+        #expect(result.passed)
+        #expect(result.archiveName == "verify.zip")
+        #expect(result.itemsCount == 2)
+        #expect(result.errorMessage == nil)
+        #expect(!progressState.isOperationInProgress)
+
+        // Now truncate the archive to corrupt it and verify failed testArchiveResult is populated
+        let bytes = try Data(contentsOf: archiveURL)
+        try bytes.prefix(24).write(to: archiveURL)
+
+        await coordinator.testArchive(appState: appState, progressState: progressState)
+        let failedResult = try #require(appState.testArchiveResult)
+        #expect(!failedResult.passed)
+        #expect(failedResult.archiveName == "verify.zip")
+        #expect(failedResult.itemsCount == 0)
+        #expect(failedResult.errorMessage != nil)
+    }
+
+    @Test func dragDropManager_cleanupStaleTempDirectories_removesOrphanedDirectoriesOnly() async throws {
+        let tempRoot = fm.temporaryDirectory
+        var deadPID: pid_t = 999_999
+        while deadPID > 10_000 {
+            if Darwin.kill(deadPID, 0) == -1 && errno == ESRCH {
+                break
+            }
+            deadPID -= 1
+        }
+        #expect(Darwin.kill(deadPID, 0) == -1 && errno == ESRCH)
+
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let deadPIDDir = tempRoot.appendingPathComponent("BentoZip-drag-\(deadPID)-\(UUID().uuidString)", isDirectory: true)
+        let livePIDDir = tempRoot.appendingPathComponent("BentoZip-drag-\(currentPID)-\(UUID().uuidString)", isDirectory: true)
+        let unrelatedDir = tempRoot.appendingPathComponent("BentoZip-keep-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: deadPIDDir, withIntermediateDirectories: true)
+        try "stale".write(to: deadPIDDir.appendingPathComponent("stale.txt"), atomically: true, encoding: .utf8)
+        try fm.createDirectory(at: livePIDDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: unrelatedDir, withIntermediateDirectories: true)
+        defer {
+            try? fm.removeItem(at: deadPIDDir)
+            try? fm.removeItem(at: livePIDDir)
+            try? fm.removeItem(at: unrelatedDir)
+        }
+
+        DragDropManager.shared.cleanupStaleTempDirectories()
+
+        for _ in 0..<100 {
+            if !fm.fileExists(atPath: deadPIDDir.path) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(!fm.fileExists(atPath: deadPIDDir.path))
+        #expect(fm.fileExists(atPath: livePIDDir.path))
+        #expect(fm.fileExists(atPath: unrelatedDir.path))
+    }
+
+    @Test func mergeStagedContents_regularFileCollidingWithDestinationURL_respectsOverwriteSkipAndRename() async throws {
+        let coordinator = CompressionCoordinator()
+
+        for policy in [ExtractConflictPolicy.overwrite, .skip, .rename] {
+            let tmp = try makeTempDir()
+            defer { try? fm.removeItem(at: tmp) }
+
+            let stagingDir = tmp.appendingPathComponent("stage", isDirectory: true)
+            try fm.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+            try "extracted-payload".write(
+                to: stagingDir.appendingPathComponent("hello.txt"),
+                atomically: true,
+                encoding: .utf8
+            )
+
+            let destURL = tmp.appendingPathComponent("Output")
+            try "blocking-regular-file".write(to: destURL, atomically: true, encoding: .utf8)
+
+            let result = try await coordinator.mergeStagedContents(
+                from: stagingDir,
+                into: destURL,
+                initialPolicy: policy,
+                appState: nil
+            )
+
+            switch policy {
+            case .overwrite:
+                #expect(result.finalDestinationURL.standardizedFileURL == destURL.standardizedFileURL)
+                var isDir: ObjCBool = false
+                #expect(fm.fileExists(atPath: destURL.path, isDirectory: &isDir) && isDir.boolValue)
+                #expect(try String(contentsOf: destURL.appendingPathComponent("hello.txt"), encoding: .utf8) == "extracted-payload")
+            case .skip:
+                var isDir: ObjCBool = false
+                #expect(fm.fileExists(atPath: destURL.path, isDirectory: &isDir) && !isDir.boolValue)
+                #expect(try String(contentsOf: destURL, encoding: .utf8) == "blocking-regular-file")
+                #expect(result.mergedTopLevelURLs.isEmpty)
+            case .rename:
+                let renamedDest = tmp.appendingPathComponent("Output 2")
+                #expect(result.finalDestinationURL.standardizedFileURL == renamedDest.standardizedFileURL)
+                var origIsDir: ObjCBool = false
+                #expect(fm.fileExists(atPath: destURL.path, isDirectory: &origIsDir) && !origIsDir.boolValue)
+                #expect(try String(contentsOf: destURL, encoding: .utf8) == "blocking-regular-file")
+                #expect(try String(contentsOf: renamedDest.appendingPathComponent("hello.txt"), encoding: .utf8) == "extracted-payload")
+            case .ask:
+                break
+            }
+        }
+    }
+
+    @Test func extract_closeWindowAfterExtract_skipsCloseWhenDetachedOrSwitchedArchive() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let archiveA = tmp.appendingPathComponent("first.zip")
+        let archiveB = tmp.appendingPathComponent("second.zip")
+        try Data("a".utf8).write(to: archiveA)
+        try Data("b".utf8).write(to: archiveB)
+
+        let mock = MockArchiveEngine()
+        mock.extractHandler = { _, _, destURL, _, _ in
+            try? FileManager.default.createDirectory(at: destURL, withIntermediateDirectories: true)
+            try Data("extracted".utf8).write(to: destURL.appendingPathComponent("item.txt"))
+            try await Task.sleep(for: .milliseconds(80))
+        }
+
+        // Case 1: User detaches and returns to .empty while extraction is running -> must NOT close window
+        let coordinator = CompressionCoordinator(engine: mock)
+        let appState = AppState()
+        appState.revealInFinderAfterExtract = false
+        appState.closeWindowAfterExtract = true
+        appState.mode = .browseArchive
+        appState.sourceArchiveURL = archiveA
+        var closeCount = 0
+        appState.onRequestCloseWindow = { closeCount += 1 }
+
+        let progressA = ProgressState()
+        let taskA = Task {
+            await coordinator.extract(appState: appState, progressState: progressA)
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        coordinator.detachWindowProgress(progressA)
+        appState.reset()
+        await taskA.value
+        #expect(closeCount == 0)
+
+        // Case 2: User detaches and switches to archiveB while archiveA extracts -> must NOT close window
+        appState.revealInFinderAfterExtract = false
+        appState.closeWindowAfterExtract = true
+        appState.mode = .browseArchive
+        appState.sourceArchiveURL = archiveA
+        let progressB = ProgressState()
+        let taskB = Task {
+            await coordinator.extract(appState: appState, progressState: progressB)
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        coordinator.detachWindowProgress(progressB)
+        appState.sourceArchiveURL = archiveB
+        await taskB.value
+        #expect(closeCount == 0)
+
+        // Case 3: Still viewing the same archive when extraction finishes -> MUST invoke onRequestCloseWindow
+        appState.sourceArchiveURL = archiveA
+        let progressC = ProgressState()
+        await coordinator.extract(appState: appState, progressState: progressC)
+        #expect(closeCount == 1)
     }
 }

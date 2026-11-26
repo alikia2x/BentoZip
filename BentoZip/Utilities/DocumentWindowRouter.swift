@@ -20,28 +20,46 @@ final class DocumentWindowRouter {
         let id: ObjectIdentifier
         weak var window: NSWindow?
         weak var appState: AppState?
+        weak var progressState: ProgressState?
+        weak var uiState: WorkspaceUIState?
         var representedArchivePath: String?
     }
 
     private var records: [ObjectIdentifier: WindowRecord] = [:]
+    private var openingArchivePaths: Set<String> = []
     private var openWorkspaceWindow: ((WorkspaceLaunchRequest) -> Void)?
     private var pendingRequests: [WorkspaceLaunchRequest] = []
+    private var preferencesManager: PreferencesManager?
 
     private init() {}
+
+    func configurePreferencesManager(_ manager: PreferencesManager) {
+        preferencesManager = manager
+    }
 
     func configureWindowOpener(_ opener: @escaping (WorkspaceLaunchRequest) -> Void) {
         openWorkspaceWindow = opener
         drainPendingRequestsIfReady()
     }
 
-    func register(window: NSWindow, appState: AppState) {
+    func register(
+        window: NSWindow,
+        appState: AppState,
+        progressState: ProgressState? = nil,
+        uiState: WorkspaceUIState? = nil
+    ) {
         pruneDeadWindows()
         let key = ObjectIdentifier(window)
         let archivePath = (appState.mode == .browseArchive) ? appState.sourceArchiveURL?.standardizedFileURL.path : nil
+        if let archivePath {
+            openingArchivePaths.remove(archivePath)
+        }
         records[key] = WindowRecord(
             id: key,
             window: window,
             appState: appState,
+            progressState: progressState,
+            uiState: uiState,
             representedArchivePath: archivePath
         )
         applyDocumentIdentity(to: window, appState: appState)
@@ -64,12 +82,22 @@ final class DocumentWindowRouter {
         }
     }
 
-    func update(window: NSWindow, appState: AppState) {
+    func update(
+        window: NSWindow,
+        appState: AppState,
+        progressState: ProgressState? = nil,
+        uiState: WorkspaceUIState? = nil
+    ) {
         pruneDeadWindows()
         let key = ObjectIdentifier(window)
         let archivePath = (appState.mode == .browseArchive) ? appState.sourceArchiveURL?.standardizedFileURL.path : nil
+        if let archivePath {
+            openingArchivePaths.remove(archivePath)
+        }
         if var record = records[key] {
             record.appState = appState
+            record.progressState = progressState ?? record.progressState
+            record.uiState = uiState ?? record.uiState
             record.representedArchivePath = archivePath
             records[key] = record
         } else {
@@ -77,6 +105,8 @@ final class DocumentWindowRouter {
                 id: key,
                 window: window,
                 appState: appState,
+                progressState: progressState,
+                uiState: uiState,
                 representedArchivePath: archivePath
             )
         }
@@ -85,6 +115,31 @@ final class DocumentWindowRouter {
 
     func unregister(window: NSWindow) {
         records.removeValue(forKey: ObjectIdentifier(window))
+    }
+
+    var activeWindowAppState: AppState? {
+        activeWindowRecord()?.appState
+    }
+
+    var activeWindowProgressState: ProgressState? {
+        activeWindowRecord()?.progressState
+    }
+
+    var activeWindowUIState: WorkspaceUIState? {
+        activeWindowRecord()?.uiState
+    }
+
+    private func activeWindowRecord() -> WindowRecord? {
+        pruneDeadWindows()
+        if let keyWindow = NSApplication.shared.keyWindow,
+           let record = records[ObjectIdentifier(keyWindow)] {
+            return record
+        }
+        if let mainWindow = NSApplication.shared.mainWindow,
+           let record = records[ObjectIdentifier(mainWindow)] {
+            return record
+        }
+        return nil
     }
 
     var hasVisibleWorkspaceWindows: Bool {
@@ -166,9 +221,17 @@ final class DocumentWindowRouter {
             return
         }
 
+        if openingArchivePaths.contains(standardizedPath) {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
+        openingArchivePaths.insert(standardizedPath)
+
         if let sourceAppState, sourceAppState.mode == .empty {
             Task {
                 await sourceAppState.coordinator.browseArchive(at: url, appState: sourceAppState)
+                finishOpeningArchive(url)
             }
             return
         }
@@ -178,11 +241,16 @@ final class DocumentWindowRouter {
             NSApplication.shared.activate(ignoringOtherApps: true)
             Task {
                 await targetState.coordinator.browseArchive(at: url, appState: targetState)
+                finishOpeningArchive(url)
             }
             return
         }
 
         dispatchLaunchRequest(.openArchive(url))
+    }
+
+    func finishOpeningArchive(_ url: URL) {
+        openingArchivePaths.remove(url.standardizedFileURL.path)
     }
 
     /// Stage local files/folders for compression in an empty window or a new compression window.
@@ -208,13 +276,39 @@ final class DocumentWindowRouter {
     /// Route external file opens (Finder double-click, Open With, Dock drop).
     func openExternalURLs(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        let allArchives = urls.allSatisfy { FormatDetector.isArchiveFile($0) }
-        if allArchives {
-            for url in urls {
-                openArchive(url)
+        let optionPressed = NSEvent.modifierFlags.contains(.option)
+        let prefs = preferencesManager?.loadPreferences() ?? AppPreferences()
+        var action = ArchiveOpenAction(rawValue: prefs.archiveOpenAction) ?? .browse
+        if optionPressed {
+            action = (action == .browse) ? .extract : .browse
+        }
+        let manager = preferencesManager
+
+        Task { @MainActor in
+            let allArchives = await Task.detached(priority: .userInitiated) {
+                urls.allSatisfy { FormatDetector.isArchiveFile($0) }
+            }.value
+
+            if allArchives {
+                if action == .extract {
+                    for url in urls {
+                        Task { @MainActor in
+                            await CompressionCoordinator().extractDirectly(
+                                archiveURL: url,
+                                preferencesManager: manager
+                            ) { encryptedURL in
+                                DocumentWindowRouter.shared.openArchive(encryptedURL)
+                            }
+                        }
+                    }
+                } else {
+                    for url in urls {
+                        openArchive(url)
+                    }
+                }
+            } else {
+                openFilesToCompress(urls)
             }
-        } else {
-            openFilesToCompress(urls)
         }
     }
 
@@ -278,19 +372,31 @@ final class DocumentWindowRouter {
 /// (titlebar proxy icon + Cmd-click path menu) and registers each workspace window with `DocumentWindowRouter`.
 struct WindowDocumentBridge: NSViewRepresentable {
     let appState: AppState
+    let progressState: ProgressState
+    let uiState: WorkspaceUIState
     let mode: ArchiveMode
     let sourceArchiveURL: URL?
 
     func makeNSView(context: Context) -> BridgeView {
         let view = BridgeView()
         view.appState = appState
+        view.progressState = progressState
+        view.uiState = uiState
         return view
     }
 
     func updateNSView(_ nsView: BridgeView, context: Context) {
         nsView.appState = appState
+        nsView.progressState = progressState
+        nsView.uiState = uiState
         if let window = nsView.window {
-            DocumentWindowRouter.shared.update(window: window, appState: appState)
+            nsView.bindCloseCallback(to: window, appState: appState)
+            DocumentWindowRouter.shared.update(
+                window: window,
+                appState: appState,
+                progressState: progressState,
+                uiState: uiState
+            )
         }
     }
 
@@ -301,6 +407,8 @@ struct WindowDocumentBridge: NSViewRepresentable {
     @MainActor
     final class BridgeView: NSView {
         weak var appState: AppState?
+        weak var progressState: ProgressState?
+        weak var uiState: WorkspaceUIState?
         private weak var trackedWindow: NSWindow?
 
         override func viewDidMoveToWindow() {
@@ -311,11 +419,31 @@ struct WindowDocumentBridge: NSViewRepresentable {
             }
             if let window, let appState {
                 trackedWindow = window
-                DocumentWindowRouter.shared.register(window: window, appState: appState)
+                bindCloseCallback(to: window, appState: appState)
+                DocumentWindowRouter.shared.register(
+                    window: window,
+                    appState: appState,
+                    progressState: progressState,
+                    uiState: uiState
+                )
+            }
+        }
+
+        func bindCloseCallback(to window: NSWindow, appState: AppState) {
+            appState.onRequestCloseWindow = { [weak window] in
+                guard let window else { return }
+                if window.styleMask.contains(.closable) {
+                    window.performClose(nil)
+                } else {
+                    window.close()
+                }
             }
         }
 
         func detachFromWindow() {
+            appState?.activeConflictPrompt?.cancel()
+            appState?.activeConflictPrompt = nil
+            appState?.onRequestCloseWindow = nil
             if let trackedWindow {
                 DocumentWindowRouter.shared.unregister(window: trackedWindow)
                 self.trackedWindow = nil

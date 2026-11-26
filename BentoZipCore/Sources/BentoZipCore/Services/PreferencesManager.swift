@@ -14,8 +14,13 @@ public final class PreferencesManager {
     public func configure(with context: ModelContext) {
         self.modelContext = context
         self.modelContainer = context.container
-        let prefs = loadPreferences()
+        let prefs = ensureDefaultPreferences()
         ArchiveCacheManager.shared.setMaxCacheSizeMB(prefs.maxCacheSizeMB)
+    }
+
+    @discardableResult
+    public func ensureDefaultPreferences() -> AppPreferences {
+        loadPreferences()
     }
 
     public func loadPreferences() -> AppPreferences {

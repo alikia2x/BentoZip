@@ -5,6 +5,7 @@ import SwiftUI
 struct FinderFileListRepresentable: NSViewRepresentable {
     let appState: AppState
     let progressState: ProgressState
+    let uiState: WorkspaceUIState
     let mode: ArchiveMode
     let sourceArchiveURL: URL?
     let showInspector: Bool
@@ -17,6 +18,7 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         FinderOutlineCoordinator(
             appState: appState,
             progressState: progressState,
+            uiState: uiState,
             onRequestArchiveDelete: onRequestArchiveDelete
         )
     }
@@ -95,7 +97,15 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         outlineView.addTableColumn(packedColumn)
         outlineView.addTableColumn(kindColumn)
         outlineView.outlineTableColumn = nameColumn
-        outlineView.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+        outlineView.autosaveName = "BentoZipFinderOutline"
+        outlineView.autosaveTableColumns = true
+
+        let prefs = appState.preferencesManager?.loadPreferences()
+        let sortKey = prefs?.sortColumnKey ?? "name"
+        let sortAscending = prefs?.sortAscending ?? true
+        let initialSort = NSSortDescriptor(key: sortKey, ascending: sortAscending)
+        coordinator.currentSortDescriptor = initialSort
+        outlineView.sortDescriptors = [initialSort]
 
         outlineView.dataSource = coordinator
         outlineView.delegate = coordinator
@@ -107,6 +117,8 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         outlineView.onNavigateUp = { [weak coordinator] in coordinator?.handleNavigateUpKey() }
         outlineView.onDelete = { [weak coordinator] in coordinator?.handleDeleteKey() }
         outlineView.onEscape = { [weak coordinator] in coordinator?.handleEscapeKey() }
+        outlineView.onCopyNames = { [weak coordinator] in coordinator?.handleCopyNames() }
+        outlineView.onCopyPaths = { [weak coordinator] in coordinator?.handleCopyPaths() }
         outlineView.onContextMenu = { [weak coordinator] nodes in
             coordinator?.makeContextMenu(for: nodes)
         }
@@ -136,6 +148,7 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.appState = appState
         coordinator.progressState = progressState
+        coordinator.uiState = uiState
         coordinator.onRequestArchiveDelete = onRequestArchiveDelete
         coordinator.syncFromModel()
     }

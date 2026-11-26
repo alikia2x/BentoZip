@@ -1002,4 +1002,533 @@ struct Bento7zEngineTests {
         try await engine.extractEntry(from: aarURL, entryPath: "Bundle/Nested/deep.txt", to: quickFile)
         #expect(try String(contentsOf: quickFile, encoding: .utf8) == "deep content")
     }
+
+    // MARK: - P0 Engine Capabilities
+
+    private func writeRawLegacyZip(at url: URL, pathData: Data, payload: Data) throws {
+        var crc: UInt32 = 0xFFFF_FFFF
+        for b in payload {
+            var c = crc ^ UInt32(b)
+            for _ in 0..<8 {
+                c = (c & 1) != 0 ? ((c >> 1) ^ 0xEDB8_8320) : (c >> 1)
+            }
+            crc = c
+        }
+        crc ^= 0xFFFF_FFFF
+
+        var lh = Data()
+        func appendU16(_ d: inout Data, _ v: UInt16) { var le = v.littleEndian; Swift.withUnsafeBytes(of: &le) { d.append(contentsOf: $0) } }
+        func appendU32(_ d: inout Data, _ v: UInt32) { var le = v.littleEndian; Swift.withUnsafeBytes(of: &le) { d.append(contentsOf: $0) } }
+        appendU32(&lh, 0x04034B50); appendU16(&lh, 20); appendU16(&lh, 0); appendU16(&lh, 0)
+        appendU16(&lh, 0); appendU16(&lh, 0); appendU32(&lh, crc)
+        appendU32(&lh, UInt32(payload.count)); appendU32(&lh, UInt32(payload.count))
+        appendU16(&lh, UInt16(pathData.count)); appendU16(&lh, 0)
+        lh.append(pathData); lh.append(payload)
+
+        var cd = Data()
+        appendU32(&cd, 0x02014B50); appendU16(&cd, 20); appendU16(&cd, 20); appendU16(&cd, 0); appendU16(&cd, 0)
+        appendU16(&cd, 0); appendU16(&cd, 0); appendU32(&cd, crc)
+        appendU32(&cd, UInt32(payload.count)); appendU32(&cd, UInt32(payload.count))
+        appendU16(&cd, UInt16(pathData.count)); appendU16(&cd, 0); appendU16(&cd, 0)
+        appendU16(&cd, 0); appendU16(&cd, 0); appendU32(&cd, 0); appendU32(&cd, 0)
+        cd.append(pathData)
+
+        var eocd = Data()
+        appendU32(&eocd, 0x06054B50); appendU16(&eocd, 0); appendU16(&eocd, 0)
+        appendU16(&eocd, 1); appendU16(&eocd, 1)
+        appendU32(&eocd, UInt32(cd.count)); appendU32(&eocd, UInt32(lh.count)); appendU16(&eocd, 0)
+
+        var zipBytes = Data()
+        zipBytes.append(lh); zipBytes.append(cd); zipBytes.append(eocd)
+        try zipBytes.write(to: url)
+    }
+
+    @Test func testArchive_validZip7zAndTarGz_passesAndReportsItemCounts() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let srcDir = dir.appendingPathComponent("src")
+        let inputs = try makeFiles([
+            "one.txt": "payload one",
+            "folder/two.txt": "payload two"
+        ], in: srcDir)
+
+        for format in [ArchiveFormat.zip, .sevenZip, .tarGz] {
+            let archiveURL = dir.appendingPathComponent("valid.\(format.fileExtension)")
+            try await engine.create(from: inputs, to: archiveURL, settings: CompressionSettings(format: format)) { _ in }
+
+            let result = try await engine.testArchive(at: archiveURL)
+            #expect(result.itemsCount >= 2)
+        }
+    }
+
+    @Test func testArchive_corruptedZip_throwsCorruptArchiveError() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let payload = Data("integrity-check-payload-0123456789".utf8)
+        let corruptPayloadZip = dir.appendingPathComponent("corrupt_crc.zip")
+        try writeRawLegacyZip(at: corruptPayloadZip, pathData: Data("check.txt".utf8), payload: payload)
+
+        // Flip a payload byte while leaving headers intact to trigger a CRC failure during testArchive
+        var bytes = try Data(contentsOf: corruptPayloadZip)
+        let payloadByteOffset = 30 + "check.txt".utf8.count
+        bytes[payloadByteOffset] ^= 0xFF
+        try bytes.write(to: corruptPayloadZip)
+
+        do {
+            _ = try await engine.testArchive(at: corruptPayloadZip)
+            Issue.record("Expected corruptArchive error for CRC-corrupted ZIP")
+        } catch let error as Bento7zError {
+            if case .corruptArchive = error {
+                // Expected
+            } else {
+                Issue.record("Expected Bento7zError.corruptArchive, got \(error)")
+            }
+        }
+
+        // Truncated ZIP archive must also fail with corruptArchive
+        let truncatedZip = dir.appendingPathComponent("truncated.zip")
+        try bytes.prefix(24).write(to: truncatedZip)
+        do {
+            _ = try await engine.testArchive(at: truncatedZip)
+            Issue.record("Expected corruptArchive error for truncated ZIP")
+        } catch let error as Bento7zError {
+            if case .corruptArchive = error {
+                // Expected
+            } else {
+                Issue.record("Expected Bento7zError.corruptArchive, got \(error)")
+            }
+        }
+    }
+
+    @Test func testArchive_encryptedArchives_enforcePasswordVerification() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let secretFile = dir.appendingPathComponent("secret.txt")
+        try "classified-contents".write(to: secretFile, atomically: true, encoding: .utf8)
+
+        for format in [ArchiveFormat.zip, .sevenZip] {
+            let archiveURL = dir.appendingPathComponent("locked.\(format.fileExtension)")
+            try await engine.create(
+                from: [secretFile],
+                to: archiveURL,
+                settings: CompressionSettings(
+                    format: format,
+                    compressionLevel: .fast,
+                    password: "correct-horse",
+                    zipEncryptionMethod: .aes256
+                )
+            ) { _ in }
+
+            do {
+                _ = try await engine.testArchive(at: archiveURL, password: nil)
+                Issue.record("Expected passwordRequired error for \(format.fileExtension)")
+            } catch let error as Bento7zError {
+                #expect(error == .passwordRequired)
+            }
+
+            do {
+                _ = try await engine.testArchive(at: archiveURL, password: "wrong-password")
+                Issue.record("Expected wrongPassword error for \(format.fileExtension)")
+            } catch let error as Bento7zError {
+                #expect(error == .wrongPassword)
+            }
+
+            let okResult = try await engine.testArchive(at: archiveURL, password: "correct-horse")
+            #expect(okResult.itemsCount == 1)
+        }
+    }
+
+    @Test func renameEntry_zip7zAndTar_renamesSingleFileAndNestedDirectory() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let srcDir = dir.appendingPathComponent("src")
+        let inputs = try makeFiles([
+            "alpha.txt": "alpha-body",
+            "docs/sub/guide.md": "guide-body"
+        ], in: srcDir)
+
+        for format in [ArchiveFormat.zip, .sevenZip, .tar] {
+            let archiveURL = dir.appendingPathComponent("rename.\(format.fileExtension)")
+            try await engine.create(from: inputs, to: archiveURL, settings: CompressionSettings(format: format)) { _ in }
+
+            // Rename single top-level file
+            try await engine.renameEntry(in: archiveURL, from: "alpha.txt", to: "omega.txt")
+            var listed = try await engine.listArchive(
+                in: archiveURL,
+                password: nil,
+                encoding: nil,
+                unwrapSingleTopDirectory: false,
+                onProgress: nil
+            )
+            let rootNamesAfterFileRename = Set(listed.entries.map(\.name))
+            #expect(rootNamesAfterFileRename == ["docs", "omega.txt"])
+
+            // Rename nested directory
+            try await engine.renameEntry(in: archiveURL, from: "docs", to: "manual")
+            listed = try await engine.listArchive(
+                in: archiveURL,
+                password: nil,
+                encoding: nil,
+                unwrapSingleTopDirectory: false,
+                onProgress: nil
+            )
+            let rootNamesAfterDirRename = Set(listed.entries.map(\.name))
+            #expect(rootNamesAfterDirRename == ["manual", "omega.txt"])
+
+            let outDir = dir.appendingPathComponent("out_\(format.fileExtension)")
+            try await engine.extract(archiveURL: archiveURL, entries: nil, to: outDir, password: nil) { _ in }
+            #expect(try String(contentsOf: outDir.appendingPathComponent("omega.txt"), encoding: .utf8) == "alpha-body")
+            #expect(try String(contentsOf: outDir.appendingPathComponent("manual/sub/guide.md"), encoding: .utf8) == "guide-body")
+            #expect(!fm.fileExists(atPath: outDir.appendingPathComponent("alpha.txt").path))
+            #expect(!fm.fileExists(atPath: outDir.appendingPathComponent("docs").path))
+        }
+    }
+
+    @Test func renameEntry_rejectsConflictsAndTraversalPaths() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let srcDir = dir.appendingPathComponent("src")
+        let inputs = try makeFiles([
+            "source.txt": "src",
+            "existing.txt": "dst",
+            "folder/item.txt": "nested"
+        ], in: srcDir)
+
+        let archiveURL = dir.appendingPathComponent("guards.zip")
+        try await engine.create(from: inputs, to: archiveURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        // Conflict rejection
+        do {
+            try await engine.renameEntry(in: archiveURL, from: "source.txt", to: "existing.txt")
+            Issue.record("Expected conflict error when target already exists")
+        } catch let error as Bento7zError {
+            if case .conflict = error {
+                // Expected
+            } else {
+                Issue.record("Expected Bento7zError.conflict, got \(error)")
+            }
+        }
+
+        // Traversal path rejection (newPath and oldPath)
+        for badPath in ["../escape.txt", "sub/../../escape.txt", "/abs/path.txt"] {
+            do {
+                try await engine.renameEntry(in: archiveURL, from: "source.txt", to: badPath)
+                Issue.record("Expected INVALID_PATH for newPath '\(badPath)'")
+            } catch let error as Bento7zError {
+                if case .operationFailed(_, let code) = error {
+                    #expect(code == "INVALID_PATH")
+                } else {
+                    Issue.record("Expected INVALID_PATH, got \(error)")
+                }
+            }
+
+            do {
+                try await engine.renameEntry(in: archiveURL, from: badPath, to: "clean.txt")
+                Issue.record("Expected INVALID_PATH for oldPath '\(badPath)'")
+            } catch let error as Bento7zError {
+                if case .operationFailed(_, let code) = error {
+                    #expect(code == "INVALID_PATH")
+                } else {
+                    Issue.record("Expected INVALID_PATH, got \(error)")
+                }
+            }
+        }
+    }
+
+    @Test func addEntries_withTargetPrefix_placesItemsInSubfolderAndRejectsTraversal() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let initial = dir.appendingPathComponent("root.txt")
+        let extra = dir.appendingPathComponent("extra.txt")
+        try "root".write(to: initial, atomically: true, encoding: .utf8)
+        try "extra-payload".write(to: extra, atomically: true, encoding: .utf8)
+
+        for format in [ArchiveFormat.zip, .sevenZip] {
+            let archiveURL = dir.appendingPathComponent("prefix.\(format.fileExtension)")
+            try await engine.create(from: [initial], to: archiveURL, settings: CompressionSettings(format: format)) { _ in }
+
+            try await engine.addEntries(
+                to: archiveURL,
+                from: [extra],
+                targetPrefix: "assets/nested",
+                password: nil
+            ) { _ in }
+
+            let listed = try await engine.listArchive(
+                in: archiveURL,
+                password: nil,
+                encoding: nil,
+                unwrapSingleTopDirectory: false,
+                onProgress: nil
+            )
+            let assetsDir = try #require(listed.entries.first(where: { $0.name == "assets" && $0.isDirectory }))
+            let nestedDir = try #require(assetsDir.children?.first(where: { $0.name == "nested" && $0.isDirectory }))
+            let addedFile = try #require(nestedDir.children?.first(where: { $0.name == "extra.txt" }))
+            #expect(addedFile.archiveRelativePath == "assets/nested/extra.txt")
+
+            let outDir = dir.appendingPathComponent("out_prefix_\(format.fileExtension)")
+            try await engine.extract(archiveURL: archiveURL, entries: nil, to: outDir, password: nil) { _ in }
+            #expect(try String(contentsOf: outDir.appendingPathComponent("assets/nested/extra.txt"), encoding: .utf8) == "extra-payload")
+
+            // Unsafe traversal prefix must be rejected before mutating the archive
+            do {
+                try await engine.addEntries(
+                    to: archiveURL,
+                    from: [extra],
+                    targetPrefix: "../escape",
+                    password: nil
+                ) { _ in }
+                Issue.record("Expected INVALID_PATH for traversal targetPrefix")
+            } catch let error as Bento7zError {
+                if case .operationFailed(_, let code) = error {
+                    #expect(code == "INVALID_PATH")
+                } else {
+                    Issue.record("Expected INVALID_PATH, got \(error)")
+                }
+            }
+        }
+    }
+
+    @Test func createFolder_insideWritableArchive_createsDirectoryEntries() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let seed = dir.appendingPathComponent("seed.txt")
+        try "seed".write(to: seed, atomically: true, encoding: .utf8)
+
+        for format in [ArchiveFormat.zip, .sevenZip] {
+            let archiveURL = dir.appendingPathComponent("mkdir.\(format.fileExtension)")
+            try await engine.create(from: [seed], to: archiveURL, settings: CompressionSettings(format: format)) { _ in }
+
+            try await engine.createFolder(in: archiveURL, path: "docs/specs", password: nil, onProgress: nil)
+
+            let listed = try await engine.listArchive(
+                in: archiveURL,
+                password: nil,
+                encoding: nil,
+                unwrapSingleTopDirectory: false,
+                onProgress: nil
+            )
+            let docs = try #require(listed.entries.first(where: { $0.name == "docs" && $0.isDirectory }))
+            let specs = try #require(docs.children?.first(where: { $0.name == "specs" && $0.isDirectory }))
+            #expect(specs.isDirectory)
+        }
+    }
+
+    @Test func manualEncodingOverride_decodesShiftJISAndGB18030OnListAndExtract() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        // Shift-JIS bytes for "テスト/報告.txt":
+        // テスト = 83 65 83 58 83 67, / = 2F, 報告 = 95 F1 8D 90, .txt = 2E 74 78 74
+        let sjisPath = Data([0x83, 0x65, 0x83, 0x58, 0x83, 0x67, 0x2F, 0x95, 0xF1, 0x8D, 0x90, 0x2E, 0x74, 0x78, 0x74])
+        let sjisZip = dir.appendingPathComponent("manual_sjis.zip")
+        try writeRawLegacyZip(at: sjisZip, pathData: sjisPath, payload: Data("sjis-manual-ok".utf8))
+
+        let sjisListed = try await engine.listArchive(
+            in: sjisZip,
+            password: nil,
+            encoding: FilenameEncodingOption.shiftJIS.iconvName,
+            unwrapSingleTopDirectory: false,
+            onProgress: nil
+        )
+        let sjisFolder = try #require(sjisListed.entries.first(where: { $0.name == "テスト" && $0.isDirectory }))
+        let sjisFile = try #require(sjisFolder.children?.first(where: { $0.name == "報告.txt" }))
+        #expect(sjisFile.archiveRelativePath == "テスト/報告.txt")
+
+        let sjisOut = dir.appendingPathComponent("sjis_out")
+        try await engine.extract(
+            archiveURL: sjisZip,
+            entries: nil,
+            to: sjisOut,
+            password: nil,
+            encoding: FilenameEncodingOption.shiftJIS.iconvName
+        ) { _ in }
+        #expect(try String(contentsOf: sjisOut.appendingPathComponent("テスト/報告.txt"), encoding: .utf8) == "sjis-manual-ok")
+
+        // GB18030 bytes for "目录/测试.txt": C4 BF C2 BC 2F B2 E2 CA D4 2E 74 78 74
+        let gbPath = Data([0xC4, 0xBF, 0xC2, 0xBC, 0x2F, 0xB2, 0xE2, 0xCA, 0xD4, 0x2E, 0x74, 0x78, 0x74])
+        let gbZip = dir.appendingPathComponent("manual_gb18030.zip")
+        try writeRawLegacyZip(at: gbZip, pathData: gbPath, payload: Data("gb18030-manual-ok".utf8))
+
+        let gbListed = try await engine.listArchive(
+            in: gbZip,
+            password: nil,
+            encoding: FilenameEncodingOption.gb18030.iconvName,
+            unwrapSingleTopDirectory: false,
+            onProgress: nil
+        )
+        let gbFolder = try #require(gbListed.entries.first(where: { $0.name == "目录" && $0.isDirectory }))
+        let gbFile = try #require(gbFolder.children?.first(where: { $0.name == "测试.txt" }))
+        #expect(gbFile.archiveRelativePath == "目录/测试.txt")
+
+        let gbOut = dir.appendingPathComponent("gb_out")
+        try await engine.extract(
+            archiveURL: gbZip,
+            entries: nil,
+            to: gbOut,
+            password: nil,
+            encoding: FilenameEncodingOption.gb18030.iconvName
+        ) { _ in }
+        #expect(try String(contentsOf: gbOut.appendingPathComponent("目录/测试.txt"), encoding: .utf8) == "gb18030-manual-ok")
+    }
+
+    @Test func listArchive_populatesNonZeroCRC32ViaBinaryClient() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let fileURL = dir.appendingPathComponent("hello.txt")
+        try "hello world".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let zipURL = dir.appendingPathComponent("crc.zip")
+        try await engine.create(from: [fileURL], to: zipURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let listed = try await engine.listArchive(in: zipURL)
+        let entry = try #require(listed.entries.first(where: { $0.name == "hello.txt" }))
+        let crc = try #require(entry.crc)
+        #expect(crc != 0)
+        // Standard IEEE CRC-32 of "hello world" is 0x0D4A1185
+        #expect(crc == 0x0D4A_1185)
+    }
+
+    private func writeRawLegacyZipEntries(at url: URL, items: [(pathData: Data, payload: Data)]) throws {
+        func appendU16(_ d: inout Data, _ v: UInt16) { var le = v.littleEndian; Swift.withUnsafeBytes(of: &le) { d.append(contentsOf: $0) } }
+        func appendU32(_ d: inout Data, _ v: UInt32) { var le = v.littleEndian; Swift.withUnsafeBytes(of: &le) { d.append(contentsOf: $0) } }
+        func crc32(_ data: Data) -> UInt32 {
+            var crc: UInt32 = 0xFFFF_FFFF
+            for b in data {
+                var c = crc ^ UInt32(b)
+                for _ in 0..<8 {
+                    c = (c & 1) != 0 ? ((c >> 1) ^ 0xEDB8_8320) : (c >> 1)
+                }
+                crc = c
+            }
+            return crc ^ 0xFFFF_FFFF
+        }
+
+        var localHeaders = Data()
+        var centralDirectory = Data()
+
+        for item in items {
+            let offset = UInt32(localHeaders.count)
+            let crc = crc32(item.payload)
+
+            var lh = Data()
+            appendU32(&lh, 0x04034B50); appendU16(&lh, 20); appendU16(&lh, 0); appendU16(&lh, 0)
+            appendU16(&lh, 0); appendU16(&lh, 0); appendU32(&lh, crc)
+            appendU32(&lh, UInt32(item.payload.count)); appendU32(&lh, UInt32(item.payload.count))
+            appendU16(&lh, UInt16(item.pathData.count)); appendU16(&lh, 0)
+            lh.append(item.pathData); lh.append(item.payload)
+            localHeaders.append(lh)
+
+            var cd = Data()
+            appendU32(&cd, 0x02014B50); appendU16(&cd, 20); appendU16(&cd, 20); appendU16(&cd, 0); appendU16(&cd, 0)
+            appendU16(&cd, 0); appendU16(&cd, 0); appendU32(&cd, crc)
+            appendU32(&cd, UInt32(item.payload.count)); appendU32(&cd, UInt32(item.payload.count))
+            appendU16(&cd, UInt16(item.pathData.count)); appendU16(&cd, 0); appendU16(&cd, 0)
+            appendU16(&cd, 0); appendU16(&cd, 0); appendU32(&cd, 0); appendU32(&cd, offset)
+            cd.append(item.pathData)
+            centralDirectory.append(cd)
+        }
+
+        var eocd = Data()
+        appendU32(&eocd, 0x06054B50); appendU16(&eocd, 0); appendU16(&eocd, 0)
+        appendU16(&eocd, UInt16(items.count)); appendU16(&eocd, UInt16(items.count))
+        appendU32(&eocd, UInt32(centralDirectory.count)); appendU32(&eocd, UInt32(localHeaders.count)); appendU16(&eocd, 0)
+
+        var zipBytes = Data()
+        zipBytes.append(localHeaders); zipBytes.append(centralDirectory); zipBytes.append(eocd)
+        try zipBytes.write(to: url)
+    }
+
+    @Test func renameEntryAndRemoveEntries_legacyCJKZip_operatesByDecodedUTF8Path() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        // GBK bytes:
+        // "目录/测试.txt" = C4 BF C2 BC 2F B2 E2 CA D4 2E 74 78 74
+        // "中文/数据.txt" = D6 D0 CE C4 2F CA FD BE DD 2E 74 78 74
+        let testGBK = Data([0xC4, 0xBF, 0xC2, 0xBC, 0x2F, 0xB2, 0xE2, 0xCA, 0xD4, 0x2E, 0x74, 0x78, 0x74])
+        let dataGBK = Data([0xD6, 0xD0, 0xCE, 0xC4, 0x2F, 0xCA, 0xFD, 0xBE, 0xDD, 0x2E, 0x74, 0x78, 0x74])
+        let zipURL = dir.appendingPathComponent("legacy_cjk_mutate.zip")
+        try writeRawLegacyZipEntries(at: zipURL, items: [
+            (testGBK, Data("cjk-test-payload".utf8)),
+            (dataGBK, Data("cjk-data-payload".utf8))
+        ])
+
+        // Rename using the decoded UTF-8 path
+        try await engine.renameEntry(in: zipURL, from: "目录/测试.txt", to: "目录/新名.txt")
+
+        var listed = try await engine.listArchive(
+            in: zipURL,
+            password: nil,
+            encoding: nil,
+            unwrapSingleTopDirectory: false,
+            onProgress: nil
+        )
+        let renamedDir = try #require(listed.entries.first(where: { $0.name == "目录" && $0.isDirectory }))
+        #expect(renamedDir.children?.map(\.name) == ["新名.txt"])
+        let dataDir = try #require(listed.entries.first(where: { $0.name == "中文" && $0.isDirectory }))
+        let dataEntry = try #require(dataDir.children?.first(where: { $0.name == "数据.txt" }))
+
+        let outDir = dir.appendingPathComponent("out_cjk")
+        try await engine.extract(archiveURL: zipURL, entries: nil, to: outDir, password: nil) { _ in }
+        #expect(try String(contentsOf: outDir.appendingPathComponent("目录/新名.txt"), encoding: .utf8) == "cjk-test-payload")
+        #expect(try String(contentsOf: outDir.appendingPathComponent("中文/数据.txt"), encoding: .utf8) == "cjk-data-payload")
+
+        // Remove the remaining legacy GBK entry using its decoded UTF-8 FileEntry
+        try await engine.removeEntries(from: zipURL, entries: [dataEntry])
+
+        listed = try await engine.listArchive(
+            in: zipURL,
+            password: nil,
+            encoding: nil,
+            unwrapSingleTopDirectory: false,
+            onProgress: nil
+        )
+        #expect(listed.entries.map(\.name) == ["目录"])
+        #expect(listed.entries.first?.children?.map(\.name) == ["新名.txt"])
+    }
+
+    @Test func renameEntry_compoundTarGzAndSolid7z_rejectsConflictsWithConflictError() async throws {
+        let dir = try makeTempDir()
+        defer { try? fm.removeItem(at: dir) }
+
+        let srcDir = dir.appendingPathComponent("src")
+        let inputs = try makeFiles([
+            "source.txt": "source-data",
+            "existing.txt": "existing-data"
+        ], in: srcDir)
+
+        for format in [ArchiveFormat.tarGz, .sevenZip] {
+            let archiveURL = dir.appendingPathComponent("conflict.\(format.fileExtension)")
+            try await engine.create(
+                from: inputs,
+                to: archiveURL,
+                settings: CompressionSettings(format: format, compressionLevel: .best)
+            ) { _ in }
+
+            do {
+                try await engine.renameEntry(in: archiveURL, from: "source.txt", to: "existing.txt")
+                Issue.record("Expected Bento7zError.conflict for \(format.fileExtension)")
+            } catch let error as Bento7zError {
+                if case .conflict = error {
+                    // Expected
+                } else {
+                    Issue.record("Expected Bento7zError.conflict for \(format.fileExtension), got \(error)")
+                }
+            }
+
+            let outDir = dir.appendingPathComponent("verify_\(format.fileExtension)")
+            try await engine.extract(archiveURL: archiveURL, entries: nil, to: outDir, password: nil) { _ in }
+            #expect(try String(contentsOf: outDir.appendingPathComponent("source.txt"), encoding: .utf8) == "source-data")
+            #expect(try String(contentsOf: outDir.appendingPathComponent("existing.txt"), encoding: .utf8) == "existing-data")
+        }
+    }
 }

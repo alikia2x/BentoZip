@@ -5,6 +5,7 @@ struct FilePromisePayload: Sendable {
     let entry: FileEntry
     let sourceArchiveURL: URL?
     let password: String?
+    let encoding: String?
 }
 
 @MainActor
@@ -14,6 +15,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
 
     var appState: AppState
     var progressState: ProgressState
+    var uiState: WorkspaceUIState
     var onRequestArchiveDelete: ([FileEntry]) -> Void
 
     private var lastTreeStructureRevision: UInt64 = .max
@@ -26,7 +28,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
     private var hasScheduledDeferredFocusCheck = false
     private var sortedRoots: [FileNode] = []
     private var sortedChildrenCache: [UUID: [FileNode]] = [:]
-    private var currentSortDescriptor: NSSortDescriptor? = NSSortDescriptor(key: "name", ascending: true)
+    var currentSortDescriptor: NSSortDescriptor? = NSSortDescriptor(key: "name", ascending: true)
 
     nonisolated let filePromiseQueue: OperationQueue = {
         let queue = OperationQueue()
@@ -39,22 +41,34 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
     init(
         appState: AppState,
         progressState: ProgressState,
+        uiState: WorkspaceUIState,
         onRequestArchiveDelete: @escaping ([FileEntry]) -> Void
     ) {
         self.appState = appState
         self.progressState = progressState
+        self.uiState = uiState
         self.onRequestArchiveDelete = onRequestArchiveDelete
         super.init()
+        bindResumePreview()
     }
 
     func tearDown() {
         needsInitialWindowFocus = false
         hasScheduledDeferredFocusCheck = false
+        appState.onResumePreview = nil
         if let outlineView {
             outlineView.dataSource = nil
             outlineView.delegate = nil
             outlineView.target = nil
             QuickLookHelper.shared.detachOwner(outlineView)
+        }
+    }
+
+    private func bindResumePreview() {
+        appState.onResumePreview = { [weak self] entries in
+            guard let self else { return }
+            let nodes = entries.map { self.appState.node(for: $0.id) ?? FileNode(entry: $0) }
+            self.previewNodes(nodes)
         }
     }
 
@@ -64,13 +78,21 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
 
     func handleBecameQuickLookOwner() {
         let nodes = selectedNodes()
+        let previewEntries = nodes
+            .filter { !$0.isDirectory || !$0.isFromArchive }
+            .map { $0.toFileEntry() }
         QuickLookHelper.shared.updateSelectionIfVisible(
             nodes: nodes,
             sourceArchiveURL: appState.sourceArchiveURL,
-            password: appState.archivePassword
+            password: appState.archivePassword,
+            encoding: appState.selectedEncoding.iconvName
         ) { [weak self] error in
             guard let self else { return }
-            FileListTreeSupport.handleExtractionError(error, appState: self.appState)
+            FileListTreeSupport.handleExtractionError(
+                error,
+                appState: self.appState,
+                retryAction: previewEntries.isEmpty ? nil : .preview(previewEntries)
+            )
         }
     }
 
@@ -78,6 +100,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
 
     func syncFromModel() {
         guard let outlineView else { return }
+        bindResumePreview()
 
         packedColumn?.isHidden = (appState.mode != .browseArchive)
 
@@ -179,14 +202,15 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
     private func claimFirstResponderIfAppropriate() {
         guard let outlineView,
               let window = outlineView.window,
-              window.attachedSheet == nil else {
+              window.attachedSheet == nil,
+              !appState.isSearchVisible,
+              !(window.firstResponder is NSText) else {
+            needsInitialWindowFocus = false
             return
         }
 
-        if needsInitialWindowFocus || !(window.firstResponder is NSTextView) {
-            if window.firstResponder !== outlineView {
-                window.makeFirstResponder(outlineView)
-            }
+        if window.firstResponder !== outlineView {
+            window.makeFirstResponder(outlineView)
         }
 
         // One next-runloop re-check handles SwiftUI Form TextFields claiming focus
@@ -199,7 +223,10 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
             guard self.needsInitialWindowFocus,
                   let outlineView = self.outlineView,
                   let window = outlineView.window,
-                  window.attachedSheet == nil else {
+                  window.attachedSheet == nil,
+                  !self.appState.isSearchVisible,
+                  !(window.firstResponder is NSText) else {
+                self.needsInitialWindowFocus = false
                 return
             }
             self.needsInitialWindowFocus = false
@@ -218,7 +245,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
         if let cached = sortedChildrenCache[node.id] {
             return cached
         }
-        let sorted = FileListTreeSupport.sortNodes(node.children ?? [], using: currentSortDescriptor)
+        let sorted = FileListTreeSupport.sortNodes(appState.visibleChildren(of: node), using: currentSortDescriptor)
         sortedChildrenCache[node.id] = sorted
         return sorted
     }
@@ -257,6 +284,12 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
         }
 
         currentSortDescriptor = outlineView.sortDescriptors.first
+        if let descriptor = currentSortDescriptor, let key = descriptor.key {
+            appState.preferencesManager?.updatePreferences { prefs in
+                prefs.sortColumnKey = key
+                prefs.sortAscending = descriptor.ascending
+            }
+        }
         do {
             let previousGuard = isUpdatingSelectionFromModel
             isUpdatingSelectionFromModel = true
@@ -297,13 +330,21 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
         let nodes = selectedNodes(in: outlineView)
         appState.selectedEntryIDs = Set(nodes.map(\.id))
 
+        let previewEntries = nodes
+            .filter { !$0.isDirectory || !$0.isFromArchive }
+            .map { $0.toFileEntry() }
         QuickLookHelper.shared.updateSelectionIfVisible(
             nodes: nodes,
             sourceArchiveURL: appState.sourceArchiveURL,
-            password: appState.archivePassword
+            password: appState.archivePassword,
+            encoding: appState.selectedEncoding.iconvName
         ) { [weak self] error in
             guard let self else { return }
-            FileListTreeSupport.handleExtractionError(error, appState: self.appState)
+            FileListTreeSupport.handleExtractionError(
+                error,
+                appState: self.appState,
+                retryAction: previewEntries.isEmpty ? nil : .preview(previewEntries)
+            )
         }
     }
 }

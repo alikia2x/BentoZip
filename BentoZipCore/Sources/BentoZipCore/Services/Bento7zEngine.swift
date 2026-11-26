@@ -32,11 +32,23 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
     // MARK: - ArchiveEngine Protocol
 
     public func listEntries(in archiveURL: URL, password: String? = nil) async throws -> [FileEntry] {
-        try await listArchive(in: archiveURL, password: password, onProgress: nil).entries
+        try await listArchive(
+            in: archiveURL,
+            password: password,
+            encoding: nil,
+            unwrapSingleTopDirectory: true,
+            onProgress: nil
+        ).entries
     }
 
     public func listArchive(in archiveURL: URL, password: String? = nil) async throws -> ArchiveListResult {
-        try await listArchive(in: archiveURL, password: password, onProgress: nil)
+        try await listArchive(
+            in: archiveURL,
+            password: password,
+            encoding: nil,
+            unwrapSingleTopDirectory: true,
+            onProgress: nil
+        )
     }
 
     public func listArchive(
@@ -44,18 +56,50 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         password: String? = nil,
         onProgress: (@Sendable (ArchiveProgress) -> Void)?
     ) async throws -> ArchiveListResult {
+        try await listArchive(
+            in: archiveURL,
+            password: password,
+            encoding: nil,
+            unwrapSingleTopDirectory: true,
+            onProgress: onProgress
+        )
+    }
+
+    public func listArchive(
+        in archiveURL: URL,
+        password: String?,
+        encoding: String?,
+        unwrapSingleTopDirectory: Bool,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveListResult {
         guard FileManager.default.fileExists(atPath: archiveURL.path) else {
             throw Bento7zError.fileNotFound(archiveURL.path)
         }
 
         if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
-            return try await AppleArchiveEngine().listArchive(in: archiveURL, onProgress: onProgress)
+            return try await AppleArchiveEngine().listArchive(
+                in: archiveURL,
+                unwrapSingleTopDirectory: unwrapSingleTopDirectory,
+                onProgress: onProgress
+            )
         }
 
         if prefersBinaryServer {
-            return try await listArchiveBinary(in: archiveURL, password: password, onProgress: onProgress)
+            return try await listArchiveBinary(
+                in: archiveURL,
+                password: password,
+                encoding: encoding,
+                unwrapSingleTopDirectory: unwrapSingleTopDirectory,
+                onProgress: onProgress
+            )
         }
-        return try await listArchiveJSONL(in: archiveURL, password: password, onProgress: onProgress)
+        return try await listArchiveJSONL(
+            in: archiveURL,
+            password: password,
+            encoding: encoding,
+            unwrapSingleTopDirectory: unwrapSingleTopDirectory,
+            onProgress: onProgress
+        )
     }
 
     public func extract(
@@ -63,6 +107,24 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         entries: [FileEntry]?,
         to destinationURL: URL,
         password: String? = nil,
+        onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+    ) async throws {
+        try await extract(
+            archiveURL: archiveURL,
+            entries: entries,
+            to: destinationURL,
+            password: password,
+            encoding: nil,
+            onProgress: onProgress
+        )
+    }
+
+    public func extract(
+        archiveURL: URL,
+        entries: [FileEntry]?,
+        to destinationURL: URL,
+        password: String?,
+        encoding: String?,
         onProgress: @escaping @Sendable (ArchiveProgress) -> Void
     ) async throws {
         guard FileManager.default.fileExists(atPath: archiveURL.path) else {
@@ -87,6 +149,7 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
                 entries: entries,
                 to: destinationURL,
                 password: password,
+                encoding: encoding,
                 onProgress: onProgress
             )
             return
@@ -102,6 +165,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         if let password, !password.isEmpty {
             params["password"] = password
         }
+        if let encoding, !encoding.isEmpty {
+            params["encoding"] = encoding
+        }
         if let entries, !entries.isEmpty {
             let entryPaths = Bento7zPathSafety.collectArchivePaths(from: entries)
             if !entryPaths.isEmpty {
@@ -114,6 +180,25 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             onProgress(mapper.map(progress))
         }
         onProgress(ArchiveProgress(fractionCompleted: 1.0))
+    }
+
+    public func testArchive(
+        at archiveURL: URL,
+        password: String? = nil,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)? = nil
+    ) async throws -> ArchiveTestResult {
+        guard FileManager.default.fileExists(atPath: archiveURL.path) else {
+            throw Bento7zError.fileNotFound(archiveURL.path)
+        }
+
+        if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
+            return try await AppleArchiveEngine().testArchive(at: archiveURL, onProgress: onProgress)
+        }
+
+        if prefersBinaryServer {
+            return try await testArchiveBinary(at: archiveURL, password: password, onProgress: onProgress)
+        }
+        return try await testArchiveJSONL(at: archiveURL, password: password, onProgress: onProgress)
     }
 
     public func create(
@@ -189,7 +274,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         from archiveURL: URL,
         entryPath: String,
         to destinationURL: URL,
-        password: String? = nil
+        password: String? = nil,
+        encoding: String? = nil,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)? = nil
     ) async throws {
         if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
             try await AppleArchiveEngine().extractEntry(
@@ -197,6 +284,7 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
                 entryPath: entryPath,
                 to: destinationURL
             )
+            onProgress?(ArchiveProgress(fractionCompleted: 1.0))
             return
         }
         let safeRelPath = try Bento7zPathSafety.sanitizedRelativePath(entryPath)
@@ -223,9 +311,20 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
                 password: password,
                 format: FormatDetector.detectReadableFormat(of: archiveURL)?.bento7zFormatName,
                 tarCachePath: tarCacheURL?.path,
-                entries: [safeRelPath]
+                entries: [safeRelPath],
+                encoding: encoding
             )
-            _ = try await client.sendRequest(type: .extract, payload: payload, hardKillOnCancel: false)
+            let progressForwarder: (@Sendable (Bento7zBinaryProtocol.ProgressPayload) -> Void)? = onProgress.map { callback in
+                { @Sendable payload in
+                    callback(Self.archiveProgress(from: payload))
+                }
+            }
+            _ = try await client.sendRequest(
+                type: .extract,
+                payload: payload,
+                hardKillOnCancel: false,
+                onProgress: progressForwarder
+            )
             if let tarCacheURL, fm.fileExists(atPath: tarCacheURL.path) {
                 cacheManager.recordMaterializedTar(for: archiveURL, at: tarCacheURL)
             }
@@ -241,13 +340,16 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             if let password, !password.isEmpty {
                 params["password"] = password
             }
-            _ = try await runner.execute(command: "extract", params: params)
+            if let encoding, !encoding.isEmpty {
+                params["encoding"] = encoding
+            }
+            _ = try await runner.execute(command: "extract", params: params, onProgress: onProgress)
         }
 
         let extractedFile: URL
-        if fm.fileExists(atPath: directExtracted.path) {
+        if Bento7zPathSafety.itemExists(at: directExtracted) {
             extractedFile = directExtracted
-        } else if fm.fileExists(atPath: flatExtracted.path) {
+        } else if Bento7zPathSafety.itemExists(at: flatExtracted) {
             extractedFile = flatExtracted
         } else {
             throw Bento7zError.fileNotFound(entryPath)
@@ -258,7 +360,7 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             try fm.createDirectory(at: destParent, withIntermediateDirectories: true)
         }
 
-        if fm.fileExists(atPath: destinationURL.path) {
+        if Bento7zPathSafety.itemExists(at: destinationURL) {
             try fm.removeItem(at: destinationURL)
         }
         try fm.copyItem(at: extractedFile, to: destinationURL)
@@ -269,6 +371,8 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
     private func listArchiveBinary(
         in archiveURL: URL,
         password: String?,
+        encoding: String?,
+        unwrapSingleTopDirectory: Bool,
         onProgress: (@Sendable (ArchiveProgress) -> Void)?
     ) async throws -> ArchiveListResult {
         let isEncrypted = !(password ?? "").isEmpty
@@ -316,7 +420,8 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             archivePath: archiveURL.path,
             password: password,
             format: formatHint,
-            tarCachePath: tarCacheURL?.path
+            tarCachePath: tarCacheURL?.path,
+            encoding: encoding
         )
 
         let progressForwarder: (@Sendable (Bento7zBinaryProtocol.ProgressPayload) -> Void)?
@@ -351,8 +456,16 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         let (flatEntries, archivePackedSize) = collector.takeSnapshot()
         let buildTask = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
-            let tree = ArchiveTreeBuilder.build(from: flatEntries)
-            return ArchiveListResult(entries: tree, archivePackedSize: archivePackedSize)
+            let built = ArchiveTreeBuilder.buildTreeWithMetadata(
+                from: flatEntries,
+                archiveURL: archiveURL,
+                unwrapSingleTopDirectory: unwrapSingleTopDirectory
+            )
+            return ArchiveListResult(
+                entries: built.entries,
+                archivePackedSize: archivePackedSize,
+                unwrappedRootPath: built.unwrappedRootPath
+            )
         }
         return try await withTaskCancellationHandler {
             try await buildTask.value
@@ -366,6 +479,7 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         entries: [FileEntry]?,
         to destinationURL: URL,
         password: String?,
+        encoding: String?,
         onProgress: @escaping @Sendable (ArchiveProgress) -> Void
     ) async throws {
         let isEncrypted = !(password ?? "").isEmpty
@@ -386,7 +500,8 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             password: password,
             format: formatHint,
             tarCachePath: tarCacheURL?.path,
-            entries: entryPaths
+            entries: entryPaths,
+            encoding: encoding
         )
 
         let mapper = ProgressStageMapper(context: .extract)
@@ -403,6 +518,50 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             cacheManager.recordMaterializedTar(for: archiveURL, at: tarCacheURL)
         }
         onProgress(ArchiveProgress(fractionCompleted: 1.0))
+    }
+
+    private func testArchiveBinary(
+        at archiveURL: URL,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveTestResult {
+        let isEncrypted = !(password ?? "").isEmpty
+        let tarCacheURL = cacheManager.tarCacheURL(for: archiveURL, isEncrypted: isEncrypted)
+        let formatHint = FormatDetector.detectReadableFormat(of: archiveURL)?.bento7zFormatName
+
+        let worker = Bento7zBinaryClient(
+            binaryPath: runner.binaryPath,
+            libraryPath: runner.libraryPath,
+            label: "test"
+        )
+        defer { worker.shutdown(terminateProcess: true) }
+
+        let payload = Bento7zBinaryProtocol.encodeTestRequest(
+            archivePath: archiveURL.path,
+            password: password,
+            format: formatHint,
+            tarCachePath: tarCacheURL?.path
+        )
+
+        let progressForwarder: (@Sendable (Bento7zBinaryProtocol.ProgressPayload) -> Void)? = onProgress.map { callback in
+            let mapper = ProgressStageMapper(context: .extract)
+            return { @Sendable progress in
+                callback(mapper.map(Self.archiveProgress(from: progress)))
+            }
+        }
+
+        let result = try await worker.sendRequest(
+            type: .test,
+            payload: payload,
+            hardKillOnCancel: true,
+            onProgress: progressForwarder
+        )
+
+        if let tarCacheURL, FileManager.default.fileExists(atPath: tarCacheURL.path) {
+            cacheManager.recordMaterializedTar(for: archiveURL, at: tarCacheURL)
+        }
+        onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+        return ArchiveTestResult(itemsCount: Int(max(0, result.outputSize)))
     }
 
     private func compressBinary(
@@ -450,6 +609,8 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
     private func listArchiveJSONL(
         in archiveURL: URL,
         password: String?,
+        encoding: String?,
+        unwrapSingleTopDirectory: Bool,
         onProgress: (@Sendable (ArchiveProgress) -> Void)?
     ) async throws -> ArchiveListResult {
         var params: [String: Any] = ["archive": archiveURL.path]
@@ -458,6 +619,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         }
         if let password, !password.isEmpty {
             params["password"] = password
+        }
+        if let encoding, !encoding.isEmpty {
+            params["encoding"] = encoding
         }
 
         let wrappedProgress: (@Sendable (ArchiveProgress) -> Void)?
@@ -494,6 +658,8 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
                 let isDir = item["is_dir"] as? Bool ?? false
                 let size = (item["size"] as? NSNumber)?.int64Value ?? 0
                 let packedSize = (item["packed_size"] as? NSNumber)?.int64Value
+                let crcValue = (item["crc"] as? NSNumber)?.uint32Value
+                let crc: UInt32? = (!isDir && (crcValue ?? 0) != 0) ? crcValue : nil
                 let isEncrypted = item["encrypted"] as? Bool ?? false
                 let modDate: Date? = if let ts = (item["modified_at"] as? NSNumber)?.doubleValue, ts > 0 {
                     Date(timeIntervalSince1970: ts)
@@ -508,13 +674,22 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
                     size: size,
                     packedSize: packedSize,
                     modificationDate: modDate,
+                    crc: crc,
                     isEncrypted: isEncrypted
                 ))
             }
 
             try Task.checkCancellation()
-            let tree = ArchiveTreeBuilder.build(from: flatEntries)
-            return ArchiveListResult(entries: tree, archivePackedSize: archivePackedSize)
+            let built = ArchiveTreeBuilder.buildTreeWithMetadata(
+                from: flatEntries,
+                archiveURL: archiveURL,
+                unwrapSingleTopDirectory: unwrapSingleTopDirectory
+            )
+            return ArchiveListResult(
+                entries: built.entries,
+                archivePackedSize: archivePackedSize,
+                unwrappedRootPath: built.unwrappedRootPath
+            )
         }
 
         return try await withTaskCancellationHandler {
@@ -522,6 +697,38 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         } onCancel: {
             decodeTask.cancel()
         }
+    }
+
+    private func testArchiveJSONL(
+        at archiveURL: URL,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveTestResult {
+        var params: [String: Any] = ["archive": archiveURL.path]
+        if let formatHint = FormatDetector.detectReadableFormat(of: archiveURL)?.bento7zFormatName {
+            params["format"] = formatHint
+        }
+        if let password, !password.isEmpty {
+            params["password"] = password
+        }
+        let isEncrypted = !(password ?? "").isEmpty
+        if let tarCacheURL = cacheManager.tarCacheURL(for: archiveURL, isEncrypted: isEncrypted) {
+            params["tar_cache_path"] = tarCacheURL.path
+        }
+
+        let wrappedProgress: (@Sendable (ArchiveProgress) -> Void)? = onProgress.map { callback in
+            let mapper = ProgressStageMapper(context: .extract)
+            return { @Sendable progress in
+                callback(mapper.map(progress))
+            }
+        }
+        let result = try await runner.execute(command: "test", params: params, onProgress: wrappedProgress)
+        let itemsCount = (result["items_tested"] as? NSNumber)?.intValue
+            ?? (result["items_count"] as? NSNumber)?.intValue
+            ?? (result["output_size"] as? NSNumber)?.intValue
+            ?? 0
+        onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+        return ArchiveTestResult(itemsCount: max(0, itemsCount))
     }
 
     private func executeDirectCompressJSONL(
@@ -657,6 +864,66 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             urls.append(url)
         }
         return urls
+    }
+
+    /// Discover all companion split volume URLs belonging to an existing archive volume (including itself).
+    static func allSplitVolumeURLs(for archiveURL: URL) -> [URL] {
+        let fm = FileManager.default
+        let fileName = archiveURL.lastPathComponent
+        let lower = fileName.lowercased()
+        let parent = archiveURL.deletingLastPathComponent()
+
+        // Numbered split volumes (.7z.001, .zip.001, .tar.001, .001)
+        if let dot = fileName.lastIndex(of: ".") {
+            let ext = fileName[fileName.index(after: dot)...]
+            if ext.count >= 3 && ext.allSatisfy({ $0.isASCII && $0.isNumber }) {
+                let baseURL = URL(fileURLWithPath: String(archiveURL.path.dropLast(ext.count + 1)))
+                let companions = splitVolumeURLs(for: baseURL)
+                if !companions.isEmpty {
+                    return companions
+                }
+            }
+        }
+
+        // Multi-part RAR (.part1.rar / .part01.rar)
+        if lower.hasSuffix(".rar"),
+           let dotPart = lower.range(of: ".part", options: [.backwards]),
+           dotPart.lowerBound > lower.startIndex {
+            let digits = lower[dotPart.upperBound..<lower.index(lower.endIndex, offsetBy: -4)]
+            if !digits.isEmpty && digits.allSatisfy({ $0.isASCII && $0.isNumber }) {
+                let offset = lower.distance(from: lower.startIndex, to: dotPart.lowerBound)
+                let stem = String(fileName.prefix(offset))
+                let regexPrefix = (stem + ".part").lowercased()
+                if let dirItems = try? fm.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil) {
+                    let matching = dirItems.filter { candidate in
+                        let cLower = candidate.lastPathComponent.lowercased()
+                        guard cLower.hasPrefix(regexPrefix), cLower.hasSuffix(".rar") else { return false }
+                        let mid = cLower.dropFirst(regexPrefix.count).dropLast(4)
+                        return !mid.isEmpty && mid.allSatisfy { $0.isASCII && $0.isNumber }
+                    }
+                    if !matching.isEmpty {
+                        return matching.sorted { $0.lastPathComponent < $1.lastPathComponent }
+                    }
+                }
+            }
+        }
+
+        // Legacy RAR (.rar + .r00..r99)
+        if lower.hasSuffix(".rar") {
+            let stem = String(fileName.dropLast(4))
+            var found: [URL] = fm.fileExists(atPath: archiveURL.path) ? [archiveURL] : []
+            for idx in 0...99 {
+                let companion = parent.appendingPathComponent(String(format: "%@.r%02d", stem, idx))
+                if fm.fileExists(atPath: companion.path) {
+                    found.append(companion)
+                } else if idx > 0 {
+                    break
+                }
+            }
+            if !found.isEmpty { return found }
+        }
+
+        return fm.fileExists(atPath: archiveURL.path) ? [archiveURL] : []
     }
 
     static func cleanupSplitVolumes(baseArchiveURL: URL) {

@@ -5,6 +5,7 @@ import SwiftUI
 struct ToolbarCommands: ToolbarContent {
     @Environment(AppState.self) private var appState
     @Environment(ProgressState.self) private var progressState
+    @Environment(WorkspaceUIState.self) private var uiState
 
     @Binding var showDeleteConfirmation: Bool
     let selectedCount: Int
@@ -67,6 +68,14 @@ struct ToolbarCommands: ToolbarContent {
                         .help("Add to Archive")
 
                         Button {
+                            uiState.showNewFolderSheet = true
+                        } label: {
+                            Label("New Folder", systemImage: "folder.badge.plus")
+                        }
+                        .disabled(isBusy)
+                        .help("New Folder")
+
+                        Button {
                             showDeleteConfirmation = true
                         } label: {
                             Label("Delete", systemImage: "trash")
@@ -74,6 +83,19 @@ struct ToolbarCommands: ToolbarContent {
                         .disabled(selectedCount == 0 || isBusy)
                         .help("Delete Selected from Archive")
                     }
+
+                    Button {
+                        Task {
+                            await appState.coordinator.testArchive(
+                                appState: appState,
+                                progressState: progressState
+                            )
+                        }
+                    } label: {
+                        Label("Test Archive", systemImage: "checkmark.shield")
+                    }
+                    .disabled(isBusy)
+                    .help("Test Archive")
 
                     Menu {
                         Button {
@@ -109,14 +131,25 @@ struct ToolbarCommands: ToolbarContent {
                                         appState: appState,
                                         progressState: progressState,
                                         entries: entries,
+                                        chooseDestination: false
+                                    )
+                                }
+                            } label: {
+                                Label("Extract Selected Here", systemImage: "square.and.arrow.down")
+                            }
+
+                            Button {
+                                let entries = appState.selectedNodes.map { $0.toFileEntry() }
+                                Task {
+                                    await appState.coordinator.extract(
+                                        appState: appState,
+                                        progressState: progressState,
+                                        entries: entries,
                                         chooseDestination: true
                                     )
                                 }
                             } label: {
-                                Label(
-                                    String(localized: "Extract Selected (\(appState.selectedNodes.count))…"),
-                                    systemImage: "checkmark.rectangle.stack"
-                                )
+                                Label("Extract Selected…", systemImage: "checkmark.rectangle.stack")
                             }
                         }
                     } label: {
@@ -135,7 +168,20 @@ struct ToolbarCommands: ToolbarContent {
                 }
             }
 
-            ToolbarItem(placement: .automatic) {
+            ToolbarItemGroup(placement: .automatic) {
+                Button {
+                    if appState.isSearchVisible {
+                        appState.searchQuery = ""
+                        appState.isSearchVisible = false
+                    } else {
+                        appState.isSearchVisible = true
+                        uiState.requestSearchFocus()
+                    }
+                } label: {
+                    Label("Find", systemImage: "magnifyingglass")
+                }
+                .help("Find")
+
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) {
                         appState.showInspector.toggle()
@@ -176,10 +222,12 @@ struct ToolbarCommands: ToolbarContent {
             if appState.mode == .compress {
                 appState.addEntries(from: urls)
             } else if appState.isWritableArchive {
+                let targetPrefix = appState.currentSubfolderPath
                 Task {
                     await appState.coordinator.addEntries(
                         appState: appState,
                         urls: urls,
+                        targetPrefix: targetPrefix,
                         progressState: progressState
                     )
                 }

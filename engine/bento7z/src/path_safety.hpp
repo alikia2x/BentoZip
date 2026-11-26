@@ -23,6 +23,11 @@ struct CompiledExcludes {
 
 std::string normalize_archive_path(std::string s);
 
+bool normalize_strict_archive_path(std::string_view raw_path,
+                                 bool allow_empty,
+                                 std::string& out_norm,
+                                 std::string& reason);
+
 bool is_safe_archive_path(std::string_view raw_path);
 
 bool glob_match(std::string_view pattern, std::string_view text);

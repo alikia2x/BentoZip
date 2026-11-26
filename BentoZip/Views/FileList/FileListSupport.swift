@@ -96,14 +96,18 @@ enum FileListTreeSupport {
         }
     }
 
-    static func handleExtractionError(_ error: Error, appState: AppState) {
+    static func handleExtractionError(
+        _ error: Error,
+        appState: AppState,
+        retryAction: PendingPasswordAction? = nil
+    ) {
         if let bentoError = error as? Bento7zError,
            bentoError == .passwordRequired || bentoError == .wrongPassword {
             if bentoError == .wrongPassword {
                 appState.archivePassword = nil
             }
             appState.pendingPasswordArchiveURL = appState.sourceArchiveURL
-            appState.pendingPasswordAction = appState.sourceArchiveURL.map { .browse($0) }
+            appState.pendingPasswordAction = retryAction ?? appState.sourceArchiveURL.map { .browse($0) }
             appState.isPasswordRetryError = (bentoError == .wrongPassword)
             appState.passwordPromptReason = bentoError.localizedDescription
             appState.needsPasswordPrompt = true

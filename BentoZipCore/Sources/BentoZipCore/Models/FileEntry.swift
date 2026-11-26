@@ -9,6 +9,7 @@ public struct FileEntry: Identifiable, Hashable, Sendable {
     public var size: Int64
     public let packedSize: Int64?
     public let modificationDate: Date?
+    public let crc: UInt32?
     public let isEncrypted: Bool
     public let isFromArchive: Bool
     public let archiveRelativePath: String?
@@ -23,6 +24,7 @@ public struct FileEntry: Identifiable, Hashable, Sendable {
         size: Int64 = 0,
         packedSize: Int64? = nil,
         modificationDate: Date? = nil,
+        crc: UInt32? = nil,
         isEncrypted: Bool = false,
         isFromArchive: Bool = false,
         archiveRelativePath: String? = nil,
@@ -36,6 +38,7 @@ public struct FileEntry: Identifiable, Hashable, Sendable {
         self.size = size
         self.packedSize = packedSize
         self.modificationDate = modificationDate
+        self.crc = crc
         self.isEncrypted = isEncrypted
         self.isFromArchive = isFromArchive
         self.archiveRelativePath = archiveRelativePath

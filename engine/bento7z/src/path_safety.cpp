@@ -219,6 +219,66 @@ std::string normalize_archive_path(std::string s) {
     return collapsed;
 }
 
+bool normalize_strict_archive_path(std::string_view raw_path,
+                                 bool allow_empty,
+                                 std::string& out_norm,
+                                 std::string& reason) {
+    if (raw_path.empty()) {
+        if (allow_empty) {
+            out_norm.clear();
+            return true;
+        }
+        reason = "Archive path must not be empty";
+        return false;
+    }
+    if (raw_path.find('\0') != std::string_view::npos) {
+        reason = "Archive path contains a null byte";
+        return false;
+    }
+
+    std::string norm(raw_path);
+    std::replace(norm.begin(), norm.end(), '\\', '/');
+
+    if (norm.front() == '/') {
+        reason = "Archive path must not start with '/': " + std::string(raw_path);
+        return false;
+    }
+    if (is_windows_drive_prefix(norm)) {
+        reason = "Archive path must not contain drive prefix: " + std::string(raw_path);
+        return false;
+    }
+    if (norm.find("//") != std::string::npos) {
+        reason = "Archive path contains empty segment: " + std::string(raw_path);
+        return false;
+    }
+    if (norm.back() == '/') {
+        norm.pop_back();
+    }
+    if (norm.empty()) {
+        reason = "Archive path must not be empty";
+        return false;
+    }
+
+    size_t pos = 0;
+    while (pos <= norm.size()) {
+        const size_t next = norm.find('/', pos);
+        const std::string_view comp = (next == std::string_view::npos)
+            ? std::string_view(norm).substr(pos)
+            : std::string_view(norm).substr(pos, next - pos);
+        if (comp.empty() || comp == "." || comp == "..") {
+            reason = "Archive path contains invalid segment: " + std::string(raw_path);
+            return false;
+        }
+        if (next == std::string_view::npos) {
+            break;
+        }
+        pos = next + 1;
+    }
+
+    out_norm = std::move(norm);
+    return true;
+}
+
 bool is_safe_archive_path(std::string_view raw_path) {
     const fs::path dummy_base = normalize_output_base("safe_root");
     fs::path rel_out;

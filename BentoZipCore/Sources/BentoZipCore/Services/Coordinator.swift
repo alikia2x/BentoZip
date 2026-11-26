@@ -187,6 +187,8 @@ public class CompressionCoordinator {
     public func browseArchive(
         at url: URL,
         password: String? = nil,
+        encoding: FilenameEncodingOption = .auto,
+        preserveSearch: Bool = false,
         appState: AppState
     ) async {
         browseGeneration &+= 1
@@ -195,6 +197,12 @@ public class CompressionCoordinator {
 
         pendingExtractDestinationURL = nil
         appState.lastError = nil
+        appState.testArchiveResult = nil
+        appState.selectedEncoding = encoding
+        if !preserveSearch {
+            appState.searchQuery = ""
+            appState.isSearchVisible = false
+        }
         appState.mode = .browseArchive
         appState.sourceArchiveURL = url
         appState.archivePackedSize = nil
@@ -205,6 +213,9 @@ public class CompressionCoordinator {
         appState.browseProcessedBytes = 0
         appState.browseTotalBytes = 0
         appState.isLoading = true
+
+        let unwrapSingleTopDirectory = appState.unwrapSingleTopDirectory
+        let encodingName = encoding.iconvName
 
         let browseCoalescer = ProgressCoalescer(minInterval: .milliseconds(50)) { [weak self, weak appState] update in
             guard let self, let appState, self.browseGeneration == generation, appState.isLoading else { return }
@@ -233,7 +244,12 @@ public class CompressionCoordinator {
         let task = Task { @MainActor in
             defer { browseCoalescer.stop() }
             do {
-                let result = try await engine.listArchive(in: url, password: password) { update in
+                let result = try await engine.listArchive(
+                    in: url,
+                    password: password,
+                    encoding: encodingName,
+                    unwrapSingleTopDirectory: unwrapSingleTopDirectory
+                ) { update in
                     browseCoalescer.receive(update)
                 }
                 guard !Task.isCancelled, self.browseGeneration == generation else { return }
@@ -243,7 +259,7 @@ public class CompressionCoordinator {
                 appState.archivePackedSize = result.archivePackedSize
                 appState.clearNavigationAndSelection()
                 appState.cancelPasswordPrompt()
-                appState.setEntries(result.entries)
+                appState.setEntries(result.entries, unwrappedRootPath: result.unwrappedRootPath)
                 appState.browseProgress = nil
                 appState.browseStage = .normal
                 appState.browseProcessedBytes = 0
@@ -278,7 +294,7 @@ public class CompressionCoordinator {
         }
     }
 
-    /// Retry browsing or extracting the pending encrypted archive with a user-supplied password.
+    /// Retry browsing, extracting, previewing, or opening an encrypted archive item with a user-supplied password.
     public func submitPassword(
         _ password: String,
         appState: AppState,
@@ -290,7 +306,12 @@ public class CompressionCoordinator {
 
         switch action {
         case .browse(let targetURL):
-            await browseArchive(at: targetURL, password: password, appState: appState)
+            await browseArchive(
+                at: targetURL,
+                password: password,
+                encoding: appState.selectedEncoding,
+                appState: appState
+            )
 
         case .extract(let targetURL, let entries, let chooseDestination):
             appState.mode = .browseArchive
@@ -303,6 +324,45 @@ public class CompressionCoordinator {
                 progressState: effectiveProgressState,
                 entries: entries,
                 chooseDestination: chooseDestination
+            )
+
+        case .preview(let entries):
+            guard let targetURL = fallbackURL else { return }
+            let previewable = entries.filter { !$0.isDirectory || !$0.isFromArchive }
+            guard !previewable.isEmpty else {
+                appState.cancelPasswordPrompt()
+                return
+            }
+            let encodingName = appState.selectedEncoding.iconvName
+            do {
+                for entry in previewable {
+                    _ = try await DragDropManager.shared.prepareForDragThrowing(
+                        entry,
+                        sourceArchiveURL: targetURL,
+                        password: password,
+                        encoding: encodingName
+                    )
+                }
+                appState.archivePassword = password
+                appState.cancelPasswordPrompt()
+                appState.onResumePreview?(previewable)
+            } catch let error as Bento7zError where error == .passwordRequired || error == .wrongPassword {
+                if error == .wrongPassword {
+                    appState.archivePassword = nil
+                }
+                presentPasswordPrompt(for: targetURL, action: .preview(entries), error: error, in: appState)
+            } catch {
+                appState.cancelPasswordPrompt()
+                appState.lastError = error.localizedDescription
+            }
+
+        case .openFile(let entry, let appURL):
+            await extractEntryForOpen(
+                entry,
+                archiveURL: fallbackURL,
+                password: password,
+                appURL: appURL,
+                appState: appState
             )
         }
     }
@@ -445,13 +505,20 @@ public class CompressionCoordinator {
               appState.sourceArchiveURL?.standardizedFileURL == archiveURL.standardizedFileURL else {
             return
         }
-        let refreshed = try await engine.listArchive(in: archiveURL, password: password)
+        let previousSubfolder = appState.currentSubfolderPath
+        let refreshed = try await engine.listArchive(
+            in: archiveURL,
+            password: password,
+            encoding: appState.selectedEncoding.iconvName,
+            unwrapSingleTopDirectory: appState.unwrapSingleTopDirectory,
+            onProgress: nil
+        )
         guard appState.mode == .browseArchive,
               appState.sourceArchiveURL?.standardizedFileURL == archiveURL.standardizedFileURL else {
             return
         }
-        appState.clearNavigationAndSelection()
-        appState.setEntries(refreshed.entries)
+        appState.setEntries(refreshed.entries, unwrappedRootPath: refreshed.unwrappedRootPath)
+        appState.restoreNavigationPath(matchingArchiveRelativePath: previousSubfolder)
         appState.archivePackedSize = refreshed.archivePackedSize
     }
 

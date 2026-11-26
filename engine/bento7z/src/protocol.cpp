@@ -109,4 +109,20 @@ std::optional<DeleteParams> Request::as_delete() const {
     }
 }
 
+std::optional<RenameParams> Request::as_rename() const {
+    try {
+        return params_json.get<RenameParams>();
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::optional<TestParams> Request::as_test() const {
+    try {
+        return params_json.get<TestParams>();
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 } // namespace bento7z

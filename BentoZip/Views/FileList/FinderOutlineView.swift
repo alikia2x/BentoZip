@@ -9,6 +9,8 @@ final class FinderOutlineView: NSOutlineView {
     var onNavigateUp: (() -> Void)?
     var onDelete: (() -> Void)?
     var onEscape: (() -> Void)?
+    var onCopyNames: (() -> Void)?
+    var onCopyPaths: (() -> Void)?
     var onContextMenu: (([FileNode]) -> NSMenu?)?
     var onMovedToWindow: (() -> Void)?
     var onBecameQuickLookOwner: (() -> Void)?
@@ -22,8 +24,25 @@ final class FinderOutlineView: NSOutlineView {
         }
     }
 
+    @objc func copy(_ sender: Any?) {
+        onCopyNames?()
+    }
+
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)) {
+            return !selectedRowIndexes.isEmpty
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+
+        if modifiers == [.command, .option],
+           event.charactersIgnoringModifiers?.lowercased() == "c" {
+            onCopyPaths?()
+            return
+        }
 
         switch event.keyCode {
         case 49 where modifiers.isEmpty: // Space
@@ -50,7 +69,9 @@ final class FinderOutlineView: NSOutlineView {
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         let clickedRow = row(at: point)
-        guard clickedRow >= 0 else { return nil }
+        guard clickedRow >= 0 else {
+            return onContextMenu?([])
+        }
 
         let targetNodes: [FileNode]
         if selectedRowIndexes.contains(clickedRow) {

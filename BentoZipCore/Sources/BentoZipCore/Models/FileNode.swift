@@ -17,6 +17,7 @@ public final class FileNode: Identifiable {
     }
     public let packedSize: Int64?
     public let modificationDate: Date?
+    public let crc: UInt32?
     public let isEncrypted: Bool
     public let isFromArchive: Bool
     public let archiveRelativePath: String?
@@ -30,6 +31,11 @@ public final class FileNode: Identifiable {
     }
     public var hasLoadedChildren: Bool
     private var cachedArchiveSubtreeSize: Int64?
+
+    /// Whether this entry is a hidden dotfile (name begins with `.`).
+    public var isHidden: Bool {
+        name.hasPrefix(".")
+    }
 
     /// Whether this node can be disclosed in an outline view.
     public var isExpandable: Bool {
@@ -60,6 +66,7 @@ public final class FileNode: Identifiable {
         size: Int64 = 0,
         packedSize: Int64? = nil,
         modificationDate: Date? = nil,
+        crc: UInt32? = nil,
         isEncrypted: Bool = false,
         isFromArchive: Bool = false,
         archiveRelativePath: String? = nil,
@@ -74,6 +81,7 @@ public final class FileNode: Identifiable {
         self.size = size
         self.packedSize = packedSize
         self.modificationDate = modificationDate
+        self.crc = crc
         self.isEncrypted = isEncrypted
         self.isFromArchive = isFromArchive
         self.archiveRelativePath = archiveRelativePath
@@ -95,6 +103,7 @@ public final class FileNode: Identifiable {
             size: entry.size,
             packedSize: entry.packedSize,
             modificationDate: entry.modificationDate,
+            crc: entry.crc,
             isEncrypted: entry.isEncrypted,
             isFromArchive: entry.isFromArchive,
             archiveRelativePath: entry.archiveRelativePath,
@@ -119,6 +128,7 @@ public final class FileNode: Identifiable {
             size: size,
             packedSize: packedSize,
             modificationDate: modificationDate,
+            crc: crc,
             isEncrypted: isEncrypted,
             isFromArchive: isFromArchive,
             archiveRelativePath: archiveRelativePath,

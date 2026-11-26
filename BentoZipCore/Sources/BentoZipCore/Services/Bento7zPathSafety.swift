@@ -1,7 +1,25 @@
+import Darwin
 import Foundation
 
-/// Path traversal validation and atomic archive replacement helpers for `Bento7zEngine`.
+/// Path traversal validation, symlink-safe existence checks, and atomic archive replacement helpers.
 enum Bento7zPathSafety {
+
+    static func itemStatus(at url: URL) -> (exists: Bool, isDirectory: Bool, device: dev_t, inode: ino_t) {
+        var st = stat()
+        guard lstat(url.path, &st) == 0 else {
+            return (false, false, 0, 0)
+        }
+        let isDir = (st.st_mode & S_IFMT) == S_IFDIR
+        return (true, isDir, st.st_dev, st.st_ino)
+    }
+
+    static func itemExists(at url: URL) -> Bool {
+        itemStatus(at: url).exists
+    }
+
+    static func validatedRelativePath(_ rawPath: String) throws -> String {
+        try sanitizedRelativePath(rawPath)
+    }
 
     static func sanitizedRelativePath(_ rawPath: String) throws -> String {
         let normalized = rawPath.replacingOccurrences(of: "\\", with: "/")
@@ -31,7 +49,7 @@ enum Bento7zPathSafety {
         while components.first == "." {
             components.removeFirst()
         }
-        guard !components.isEmpty else {
+        guard !components.isEmpty, !components.contains(".") else {
             throw Bento7zError.operationFailed(
                 String(localized: "Invalid archive path: \(rawPath)", bundle: .module),
                 "INVALID_PATH"

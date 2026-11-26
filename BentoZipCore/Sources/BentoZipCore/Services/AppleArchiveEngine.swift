@@ -11,6 +11,7 @@ struct AppleArchiveEngine: Sendable {
 
     func listArchive(
         in archiveURL: URL,
+        unwrapSingleTopDirectory: Bool = true,
         onProgress: (@Sendable (ArchiveProgress) -> Void)?
     ) async throws -> ArchiveListResult {
         try Task.checkCancellation()
@@ -25,8 +26,49 @@ struct AppleArchiveEngine: Sendable {
         }.value
 
         try Task.checkCancellation()
-        let tree = ArchiveTreeBuilder.build(from: flatEntries)
-        return ArchiveListResult(entries: tree, archivePackedSize: packedSize)
+        let built = ArchiveTreeBuilder.buildTreeWithMetadata(
+            from: flatEntries,
+            archiveURL: archiveURL,
+            unwrapSingleTopDirectory: unwrapSingleTopDirectory
+        )
+        return ArchiveListResult(
+            entries: built.entries,
+            archivePackedSize: packedSize,
+            unwrappedRootPath: built.unwrappedRootPath
+        )
+    }
+
+    func testArchive(
+        at archiveURL: URL,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws -> ArchiveTestResult {
+        try Task.checkCancellation()
+        guard FileManager.default.fileExists(atPath: archiveURL.path) else {
+            throw Bento7zError.fileNotFound(archiveURL.path)
+        }
+
+        let itemsCount = try await Task.detached(priority: .userInitiated) {
+            let fm = FileManager.default
+            let tempDir = fm.temporaryDirectory.appendingPathComponent("BentoZip_aa_test_\(UUID().uuidString)")
+            defer { try? fm.removeItem(at: tempDir) }
+            try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+            do {
+                let count = try Self.verifyArchive(
+                    at: archiveURL,
+                    scratchDirectory: tempDir,
+                    onProgress: onProgress ?? { _ in }
+                )
+                return count
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw Bento7zError.corruptArchive(error.localizedDescription)
+            }
+        }.value
+
+        onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+        return ArchiveTestResult(itemsCount: itemsCount)
     }
 
     func create(
@@ -102,9 +144,9 @@ struct AppleArchiveEngine: Sendable {
         let flatExtracted = try Bento7zPathSafety.verifiedDescendantURL(relativePath: flatName, baseDirectory: tempDir)
 
         let extractedFile: URL
-        if fm.fileExists(atPath: directExtracted.path) {
+        if Bento7zPathSafety.itemExists(at: directExtracted) {
             extractedFile = directExtracted
-        } else if fm.fileExists(atPath: flatExtracted.path) {
+        } else if Bento7zPathSafety.itemExists(at: flatExtracted) {
             extractedFile = flatExtracted
         } else {
             throw Bento7zError.fileNotFound(entryPath)
@@ -114,7 +156,7 @@ struct AppleArchiveEngine: Sendable {
         if !fm.fileExists(atPath: parent.path) {
             try fm.createDirectory(at: parent, withIntermediateDirectories: true)
         }
-        if fm.fileExists(atPath: destinationURL.path) {
+        if Bento7zPathSafety.itemExists(at: destinationURL) {
             try fm.removeItem(at: destinationURL)
         }
         try fm.copyItem(at: extractedFile, to: destinationURL)
@@ -171,6 +213,29 @@ struct AppleArchiveEngine: Sendable {
             }
         }
         return entries
+    }
+
+    private static func verifyArchive(
+        at archiveURL: URL,
+        scratchDirectory: URL,
+        onProgress: @escaping @Sendable (ArchiveProgress) -> Void
+    ) throws -> Int {
+        var count = 0
+        try withDecodeStream(at: archiveURL) { decodeStream in
+            while let header = try decodeStream.readHeader() {
+                try Task.checkCancellation()
+                if let rawPath = header.entryPath?.string, !normalizePath(rawPath).isEmpty {
+                    count += 1
+                }
+            }
+        }
+        try extractArchive(
+            at: archiveURL,
+            targetPaths: nil,
+            to: scratchDirectory,
+            onProgress: onProgress
+        )
+        return count
     }
 
     // MARK: - Extracting

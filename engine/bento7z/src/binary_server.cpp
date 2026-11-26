@@ -376,6 +376,12 @@ private:
                 case BinaryMsgType::Delete:
                     handle_delete(req_id, item.payload, cancel_flag);
                     break;
+                case BinaryMsgType::Rename:
+                    handle_rename(req_id, item.payload, cancel_flag);
+                    break;
+                case BinaryMsgType::Test:
+                    handle_test(req_id, item.payload, cancel_flag);
+                    break;
                 default:
                     send_frame(encode_error_frame(req_id, "UNKNOWN_COMMAND", "Unknown binary message type"));
                     break;
@@ -457,7 +463,7 @@ private:
                     send_frame(encode_list_meta_frame(
                         req_id, items_count, total_size, packed_size, used_tar_cache));
 
-                    const ZipEncodingResolver zip_encoding(reader);
+                    const ZipEncodingResolver zip_encoding(reader, params.encoding);
                     const bool emit_reading_progress =
                         items_count > 0 && (outer_pack_size.has_value() || items_count >= kListChunkSize);
                     auto last_read_progress = std::chrono::steady_clock::now();
@@ -483,6 +489,11 @@ private:
                             rec.modified_at = *mtime;
                         } else {
                             rec.modified_at = 0;
+                        }
+                        const uint32_t crc = item.crc();
+                        if (!item.isDir() || crc != 0) {
+                            flags |= 0x08u;
+                            rec.crc = crc;
                         }
                         rec.flags = flags;
                         rec.size = item.size();
@@ -709,6 +720,48 @@ private:
         const ProgressSink sink = make_progress_sink(req_id);
         const OperationOutcome out = run_delete(lib_, params, &sink, cancel_flag);
         reader_pool_.invalidate(params.archive);
+
+        if (!out.ok) {
+            send_frame(encode_error_frame(req_id, out.error_code, out.error_msg));
+            return;
+        }
+        send_frame(encode_result_frame(req_id, out.archive_deleted, out.output_size));
+    }
+
+    void handle_rename(uint64_t req_id,
+                       const std::vector<uint8_t>& payload,
+                       std::atomic<bool>* cancel_flag) {
+        RenameParams params;
+        if (!decode_rename_request(payload, params)) {
+            send_frame(encode_error_frame(
+                req_id, "INVALID_PARAMS", "Invalid RENAME request payload"));
+            return;
+        }
+
+        reader_pool_.invalidate(params.archive);
+        const ProgressSink sink = make_progress_sink(req_id);
+        const OperationOutcome out = run_rename(lib_, params, &sink, cancel_flag);
+        reader_pool_.invalidate(params.archive);
+
+        if (!out.ok) {
+            send_frame(encode_error_frame(req_id, out.error_code, out.error_msg));
+            return;
+        }
+        send_frame(encode_result_frame(req_id, out.archive_deleted, out.output_size));
+    }
+
+    void handle_test(uint64_t req_id,
+                     const std::vector<uint8_t>& payload,
+                     std::atomic<bool>* cancel_flag) {
+        TestParams params;
+        if (!decode_test_request(payload, params)) {
+            send_frame(encode_error_frame(
+                req_id, "INVALID_PARAMS", "Invalid TEST request payload"));
+            return;
+        }
+
+        const ProgressSink sink = make_progress_sink(req_id);
+        const OperationOutcome out = run_test(lib_, params, &sink, cancel_flag);
 
         if (!out.ok) {
             send_frame(encode_error_frame(req_id, out.error_code, out.error_msg));

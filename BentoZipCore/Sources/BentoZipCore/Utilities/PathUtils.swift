@@ -69,9 +69,9 @@ enum PathUtils {
         return (stem, ext)
     }
 
-    /// Generate a unique file URL by appending a counter when the target already exists.
+    /// Generate a unique file URL by appending a counter when the target already exists (including symlinks).
     static func uniqueFileURL(for proposedURL: URL) -> URL {
-        guard FileManager.default.fileExists(atPath: proposedURL.path) else {
+        guard Bento7zPathSafety.itemExists(at: proposedURL) else {
             return proposedURL
         }
         let directory = proposedURL.deletingLastPathComponent()
@@ -82,7 +82,7 @@ enum PathUtils {
             let name = ext.isEmpty ? "\(stem) \(counter)" : "\(stem) \(counter).\(ext)"
             url = directory.appendingPathComponent(name)
             counter += 1
-        } while FileManager.default.fileExists(atPath: url.path)
+        } while Bento7zPathSafety.itemExists(at: url)
         return url
     }
 
