@@ -18,6 +18,7 @@ public enum PendingPasswordAction: Sendable, Equatable {
     case extract(URL, entries: [FileEntry]?, chooseDestination: Bool)
     case preview([FileEntry])
     case openFile(FileEntry, appURL: URL?)
+    case openNestedArchive(FileEntry)
 }
 
 extension AppState {
@@ -37,12 +38,13 @@ extension AppState {
     }
 
     public var isWritableArchive: Bool {
-        guard mode == .browseArchive, let archiveURL = sourceArchiveURL else { return false }
+        guard mode == .browseArchive, !isViewingNestedArchive, let archiveURL = sourceArchiveURL else { return false }
         return FormatDetector.detectFormat(of: archiveURL) != nil
     }
 
     public var isReadOnlyArchive: Bool {
         guard mode == .browseArchive, let archiveURL = sourceArchiveURL else { return false }
+        if isViewingNestedArchive { return true }
         return FormatDetector.detectReadableFormat(of: archiveURL)?.isReadOnly == true
     }
 
@@ -72,6 +74,7 @@ extension AppState {
         compressionSettings = CompressionSettings()
         showInspector = false
         sourceArchiveURL = nil
+        archiveComment = nil
         archivePackedSize = nil
         lastError = nil
         archivePassword = nil
@@ -98,6 +101,7 @@ extension AppState {
         extractConflictPolicy = ExtractConflictPolicy(rawValue: prefs.extractConflictPolicy) ?? .ask
         moveArchiveToTrashAfterExtract = prefs.moveArchiveToTrashAfterExtract
         closeWindowAfterExtract = prefs.closeWindowAfterExtract
+        stripQuarantineOnExtract = prefs.stripQuarantineOnExtract
         showHiddenFiles = prefs.showHiddenFiles
     }
 
@@ -112,6 +116,7 @@ extension AppState {
             prefs.extractConflictPolicy = extractConflictPolicy.rawValue
             prefs.moveArchiveToTrashAfterExtract = moveArchiveToTrashAfterExtract
             prefs.closeWindowAfterExtract = closeWindowAfterExtract
+            prefs.stripQuarantineOnExtract = stripQuarantineOnExtract
             prefs.showHiddenFiles = showHiddenFiles
         }
     }
@@ -123,6 +128,7 @@ extension AppState {
         extractConflictPolicy = ExtractConflictPolicy(rawValue: prefs.extractConflictPolicy) ?? .ask
         moveArchiveToTrashAfterExtract = prefs.moveArchiveToTrashAfterExtract
         closeWindowAfterExtract = prefs.closeWindowAfterExtract
+        stripQuarantineOnExtract = prefs.stripQuarantineOnExtract
         showHiddenFiles = prefs.showHiddenFiles
         if mode == .empty {
             preferencesManager?.applyDefaults(to: &compressionSettings, from: prefs)

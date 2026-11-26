@@ -6,6 +6,8 @@ enum FinderColumnID {
     static let date = NSUserInterfaceItemIdentifier("date")
     static let size = NSUserInterfaceItemIdentifier("size")
     static let packed = NSUserInterfaceItemIdentifier("packed")
+    static let ratio = NSUserInterfaceItemIdentifier("ratio")
+    static let crc = NSUserInterfaceItemIdentifier("crc")
     static let kind = NSUserInterfaceItemIdentifier("kind")
 }
 
@@ -77,6 +79,39 @@ enum FinderOutlineCellFactory {
             }
             if let packed = node.packedSize, !node.isDirectory, packed > 0 {
                 cell.setText(FileListFormatters.byteFormatter.string(fromByteCount: packed), isPlaceholder: false)
+            } else {
+                cell.setText("--", isPlaceholder: true)
+            }
+            return cell
+
+        case FinderColumnID.ratio:
+            let cell = dequeueOrCreate(
+                FinderTextCellView.self,
+                identifier: columnID,
+                in: outlineView
+            ) { view in
+                view.configureStyle(alignment: .right, monospacedDigits: true)
+            }
+            if !node.isDirectory, node.size > 0, let packed = node.packedSize, packed >= 0 {
+                let saved = packed <= node.size
+                    ? Int(((Double(node.size - packed) / Double(node.size)) * 100.0).rounded())
+                    : 0
+                cell.setText("\(saved)%", isPlaceholder: false)
+            } else {
+                cell.setText("--", isPlaceholder: true)
+            }
+            return cell
+
+        case FinderColumnID.crc:
+            let cell = dequeueOrCreate(
+                FinderTextCellView.self,
+                identifier: columnID,
+                in: outlineView
+            ) { view in
+                view.configureStyle(alignment: .left, monospacedDigits: true)
+            }
+            if !node.isDirectory, let crc = node.crc {
+                cell.setText(String(format: "%08X", crc), isPlaceholder: false)
             } else {
                 cell.setText("--", isPlaceholder: true)
             }

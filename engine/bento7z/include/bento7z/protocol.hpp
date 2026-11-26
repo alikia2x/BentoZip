@@ -29,6 +29,8 @@ struct CompressParams {
     std::vector<std::string> exclude;
     uint64_t volume_size_bytes = 0;
     std::string encryption_method; // "", "aes256", "zipcrypto"
+    bool encrypt_headers = true;
+    bool follow_symlinks = false;
 };
 
 struct ExtractParams {
@@ -71,6 +73,23 @@ struct TestParams {
     std::string tar_cache_path; // optional persistent .tar cache path for compound .tar.*
 };
 
+struct MoveParams {
+    std::string archive;
+    std::string password; // empty = no password
+    std::string format;   // empty or "auto" = auto-detect
+    std::vector<std::string> entries;
+    std::string target_dir; // empty = archive root
+};
+
+struct UpdatePasswordParams {
+    std::string archive;
+    std::string old_password;
+    std::string new_password;
+    std::string format;            // empty or "auto" = auto-detect
+    std::string encryption_method; // "", "aes256", "zipcrypto"
+    bool encrypt_headers = true;
+};
+
 struct Request {
     std::string id;
     std::string command;
@@ -84,6 +103,8 @@ struct Request {
     std::optional<DeleteParams> as_delete() const;
     std::optional<RenameParams> as_rename() const;
     std::optional<TestParams> as_test() const;
+    std::optional<MoveParams> as_move() const;
+    std::optional<UpdatePasswordParams> as_update_password() const;
 };
 
 struct ArchiveItem {
@@ -151,7 +172,9 @@ inline void to_json(json& j, const CompressParams& p) {
         {"paths", p.paths},
         {"format", p.format},
         {"level", p.level},
-        {"preserve_paths", p.preserve_paths}
+        {"preserve_paths", p.preserve_paths},
+        {"encrypt_headers", p.encrypt_headers},
+        {"follow_symlinks", p.follow_symlinks}
     };
     if (!p.password.empty()) j["password"] = p.password;
     if (!p.exclude.empty()) j["exclude"] = p.exclude;
@@ -177,6 +200,12 @@ inline void from_json(const json& j, CompressParams& p) {
     }
     if (j.contains("encryption_method") && !j["encryption_method"].is_null()) {
         j.at("encryption_method").get_to(p.encryption_method);
+    }
+    if (j.contains("encrypt_headers") && !j["encrypt_headers"].is_null()) {
+        j.at("encrypt_headers").get_to(p.encrypt_headers);
+    }
+    if (j.contains("follow_symlinks") && !j["follow_symlinks"].is_null()) {
+        j.at("follow_symlinks").get_to(p.follow_symlinks);
     }
 }
 
@@ -277,6 +306,55 @@ inline void from_json(const json& j, TestParams& p) {
     }
     if (j.contains("tar_cache_path") && !j["tar_cache_path"].is_null()) {
         j.at("tar_cache_path").get_to(p.tar_cache_path);
+    }
+}
+
+inline void to_json(json& j, const MoveParams& p) {
+    j = json{{"archive", p.archive}, {"entries", p.entries}};
+    if (!p.password.empty()) j["password"] = p.password;
+    if (!p.format.empty()) j["format"] = p.format;
+    if (!p.target_dir.empty()) j["target_dir"] = p.target_dir;
+}
+inline void from_json(const json& j, MoveParams& p) {
+    j.at("archive").get_to(p.archive);
+    j.at("entries").get_to(p.entries);
+    if (j.contains("password") && !j["password"].is_null()) {
+        j.at("password").get_to(p.password);
+    }
+    if (j.contains("format") && !j["format"].is_null()) {
+        j.at("format").get_to(p.format);
+    }
+    if (j.contains("target_dir") && !j["target_dir"].is_null()) {
+        j.at("target_dir").get_to(p.target_dir);
+    }
+}
+
+inline void to_json(json& j, const UpdatePasswordParams& p) {
+    j = json{
+        {"archive", p.archive},
+        {"old_password", p.old_password},
+        {"new_password", p.new_password},
+        {"encrypt_headers", p.encrypt_headers}
+    };
+    if (!p.format.empty()) j["format"] = p.format;
+    if (!p.encryption_method.empty()) j["encryption_method"] = p.encryption_method;
+}
+inline void from_json(const json& j, UpdatePasswordParams& p) {
+    j.at("archive").get_to(p.archive);
+    if (j.contains("old_password") && !j["old_password"].is_null()) {
+        j.at("old_password").get_to(p.old_password);
+    }
+    if (j.contains("new_password") && !j["new_password"].is_null()) {
+        j.at("new_password").get_to(p.new_password);
+    }
+    if (j.contains("format") && !j["format"].is_null()) {
+        j.at("format").get_to(p.format);
+    }
+    if (j.contains("encryption_method") && !j["encryption_method"].is_null()) {
+        j.at("encryption_method").get_to(p.encryption_method);
+    }
+    if (j.contains("encrypt_headers") && !j["encrypt_headers"].is_null()) {
+        j.at("encrypt_headers").get_to(p.encrypt_headers);
     }
 }
 

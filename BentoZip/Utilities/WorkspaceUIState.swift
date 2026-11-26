@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class WorkspaceUIState {
     var showNewFolderSheet: Bool = false
+    var showUpdatePasswordSheet: Bool = false
     var renameTargetEntry: FileEntry?
     var searchFocusRequestID: UInt64 = 0
     var outlineFocusRequestID: UInt64 = 0

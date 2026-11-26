@@ -31,6 +31,8 @@ std::string classify_bit7z_error(const bit7z::BitException& ex, bool password_pr
 
 std::optional<int64_t> extract_item_mtime(const bit7z::BitArchiveItemOffset& item);
 
+std::string extract_archive_comment(const bit7z::BitArchiveReader& reader);
+
 const bit7z::BitInOutFormat* resolve_inplace_format(
     const bit7z::Bit7zLibrary& lib,
     const std::string& archive,
@@ -72,6 +74,16 @@ OperationOutcome run_test(const bit7z::Bit7zLibrary& lib,
                           const ProgressSink* progress_sink,
                           std::atomic<bool>* cancel_flag);
 
+OperationOutcome run_move(const bit7z::Bit7zLibrary& lib,
+                          const MoveParams& params,
+                          const ProgressSink* progress_sink,
+                          std::atomic<bool>* cancel_flag);
+
+OperationOutcome run_update_password(const bit7z::Bit7zLibrary& lib,
+                                     const UpdatePasswordParams& params,
+                                     const ProgressSink* progress_sink,
+                                     std::atomic<bool>* cancel_flag);
+
 /// Handler for JSONL archive operations. All callbacks write JSONL to stdout.
 class CommandHandler {
 public:
@@ -88,6 +100,8 @@ private:
     void handle_delete(const Request& req);
     void handle_rename(const Request& req);
     void handle_test(const Request& req);
+    void handle_move(const Request& req);
+    void handle_update_password(const Request& req);
 
     bit7z::Bit7zLibrary lib_;
 };

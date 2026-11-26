@@ -13,6 +13,8 @@ public final class TransferTask: Identifiable {
         case removeEntries
         case rename
         case createFolder
+        case moveEntries
+        case updatePassword
         case test
     }
 

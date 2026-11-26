@@ -128,6 +128,9 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $uiState.showUpdatePasswordSheet) {
+            UpdatePasswordSheet()
+        }
         .alert(
             testArchiveAlertTitle,
             isPresented: Binding(

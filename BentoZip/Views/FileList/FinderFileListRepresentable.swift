@@ -37,7 +37,7 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         outlineView.intercellSpacing = NSSize(width: 8, height: 0)
         outlineView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         outlineView.setDraggingSourceOperationMask(.copy, forLocal: false)
-        outlineView.setDraggingSourceOperationMask([], forLocal: true)
+        outlineView.setDraggingSourceOperationMask(appState.isWritableArchive ? .move : [], forLocal: true)
         outlineView.registerForDraggedTypes([.fileURL])
 
         let nameColumn = makeColumn(
@@ -82,6 +82,30 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         )
         packedColumn.isHidden = (mode != .browseArchive)
 
+        let ratioColumn = makeColumn(
+            id: FinderColumnID.ratio,
+            title: String(localized: "Ratio"),
+            width: 64,
+            minWidth: 52,
+            sortKey: "ratio",
+            ascending: false,
+            alignment: .right,
+            resizingMask: .userResizingMask
+        )
+        ratioColumn.isHidden = true
+
+        let crcColumn = makeColumn(
+            id: FinderColumnID.crc,
+            title: String(localized: "CRC32"),
+            width: 82,
+            minWidth: 68,
+            sortKey: "crc",
+            ascending: true,
+            alignment: .left,
+            resizingMask: .userResizingMask
+        )
+        crcColumn.isHidden = true
+
         let kindColumn = makeColumn(
             id: FinderColumnID.kind,
             title: String(localized: "Kind"),
@@ -97,6 +121,8 @@ struct FinderFileListRepresentable: NSViewRepresentable {
         outlineView.addTableColumn(dateColumn)
         outlineView.addTableColumn(sizeColumn)
         outlineView.addTableColumn(packedColumn)
+        outlineView.addTableColumn(ratioColumn)
+        outlineView.addTableColumn(crcColumn)
         outlineView.addTableColumn(kindColumn)
         outlineView.outlineTableColumn = nameColumn
         outlineView.autosaveName = "BentoZipFinderOutline"
@@ -133,6 +159,9 @@ struct FinderFileListRepresentable: NSViewRepresentable {
 
         coordinator.outlineView = outlineView
         coordinator.packedColumn = packedColumn
+        coordinator.ratioColumn = ratioColumn
+        coordinator.crcColumn = crcColumn
+        coordinator.configureColumnsAndHeaderMenu(for: outlineView)
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true

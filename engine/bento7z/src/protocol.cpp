@@ -125,4 +125,20 @@ std::optional<TestParams> Request::as_test() const {
     }
 }
 
+std::optional<MoveParams> Request::as_move() const {
+    try {
+        return params_json.get<MoveParams>();
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::optional<UpdatePasswordParams> Request::as_update_password() const {
+    try {
+        return params_json.get<UpdatePasswordParams>();
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 } // namespace bento7z

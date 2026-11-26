@@ -231,6 +231,17 @@ private struct WorkspaceMenuCommands: Commands {
         (activeAppState?.isLoading ?? false) || (activeProgressState?.isOperationInProgress ?? false)
     }
 
+    private var canUpdatePassword: Bool {
+        guard isBrowsingArchive,
+              let appState = activeAppState,
+              appState.isWritableArchive,
+              let url = appState.sourceArchiveURL,
+              let format = FormatDetector.detectFormat(of: url) else {
+            return false
+        }
+        return format.supportsPassword
+    }
+
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
             Divider()
@@ -311,6 +322,11 @@ private struct WorkspaceMenuCommands: Commands {
                 activeUIState?.showNewFolderSheet = true
             }
             .disabled(!(isBrowsingArchive && activeAppState?.isWritableArchive == true) || isBusy)
+
+            Button(activeAppState?.isArchiveEncrypted == true ? "Change Password…" : "Set Password…") {
+                activeUIState?.showUpdatePasswordSheet = true
+            }
+            .disabled(!canUpdatePassword || isBusy)
 
             Divider()
 

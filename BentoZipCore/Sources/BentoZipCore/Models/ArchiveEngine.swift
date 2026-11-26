@@ -43,15 +43,18 @@ public struct ArchiveListResult: Sendable, Equatable {
     public let entries: [FileEntry]
     public let archivePackedSize: Int64?
     public let unwrappedRootPath: String?
+    public let archiveComment: String?
 
     public init(
         entries: [FileEntry],
         archivePackedSize: Int64? = nil,
-        unwrappedRootPath: String? = nil
+        unwrappedRootPath: String? = nil,
+        archiveComment: String? = nil
     ) {
         self.entries = entries
         self.archivePackedSize = archivePackedSize
         self.unwrappedRootPath = unwrappedRootPath
+        self.archiveComment = archiveComment
     }
 }
 
@@ -145,6 +148,23 @@ public protocol ArchiveEngine: Sendable {
         password: String?,
         onProgress: (@Sendable (ArchiveProgress) -> Void)?
     ) async throws -> ArchiveTestResult
+
+    func moveEntries(
+        in archiveURL: URL,
+        entries: [FileEntry],
+        toTargetDir targetDir: String,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws
+
+    func updatePassword(
+        in archiveURL: URL,
+        oldPassword: String?,
+        newPassword: String?,
+        encryptionMethod: String?,
+        encryptHeaders: Bool,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws
 }
 
 public extension ArchiveEngine {
@@ -324,6 +344,33 @@ public extension ArchiveEngine {
     ) async throws -> ArchiveTestResult {
         throw Bento7zError.operationFailed(
             String(localized: "Testing archives is not supported by this engine.", bundle: .module),
+            "UNSUPPORTED_OPERATION"
+        )
+    }
+
+    func moveEntries(
+        in archiveURL: URL,
+        entries: [FileEntry],
+        toTargetDir targetDir: String,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws {
+        throw Bento7zError.operationFailed(
+            String(localized: "Moving entries is not supported by this engine.", bundle: .module),
+            "UNSUPPORTED_OPERATION"
+        )
+    }
+
+    func updatePassword(
+        in archiveURL: URL,
+        oldPassword: String?,
+        newPassword: String?,
+        encryptionMethod: String?,
+        encryptHeaders: Bool,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws {
+        throw Bento7zError.operationFailed(
+            String(localized: "Updating archive password is not supported by this engine.", bundle: .module),
             "UNSUPPORTED_OPERATION"
         )
     }

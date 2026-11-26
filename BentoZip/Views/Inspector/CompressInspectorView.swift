@@ -90,6 +90,8 @@ struct CompressInspectorView: View {
                                 Text(method.rawValue).tag(method)
                             }
                         }
+                    } else if appState.compressionSettings.format == .sevenZip && !(appState.compressionSettings.password ?? "").isEmpty {
+                        Toggle("Encrypt Filenames", isOn: $appState.compressionSettings.encryptHeaders)
                     }
                 }
 
@@ -108,6 +110,7 @@ struct CompressInspectorView: View {
 
             Section {
                 Toggle("Preserve Folders", isOn: $appState.compressionSettings.preserveDirectoryStructure)
+                Toggle("Follow Symlinks", isOn: $appState.compressionSettings.followSymlinks)
             }
 
             Section("Exclude") {

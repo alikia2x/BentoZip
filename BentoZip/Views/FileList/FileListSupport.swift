@@ -81,6 +81,14 @@ enum FileListTreeSupport {
                 let lPacked = lhs.isDirectory ? -1 : (lhs.packedSize ?? -1)
                 let rPacked = rhs.isDirectory ? -1 : (rhs.packedSize ?? -1)
                 comparison = compareInt64(lPacked, rPacked)
+            case "ratio":
+                let lRatio = savedRatioBasisPoints(for: lhs)
+                let rRatio = savedRatioBasisPoints(for: rhs)
+                comparison = compareInt64(lRatio, rRatio)
+            case "crc":
+                let lCrc = lhs.isDirectory ? -1 : lhs.crc.map(Int64.init) ?? -1
+                let rCrc = rhs.isDirectory ? -1 : rhs.crc.map(Int64.init) ?? -1
+                comparison = compareInt64(lCrc, rCrc)
             case "kind":
                 let lKind = FileKindCache.localizedKind(for: lhs)
                 let rKind = FileKindCache.localizedKind(for: rhs)
@@ -125,5 +133,13 @@ enum FileListTreeSupport {
         if lhs < rhs { return .orderedAscending }
         if lhs > rhs { return .orderedDescending }
         return .orderedSame
+    }
+
+    private static func savedRatioBasisPoints(for node: FileNode) -> Int64 {
+        guard !node.isDirectory, node.size > 0, let packed = node.packedSize, packed >= 0 else {
+            return -1
+        }
+        guard packed <= node.size else { return 0 }
+        return Int64(((Double(node.size - packed) / Double(node.size)) * 10_000.0).rounded())
     }
 }

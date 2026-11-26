@@ -1125,4 +1125,175 @@ struct CompressionCoordinatorTests {
         await coordinator.extract(appState: appState, progressState: progressC)
         #expect(closeCount == 1)
     }
+
+    // MARK: - Phase 1 Coordinator, Nested Archives, External Edit, Checksums & Quarantine
+
+    @Test func nestedArchive_openAndPop_restoresParentStateAndCleansTempDir() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let innerSrc = tmp.appendingPathComponent("inner_src")
+        let innerSub = innerSrc.appendingPathComponent("sub")
+        try fm.createDirectory(at: innerSub, withIntermediateDirectories: true)
+        let innerNote = innerSrc.appendingPathComponent("note.txt")
+        let innerDeep = innerSub.appendingPathComponent("deep.txt")
+        try "inner-note".write(to: innerNote, atomically: true, encoding: .utf8)
+        try "inner-deep".write(to: innerDeep, atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let innerZip = tmp.appendingPathComponent("inner.zip")
+        try await engine.create(from: [innerNote, innerSub], to: innerZip, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let outerNote = tmp.appendingPathComponent("outer.txt")
+        try "outer-note".write(to: outerNote, atomically: true, encoding: .utf8)
+        let outerZip = tmp.appendingPathComponent("outer.zip")
+        try await engine.create(from: [innerZip, outerNote], to: outerZip, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: engine)
+        let appState = AppState()
+        appState.coordinator = coordinator
+        await coordinator.browseArchive(at: outerZip, appState: appState)
+        #expect(!appState.isViewingNestedArchive)
+
+        let innerEntry = try #require(appState.fileEntries.first(where: { $0.name == "inner.zip" }))
+        let progressState = ProgressState()
+        await coordinator.openNestedArchive(entry: innerEntry, appState: appState, progressState: progressState)
+
+        #expect(appState.lastError == nil)
+        #expect(appState.isViewingNestedArchive)
+        #expect(appState.canNavigateUp)
+        #expect(appState.sourceArchiveURL?.lastPathComponent == "inner.zip")
+        #expect(Set(appState.fileEntries.map(\.name)) == ["sub", "note.txt"])
+
+        let nestedTempDir = try #require(appState.sourceArchiveURL?.deletingLastPathComponent())
+        #expect(fm.fileExists(atPath: nestedTempDir.path))
+
+        appState.navigateUp()
+
+        #expect(!appState.isViewingNestedArchive)
+        #expect(appState.sourceArchiveURL == outerZip)
+        #expect(Set(appState.fileEntries.map(\.name)) == ["inner.zip", "outer.txt"])
+
+        for _ in 0..<100 {
+            if !fm.fileExists(atPath: nestedTempDir.path) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!fm.fileExists(atPath: nestedTempDir.path))
+    }
+
+    @Test func externalEdit_detectsModificationAndSavesBackIntoArchive() async throws {
+        let tmp = try makeTempDir()
+        let appState = AppState()
+        defer {
+            appState.externalEditMonitor.stopAll()
+            DragDropManager.shared.cleanup()
+            try? fm.removeItem(at: tmp)
+        }
+
+        let fileURL = tmp.appendingPathComponent("notes.txt")
+        try "initial-v1".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let engine = Bento7zEngine()
+        let zipURL = tmp.appendingPathComponent("editable.zip")
+        try await engine.create(from: [fileURL], to: zipURL, settings: CompressionSettings(format: .zip)) { _ in }
+
+        let coordinator = CompressionCoordinator(engine: engine)
+        appState.coordinator = coordinator
+        await coordinator.browseArchive(at: zipURL, appState: appState)
+        #expect(appState.isWritableArchive)
+
+        let entry = try #require(appState.fileEntries.first(where: { $0.name == "notes.txt" }))
+        let nonLaunchingApp = tmp.appendingPathComponent("NoSuchEditor_\(UUID().uuidString).app")
+
+        await coordinator.extractEntryForOpen(
+            entry,
+            archiveURL: zipURL,
+            password: nil,
+            appURL: nonLaunchingApp,
+            appState: appState
+        )
+
+        let watchedTempURL = try #require(
+            await DragDropManager.shared.prepareForDrag(entry, sourceArchiveURL: zipURL)
+        )
+        #expect(fm.fileExists(atPath: watchedTempURL.path))
+
+        try "updated-v2-modified".write(to: watchedTempURL, atomically: true, encoding: .utf8)
+        appState.externalEditMonitor.checkAllWatchedFiles()
+
+        #expect(appState.pendingExternalEdits.count == 1)
+        let pendingEdit = try #require(appState.pendingExternalEdits.first)
+        #expect(pendingEdit.archiveRelativePath == "notes.txt")
+
+        let progressState = ProgressState()
+        await coordinator.saveBackExternalEdit(pendingEdit, appState: appState, progressState: progressState)
+        #expect(appState.lastError == nil)
+        #expect(appState.pendingExternalEdits.isEmpty)
+
+        let verifyDir = tmp.appendingPathComponent("verify")
+        try await engine.extract(archiveURL: zipURL, entries: nil, to: verifyDir, password: nil) { _ in }
+        #expect(try String(contentsOf: verifyDir.appendingPathComponent("notes.txt"), encoding: .utf8) == "updated-v2-modified")
+    }
+
+    @Test func fileHashUtils_computesAccurateSHA256AndMD5() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let fileURL = tmp.appendingPathComponent("sample.txt")
+        try Data("hello world".utf8).write(to: fileURL)
+
+        let checksums = try await FileHashUtils.computeHashes(for: fileURL)
+        #expect(checksums.sha256 == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+        #expect(checksums.md5 == "5eb63bbbe01eeed093cb22bb8f5acdc3")
+    }
+
+    @Test func stripQuarantineOnExtract_removesQuarantineXattrWhenEnabled() async throws {
+        let tmp = try makeTempDir()
+        defer { try? fm.removeItem(at: tmp) }
+
+        let quarantineAttr = "com.apple.quarantine"
+        let quarantineValue = Array("0081;00000000;Safari;".utf8)
+
+        let mock = MockArchiveEngine()
+        mock.extractHandler = { _, _, destURL, _, _ in
+            try FileManager.default.createDirectory(at: destURL, withIntermediateDirectories: true)
+            let extractedFile = destURL.appendingPathComponent("downloaded.txt")
+            try Data("quarantined-payload".utf8).write(to: extractedFile)
+            let rc = Darwin.setxattr(extractedFile.path, quarantineAttr, quarantineValue, quarantineValue.count, 0, 0)
+            #expect(rc == 0)
+        }
+
+        let archiveA = tmp.appendingPathComponent("keep_q.zip")
+        let archiveB = tmp.appendingPathComponent("strip_q.zip")
+        try Data("zip".utf8).write(to: archiveA)
+        try Data("zip".utf8).write(to: archiveB)
+
+        let coordinator = CompressionCoordinator(engine: mock)
+        let progressState = ProgressState()
+
+        // 1. stripQuarantineOnExtract == false preserves xattr
+        let stateKeep = AppState()
+        stateKeep.revealInFinderAfterExtract = false
+        stateKeep.stripQuarantineOnExtract = false
+        stateKeep.mode = .browseArchive
+        stateKeep.sourceArchiveURL = archiveA
+        await coordinator.extract(appState: stateKeep, progressState: progressState)
+
+        let keptFile = tmp.appendingPathComponent("keep_q/downloaded.txt")
+        #expect(fm.fileExists(atPath: keptFile.path))
+        #expect(Darwin.getxattr(keptFile.path, quarantineAttr, nil, 0, 0, XATTR_NOFOLLOW) > 0)
+
+        // 2. stripQuarantineOnExtract == true removes xattr
+        let stateStrip = AppState()
+        stateStrip.revealInFinderAfterExtract = false
+        stateStrip.stripQuarantineOnExtract = true
+        stateStrip.mode = .browseArchive
+        stateStrip.sourceArchiveURL = archiveB
+        await coordinator.extract(appState: stateStrip, progressState: progressState)
+
+        let strippedFile = tmp.appendingPathComponent("strip_q/downloaded.txt")
+        #expect(fm.fileExists(atPath: strippedFile.path))
+        #expect(Darwin.getxattr(strippedFile.path, quarantineAttr, nil, 0, 0, XATTR_NOFOLLOW) == -1)
+        #expect(errno == ENOATTR)
+    }
 }

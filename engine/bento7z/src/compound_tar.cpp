@@ -271,14 +271,18 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
             throw OperationCancelled();
         }
         std::error_code ec;
-        if (!fs::exists(p, ec)) {
+        const bool exists = params.follow_symlinks
+            ? fs::exists(p, ec)
+            : fs::exists(fs::symlink_status(p, ec));
+        if (!exists) {
             missing_path = ec ? (p + " (" + ec.message() + ")") : p;
             return false;
         }
     }
 
     const CompiledExcludes compiled_excludes = compile_excludes(params.exclude);
-    const bool fast_path = params.preserve_paths && compiled_excludes.empty() && target_prefix.empty();
+    const bool fast_path = params.preserve_paths && compiled_excludes.empty() &&
+                           target_prefix.empty() && !params.follow_symlinks;
 
     for (const auto& p : params.paths) {
         if (is_cancelled(cancel_flag)) {
@@ -286,7 +290,11 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
         }
         fs::path src_path(p);
         std::error_code ec;
-        const bool is_dir = fs::is_directory(src_path, ec);
+        const fs::file_status src_st = fs::symlink_status(src_path, ec);
+        const bool src_is_symlink = !ec && fs::is_symlink(src_st);
+        const bool is_dir = src_is_symlink
+            ? (params.follow_symlinks && fs::is_directory(src_path, ec))
+            : (!ec && fs::is_directory(src_st));
 
         fs::path norm_src = src_path;
         if (norm_src.filename().empty() && norm_src.has_parent_path()) {
@@ -300,7 +308,11 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
         }
 
         if (fast_path) {
-            if (is_dir) {
+            if (src_is_symlink) {
+                writer.addItems(std::vector<std::pair<std::string, std::string>>{
+                    {p, clean_name.empty() ? p : clean_name}
+                });
+            } else if (is_dir) {
                 writer.addDirectory(p);
             } else {
                 writer.addFile(p);
@@ -309,13 +321,21 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
         }
 
         if (!is_dir) {
-            if (!target_prefix.empty()) {
-                const std::string archive_name = clean_name.empty()
-                    ? p
-                    : (target_prefix + "/" + clean_name);
+            const std::string archive_name = [&]() -> std::string {
+                if (!target_prefix.empty()) {
+                    return clean_name.empty() ? p : (target_prefix + "/" + clean_name);
+                }
+                if (!params.preserve_paths && !clean_name.empty()) {
+                    return clean_name;
+                }
+                return clean_name.empty() ? p : clean_name;
+            }();
+            if (src_is_symlink && !params.follow_symlinks) {
+                writer.addItems(std::vector<std::pair<std::string, std::string>>{
+                    {p, archive_name}
+                });
+            } else if (!target_prefix.empty() || !params.preserve_paths) {
                 writer.addFile(p, archive_name);
-            } else if (!params.preserve_paths && !clean_name.empty()) {
-                writer.addFile(p, clean_name);
             } else {
                 writer.addFile(p);
             }
@@ -355,26 +375,10 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
             }
 
             std::error_code entry_ec;
-            const bool entry_is_dir = entry.is_directory(entry_ec);
-
-            if (entry.is_symlink(entry_ec)) {
-                std::error_code sym_ec;
-                const fs::path sym_target = fs::read_symlink(entry.path(), sym_ec);
-                if (sym_ec || sym_target.is_absolute()) {
-                    if (entry_is_dir) {
-                        it.disable_recursion_pending();
-                    }
-                    continue;
-                }
-                const fs::path resolved = (entry.path().parent_path() / sym_target).lexically_normal();
-                const fs::path rel_to_root = resolved.lexically_relative(norm_src);
-                if (rel_to_root.empty() || starts_with(rel_to_root.generic_string(), "..")) {
-                    if (entry_is_dir) {
-                        it.disable_recursion_pending();
-                    }
-                    continue;
-                }
-            }
+            const bool entry_is_symlink = entry.is_symlink(entry_ec);
+            const bool entry_is_dir = entry_is_symlink
+                ? (params.follow_symlinks && fs::is_directory(entry.path(), entry_ec))
+                : entry.is_directory(entry_ec);
 
             const fs::path base_rel = clean_name.empty() ? rel : (fs::path(clean_name) / rel);
             const fs::path archive_rel = target_prefix.empty()
@@ -387,6 +391,31 @@ bool add_paths_to_writer(bit7z::BitArchiveWriter& writer,
                     it.disable_recursion_pending();
                 }
                 continue;
+            }
+
+            if (entry_is_symlink) {
+                if (!params.follow_symlinks) {
+                    if (entry.is_directory(entry_ec)) {
+                        it.disable_recursion_pending();
+                    }
+                    const std::string link_name = params.preserve_paths
+                        ? archive_rel.generic_string()
+                        : (target_prefix.empty()
+                            ? entry.path().filename().string()
+                            : (target_prefix + "/" + entry.path().filename().string()));
+                    writer.addItems(std::vector<std::pair<std::string, std::string>>{
+                        {entry.path().string(), link_name}
+                    });
+                    continue;
+                }
+                // follow_symlinks == true: skip broken symlinks and directory symlinks (avoid cycles)
+                std::error_code target_ec;
+                if (!fs::exists(entry.path(), target_ec) || fs::is_directory(entry.path(), target_ec)) {
+                    if (entry_is_dir) {
+                        it.disable_recursion_pending();
+                    }
+                    continue;
+                }
             }
 
             if (entry_is_dir) {
@@ -425,6 +454,7 @@ bool compress_compound_tar(const bit7z::Bit7zLibrary& lib,
         bit7z::BitArchiveWriter tar_writer(lib, bit7z::BitFormat::Tar);
         tar_writer.setThreadsCount(hardware_threads_or_one());
         tar_writer.setRetainDirectories(false);
+        tar_writer.setStoreSymbolicLinks(!params.follow_symlinks);
         tar_progress.attach(tar_writer);
 
         if (!add_paths_to_writer(tar_writer, params, missing_path, cancel_flag)) {

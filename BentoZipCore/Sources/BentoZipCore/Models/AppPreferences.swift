@@ -105,6 +105,7 @@ public final class AppPreferences {
     public var showHiddenFiles: Bool = false
     public var sortColumnKey: String = "name"
     public var sortAscending: Bool = true
+    public var stripQuarantineOnExtract: Bool = false
 
     public init(
         defaultFormat: String = ArchiveFormat.zip.rawValue,
@@ -123,7 +124,8 @@ public final class AppPreferences {
         closeWindowAfterExtract: Bool = false,
         showHiddenFiles: Bool = false,
         sortColumnKey: String = "name",
-        sortAscending: Bool = true
+        sortAscending: Bool = true,
+        stripQuarantineOnExtract: Bool = false
     ) {
         self.defaultFormat = defaultFormat
         self.defaultCompressionLevel = defaultCompressionLevel
@@ -142,5 +144,6 @@ public final class AppPreferences {
         self.showHiddenFiles = showHiddenFiles
         self.sortColumnKey = sortColumnKey
         self.sortAscending = sortAscending
+        self.stripQuarantineOnExtract = stripQuarantineOnExtract
     }
 }

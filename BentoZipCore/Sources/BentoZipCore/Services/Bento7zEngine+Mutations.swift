@@ -373,6 +373,277 @@ extension Bento7zEngine {
         onProgress?(ArchiveProgress(fractionCompleted: 1.0))
     }
 
+    public func moveEntries(
+        in archiveURL: URL,
+        entries: [FileEntry],
+        toTargetDir targetDir: String,
+        password: String? = nil,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)? = nil
+    ) async throws {
+        guard !entries.isEmpty else {
+            onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+            return
+        }
+        guard let format = FormatDetector.detectFormat(of: archiveURL) else {
+            throw Bento7zError.operationFailed(
+                String(localized: "Read-only archive formats cannot be modified.", bundle: .module),
+                "UNSUPPORTED_FORMAT"
+            )
+        }
+
+        let cleanTargetDir: String
+        let trimmedTarget = targetDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedTarget.isEmpty {
+            cleanTargetDir = ""
+        } else {
+            cleanTargetDir = try Bento7zPathSafety.validatedRelativePath(trimmedTarget)
+        }
+
+        var safePaths: [String] = []
+        safePaths.reserveCapacity(entries.count)
+        for entry in entries {
+            let raw = Bento7zPathSafety.archiveRelativePath(for: entry)
+            let safe = try Bento7zPathSafety.validatedRelativePath(raw)
+            if !cleanTargetDir.isEmpty && (cleanTargetDir == safe || cleanTargetDir.hasPrefix(safe + "/")) {
+                throw Bento7zError.operationFailed(
+                    String(localized: "Cannot move an item into itself or its subfolder.", bundle: .module),
+                    "INVALID_PATH"
+                )
+            }
+            safePaths.append(safe)
+        }
+
+        if !prefersBinaryServer {
+            var params: [String: Any] = [
+                "archive": archiveURL.path,
+                "format": format.bento7zFormatName,
+                "entries": safePaths,
+                "target_dir": cleanTargetDir
+            ]
+            if let password, !password.isEmpty {
+                params["password"] = password
+            }
+            _ = try await runner.execute(command: "move", params: params, onProgress: onProgress)
+            cacheManager.invalidate(for: archiveURL)
+            onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+            return
+        }
+
+        if Self.supportsInPlaceEdit(format) {
+            do {
+                try await moveInPlaceBinary(
+                    in: archiveURL,
+                    format: format,
+                    entries: safePaths,
+                    targetDir: cleanTargetDir,
+                    password: password,
+                    onProgress: onProgress
+                )
+                cacheManager.invalidate(for: archiveURL)
+                onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+                return
+            } catch let error as Bento7zError {
+                if case .operationFailed(_, let code) = error, code == "UNSUPPORTED_INPLACE" {
+                    // Fall back to atomic extract-and-rebuild.
+                } else {
+                    throw error
+                }
+            }
+        }
+
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("BentoZip_move_\(UUID().uuidString)")
+        let extractDir = tempDir.appendingPathComponent("extracted")
+        let newArchiveURL = tempDir.appendingPathComponent(archiveURL.lastPathComponent)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        try fm.createDirectory(at: extractDir, withIntermediateDirectories: true)
+
+        try await extract(
+            archiveURL: archiveURL,
+            entries: nil,
+            to: extractDir,
+            password: password,
+            onProgress: { update in
+                onProgress?(ArchiveProgress(
+                    fractionCompleted: update.fractionCompleted * 0.4,
+                    currentFile: update.currentFile
+                ))
+            }
+        )
+
+        let targetBaseURL: URL
+        if cleanTargetDir.isEmpty {
+            targetBaseURL = extractDir
+        } else {
+            targetBaseURL = try Bento7zPathSafety.verifiedDescendantURL(relativePath: cleanTargetDir, baseDirectory: extractDir)
+            try fm.createDirectory(at: targetBaseURL, withIntermediateDirectories: true)
+        }
+
+        for safePath in safePaths {
+            try Task.checkCancellation()
+            let srcURL = try Bento7zPathSafety.verifiedDescendantURL(relativePath: safePath, baseDirectory: extractDir)
+            let srcStatus = Bento7zPathSafety.itemStatus(at: srcURL)
+            guard srcStatus.exists else {
+                throw Bento7zError.fileNotFound(safePath)
+            }
+            let dstURL = targetBaseURL.appendingPathComponent(srcURL.lastPathComponent)
+            let dstStatus = Bento7zPathSafety.itemStatus(at: dstURL)
+            if dstStatus.exists {
+                if srcStatus.device == dstStatus.device && srcStatus.inode == dstStatus.inode {
+                    continue
+                }
+                throw Bento7zError.conflict(
+                    String(localized: "Destination already exists: \(srcURL.lastPathComponent)", bundle: .module)
+                )
+            }
+            try fm.moveItem(at: srcURL, to: dstURL)
+        }
+
+        let allContents = try fm.contentsOfDirectory(at: extractDir, includingPropertiesForKeys: nil)
+        let settings = CompressionSettings(
+            format: format,
+            archiveName: archiveURL.lastPathComponent,
+            exclusionPatterns: [],
+            password: password
+        )
+
+        try await create(
+            from: allContents,
+            to: newArchiveURL,
+            settings: settings,
+            onProgress: { update in
+                onProgress?(ArchiveProgress(
+                    fractionCompleted: 0.4 + update.fractionCompleted * 0.6,
+                    currentFile: update.currentFile
+                ))
+            }
+        )
+
+        try Bento7zPathSafety.replaceArchiveAtomically(at: archiveURL, with: newArchiveURL, tempDir: tempDir)
+        cacheManager.invalidate(for: archiveURL)
+        onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+    }
+
+    public func updatePassword(
+        in archiveURL: URL,
+        oldPassword: String? = nil,
+        newPassword: String?,
+        encryptionMethod: String? = nil,
+        encryptHeaders: Bool = true,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)? = nil
+    ) async throws {
+        guard let format = FormatDetector.detectFormat(of: archiveURL) else {
+            throw Bento7zError.operationFailed(
+                String(localized: "Read-only archive formats cannot be modified.", bundle: .module),
+                "UNSUPPORTED_FORMAT"
+            )
+        }
+        guard format.supportsPassword else {
+            throw Bento7zError.operationFailed(
+                String(localized: "Password protection is only supported for ZIP and 7z archives.", bundle: .module),
+                "UNSUPPORTED_FORMAT"
+            )
+        }
+
+        let effectiveNewPassword = (newPassword?.isEmpty == false) ? newPassword : nil
+        let effectiveEncMethod = (format == .zip && effectiveNewPassword != nil)
+            ? (encryptionMethod ?? ZipEncryptionMethod.aes256.bento7zValue)
+            : nil
+
+        if !prefersBinaryServer {
+            var params: [String: Any] = [
+                "archive": archiveURL.path,
+                "format": format.bento7zFormatName,
+                "encrypt_headers": encryptHeaders
+            ]
+            if let oldPassword, !oldPassword.isEmpty {
+                params["old_password"] = oldPassword
+            }
+            if let effectiveNewPassword {
+                params["new_password"] = effectiveNewPassword
+            }
+            if let effectiveEncMethod {
+                params["encryption_method"] = effectiveEncMethod
+            }
+            _ = try await runner.execute(command: "update_password", params: params, onProgress: onProgress)
+            cacheManager.invalidate(for: archiveURL)
+            onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+            return
+        }
+
+        do {
+            try await updatePasswordBinary(
+                in: archiveURL,
+                format: format,
+                oldPassword: oldPassword,
+                newPassword: effectiveNewPassword,
+                encryptionMethod: effectiveEncMethod,
+                encryptHeaders: encryptHeaders,
+                onProgress: onProgress
+            )
+            cacheManager.invalidate(for: archiveURL)
+            onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+            return
+        } catch let error as Bento7zError {
+            if case .operationFailed(_, let code) = error, code == "UNSUPPORTED_INPLACE" {
+                // Fall back to atomic extract-and-recompress.
+            } else {
+                throw error
+            }
+        }
+
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("BentoZip_pw_\(UUID().uuidString)")
+        let extractDir = tempDir.appendingPathComponent("extracted")
+        let newArchiveURL = tempDir.appendingPathComponent(archiveURL.lastPathComponent)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        try fm.createDirectory(at: extractDir, withIntermediateDirectories: true)
+
+        try await extract(
+            archiveURL: archiveURL,
+            entries: nil,
+            to: extractDir,
+            password: oldPassword,
+            onProgress: { update in
+                onProgress?(ArchiveProgress(
+                    fractionCompleted: update.fractionCompleted * 0.45,
+                    currentFile: update.currentFile
+                ))
+            }
+        )
+
+        let allContents = try fm.contentsOfDirectory(at: extractDir, includingPropertiesForKeys: nil)
+        let zipMethod: ZipEncryptionMethod = (effectiveEncMethod == ZipEncryptionMethod.zipCrypto.bento7zValue)
+            ? .zipCrypto
+            : .aes256
+        let settings = CompressionSettings(
+            format: format,
+            archiveName: archiveURL.lastPathComponent,
+            exclusionPatterns: [],
+            password: effectiveNewPassword,
+            zipEncryptionMethod: zipMethod,
+            encryptHeaders: encryptHeaders
+        )
+
+        try await create(
+            from: allContents,
+            to: newArchiveURL,
+            settings: settings,
+            onProgress: { update in
+                onProgress?(ArchiveProgress(
+                    fractionCompleted: 0.45 + update.fractionCompleted * 0.55,
+                    currentFile: update.currentFile
+                ))
+            }
+        )
+
+        try Bento7zPathSafety.replaceArchiveAtomically(at: archiveURL, with: newArchiveURL, tempDir: tempDir)
+        cacheManager.invalidate(for: archiveURL)
+        onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+    }
+
     // MARK: - Native In-Place Binary Worker Mutations (ZIP / 7z / TAR)
 
     private static func supportsInPlaceEdit(_ format: ArchiveFormat) -> Bool {
@@ -483,6 +754,78 @@ extension Bento7zEngine {
             type: .delete,
             payload: payload,
             hardKillOnCancel: true
+        )
+    }
+
+    private func moveInPlaceBinary(
+        in archiveURL: URL,
+        format: ArchiveFormat,
+        entries: [String],
+        targetDir: String,
+        password: String?,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws {
+        let worker = Bento7zBinaryClient(
+            binaryPath: runner.binaryPath,
+            libraryPath: runner.libraryPath,
+            label: "move"
+        )
+        defer { worker.shutdown(terminateProcess: true) }
+
+        let payload = Bento7zBinaryProtocol.encodeMoveRequest(
+            archivePath: archiveURL.path,
+            password: password,
+            format: format.bento7zFormatName,
+            entries: entries,
+            targetDir: targetDir
+        )
+        let progressForwarder: (@Sendable (Bento7zBinaryProtocol.ProgressPayload) -> Void)? = onProgress.map { callback in
+            { @Sendable progress in
+                callback(Self.archiveProgress(from: progress))
+            }
+        }
+        _ = try await worker.sendRequest(
+            type: .move,
+            payload: payload,
+            hardKillOnCancel: true,
+            onProgress: progressForwarder
+        )
+    }
+
+    private func updatePasswordBinary(
+        in archiveURL: URL,
+        format: ArchiveFormat,
+        oldPassword: String?,
+        newPassword: String?,
+        encryptionMethod: String?,
+        encryptHeaders: Bool,
+        onProgress: (@Sendable (ArchiveProgress) -> Void)?
+    ) async throws {
+        let worker = Bento7zBinaryClient(
+            binaryPath: runner.binaryPath,
+            libraryPath: runner.libraryPath,
+            label: "updatePassword"
+        )
+        defer { worker.shutdown(terminateProcess: true) }
+
+        let payload = Bento7zBinaryProtocol.encodeUpdatePasswordRequest(
+            archivePath: archiveURL.path,
+            oldPassword: oldPassword,
+            newPassword: newPassword,
+            format: format.bento7zFormatName,
+            encryptionMethod: encryptionMethod,
+            encryptHeaders: encryptHeaders
+        )
+        let progressForwarder: (@Sendable (Bento7zBinaryProtocol.ProgressPayload) -> Void)? = onProgress.map { callback in
+            { @Sendable progress in
+                callback(Self.archiveProgress(from: progress))
+            }
+        }
+        _ = try await worker.sendRequest(
+            type: .updatePassword,
+            payload: payload,
+            hardKillOnCancel: true,
+            onProgress: progressForwarder
         )
     }
 }

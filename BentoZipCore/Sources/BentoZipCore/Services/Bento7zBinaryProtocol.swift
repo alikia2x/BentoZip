@@ -16,6 +16,8 @@ enum Bento7zBinaryProtocol {
         case ping = 7
         case rename = 8
         case test = 9
+        case move = 10
+        case updatePassword = 11
     }
 
     enum ResponseType: UInt8 {
@@ -46,6 +48,7 @@ enum Bento7zBinaryProtocol {
         let totalSize: Int64
         let packedSize: Int64
         let usedTarCache: Bool
+        let comment: String?
     }
 
     struct ResultPayload: Sendable {
@@ -114,7 +117,9 @@ enum Bento7zBinaryProtocol {
         paths: [String],
         exclude: [String],
         volumeSizeBytes: Int64 = 0,
-        encryptionMethod: String? = nil
+        encryptionMethod: String? = nil,
+        encryptHeaders: Bool = true,
+        followSymlinks: Bool = false
     ) -> Data {
         var payload = Data()
         appendString(archivePath, to: &payload)
@@ -126,6 +131,10 @@ enum Bento7zBinaryProtocol {
         appendStringArray(exclude, to: &payload)
         appendUInt64(UInt64(max(0, volumeSizeBytes)), to: &payload)
         appendString(encryptionMethod ?? "", to: &payload)
+        var flags: UInt8 = 0
+        if encryptHeaders { flags |= 0x01 }
+        if followSymlinks { flags |= 0x02 }
+        payload.append(flags)
         return payload
     }
 
@@ -189,6 +198,40 @@ enum Bento7zBinaryProtocol {
         return payload
     }
 
+    static func encodeMoveRequest(
+        archivePath: String,
+        password: String?,
+        format: String?,
+        entries: [String],
+        targetDir: String
+    ) -> Data {
+        var payload = Data()
+        appendString(archivePath, to: &payload)
+        appendString(password ?? "", to: &payload)
+        appendString(format ?? "", to: &payload)
+        appendStringArray(entries, to: &payload)
+        appendString(targetDir, to: &payload)
+        return payload
+    }
+
+    static func encodeUpdatePasswordRequest(
+        archivePath: String,
+        oldPassword: String?,
+        newPassword: String?,
+        format: String?,
+        encryptionMethod: String?,
+        encryptHeaders: Bool
+    ) -> Data {
+        var payload = Data()
+        appendString(archivePath, to: &payload)
+        appendString(oldPassword ?? "", to: &payload)
+        appendString(newPassword ?? "", to: &payload)
+        appendString(format ?? "", to: &payload)
+        appendString(encryptionMethod ?? "", to: &payload)
+        payload.append(encryptHeaders ? 1 : 0)
+        return payload
+    }
+
     // MARK: - Payload Decoding
 
     static func decodeProgress(_ data: Data) throws -> ProgressPayload {
@@ -214,11 +257,19 @@ enum Bento7zBinaryProtocol {
         let totalSize = Int64(bitPattern: try cursor.readUInt64())
         let packedSize = Int64(bitPattern: try cursor.readUInt64())
         let usedTarCache = (try cursor.readUInt8()) != 0
+        let comment: String?
+        if cursor.remaining > 0 {
+            let rawComment = try cursor.readString()
+            comment = rawComment.isEmpty ? nil : rawComment
+        } else {
+            comment = nil
+        }
         return ListMetaPayload(
             itemsCount: itemsCount,
             totalSize: max(0, totalSize),
             packedSize: max(0, packedSize),
-            usedTarCache: usedTarCache
+            usedTarCache: usedTarCache,
+            comment: comment
         )
     }
 
@@ -301,6 +352,8 @@ enum Bento7zBinaryProtocol {
     struct BinaryReader {
         let data: Data
         var offset: Int
+
+        var remaining: Int { data.endIndex - offset }
 
         init(data: Data) {
             self.data = data

@@ -31,31 +31,39 @@ struct FileListView: View {
     }
 
     var body: some View {
-        FinderFileListRepresentable(
-            appState: appState,
-            progressState: progressState,
-            uiState: uiState,
-            mode: appState.mode,
-            sourceArchiveURL: appState.sourceArchiveURL,
-            showInspector: appState.showInspector,
-            treeStructureRevision: appState.treeStructureRevision,
-            nodeUpdateRevision: appState.nodeUpdateRevision,
-            isSearchVisible: appState.isSearchVisible,
-            outlineFocusRequestID: uiState.outlineFocusRequestID,
-            selectedEntryIDs: appState.selectedEntryIDs
-        ) { entries in
-            pendingDeleteEntries = entries
-            showDeleteConfirmation = true
-        }
-        .overlay {
-            if appState.displayedNodes.isEmpty {
-                if appState.isLoading {
-                    loadingOverlay
-                } else {
-                    Text(hasActiveSearchQuery ? "No Results" : "Empty Folder")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
-                        .allowsHitTesting(false)
+        VStack(spacing: 0) {
+            if !appState.pendingExternalEdits.isEmpty {
+                ForEach(appState.pendingExternalEdits) { edit in
+                    externalEditBanner(for: edit)
+                }
+            }
+
+            FinderFileListRepresentable(
+                appState: appState,
+                progressState: progressState,
+                uiState: uiState,
+                mode: appState.mode,
+                sourceArchiveURL: appState.sourceArchiveURL,
+                showInspector: appState.showInspector,
+                treeStructureRevision: appState.treeStructureRevision,
+                nodeUpdateRevision: appState.nodeUpdateRevision,
+                isSearchVisible: appState.isSearchVisible,
+                outlineFocusRequestID: uiState.outlineFocusRequestID,
+                selectedEntryIDs: appState.selectedEntryIDs
+            ) { entries in
+                pendingDeleteEntries = entries
+                showDeleteConfirmation = true
+            }
+            .overlay {
+                if appState.displayedNodes.isEmpty {
+                    if appState.isLoading {
+                        loadingOverlay
+                    } else {
+                        Text(hasActiveSearchQuery ? "No Results" : "Empty Folder")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.tertiary)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
         }
@@ -80,6 +88,47 @@ struct FileListView: View {
             }
         } message: {
             Text("This modifies the archive and cannot be undone.")
+        }
+    }
+
+    private func externalEditBanner(for edit: PendingExternalEdit) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "pencil.and.outline")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+
+                Text("\"\(edit.fileName)\" was modified externally.")
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 8)
+
+                Button("Update Archive") {
+                    Task {
+                        await appState.coordinator.saveBackExternalEdit(
+                            edit,
+                            appState: appState,
+                            progressState: progressState
+                        )
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(appState.isLoading || progressState.isOperationInProgress || !appState.isWritableArchive)
+
+                Button("Dismiss") {
+                    appState.dismissExternalEdit(edit)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(.bar)
+
+            Divider()
         }
     }
 

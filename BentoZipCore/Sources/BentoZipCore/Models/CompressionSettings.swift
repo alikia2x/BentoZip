@@ -26,6 +26,10 @@ public struct CompressionSettings: Sendable, Equatable {
     public var zipEncryptionMethod: ZipEncryptionMethod = .aes256
     /// Multi-volume split threshold in bytes (`0` creates a single archive). Supported for ZIP and 7z.
     public var volumeSizeBytes: Int64 = 0
+    /// Encrypt archive file headers/filenames when supported (e.g. 7z).
+    public var encryptHeaders: Bool = true
+    /// Follow symbolic links and archive their targets instead of storing links.
+    public var followSymlinks: Bool = false
 
     public init(
         format: ArchiveFormat = .zip,
@@ -35,7 +39,9 @@ public struct CompressionSettings: Sendable, Equatable {
         exclusionPatterns: [String] = [".DS_Store", "__MACOSX"],
         password: String? = nil,
         zipEncryptionMethod: ZipEncryptionMethod = .aes256,
-        volumeSizeBytes: Int64 = 0
+        volumeSizeBytes: Int64 = 0,
+        encryptHeaders: Bool = true,
+        followSymlinks: Bool = false
     ) {
         self.format = format
         self.compressionLevel = compressionLevel
@@ -45,6 +51,8 @@ public struct CompressionSettings: Sendable, Equatable {
         self.password = password
         self.zipEncryptionMethod = zipEncryptionMethod
         self.volumeSizeBytes = volumeSizeBytes
+        self.encryptHeaders = encryptHeaders
+        self.followSymlinks = followSymlinks
     }
 
     /// Return a copy with `format` updated and `archiveName` extension synchronized when appropriate.

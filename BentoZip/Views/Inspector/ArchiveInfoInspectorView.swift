@@ -7,6 +7,9 @@ struct ArchiveInfoInspectorView: View {
     @Environment(ProgressState.self) private var progressState
     @Environment(WorkspaceUIState.self) private var uiState
 
+    @State private var checksumsByNodeID: [UUID: FileChecksums] = [:]
+    @State private var computingChecksumNodeID: UUID?
+
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
@@ -15,6 +18,15 @@ struct ArchiveInfoInspectorView: View {
 
     private var isBusy: Bool {
         appState.isLoading || progressState.isOperationInProgress
+    }
+
+    private var canUpdatePassword: Bool {
+        guard appState.isWritableArchive,
+              let archiveURL = appState.sourceArchiveURL,
+              let format = FormatDetector.detectFormat(of: archiveURL) else {
+            return false
+        }
+        return format.supportsPassword
     }
 
     private var encodingBinding: Binding<FilenameEncodingOption> {
@@ -44,6 +56,19 @@ struct ArchiveInfoInspectorView: View {
         .formStyle(.grouped)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomBar(selectedNodes: selectedNodes)
+        }
+        .onChange(of: appState.selectedEntryIDs) { _, newIDs in
+            checksumsByNodeID = checksumsByNodeID.filter { newIDs.contains($0.key) }
+            if let activeID = computingChecksumNodeID, !newIDs.contains(activeID) {
+                computingChecksumNodeID = nil
+            }
+        }
+        .onChange(of: appState.sourceArchiveURL) { _, _ in
+            checksumsByNodeID.removeAll()
+            computingChecksumNodeID = nil
+        }
+        .onChange(of: appState.treeStructureRevision) { _, _ in
+            checksumsByNodeID.removeAll()
         }
     }
 
@@ -108,6 +133,16 @@ struct ArchiveInfoInspectorView: View {
                 }
             }
 
+            if canUpdatePassword {
+                LabeledContent("Password") {
+                    Button(appState.isArchiveEncrypted ? "Change…" : "Set…") {
+                        uiState.showUpdatePasswordSheet = true
+                    }
+                    .buttonStyle(InspectorPillButtonStyle(compact: true))
+                    .disabled(isBusy)
+                }
+            }
+
             Picker("Encoding", selection: encodingBinding) {
                 ForEach(FilenameEncodingOption.allCases) { option in
                     Text(option.displayName).tag(option)
@@ -126,6 +161,16 @@ struct ArchiveInfoInspectorView: View {
                 }
                 .buttonStyle(InspectorPillButtonStyle(compact: true))
                 .disabled(isBusy)
+            }
+        }
+
+        if let comment = appState.archiveComment, !comment.isEmpty {
+            Section("Comment") {
+                Text(comment)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .textSelection(.enabled)
             }
         }
     }
@@ -271,6 +316,26 @@ struct ArchiveInfoInspectorView: View {
                         .textSelection(.enabled)
                 }
             }
+
+            if !node.isDirectory {
+                if let checksums = checksumsByNodeID[node.id] {
+                    checksumRow(title: "SHA-256", value: checksums.sha256)
+                    checksumRow(title: "MD5", value: checksums.md5)
+                } else {
+                    LabeledContent("Checksums") {
+                        if computingChecksumNodeID == node.id {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Button("Calculate") {
+                                calculateChecksums(for: node)
+                            }
+                            .buttonStyle(InspectorPillButtonStyle(compact: true))
+                            .disabled(isBusy || computingChecksumNodeID != nil)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -395,6 +460,61 @@ struct ArchiveInfoInspectorView: View {
     }
 
     // MARK: - Helpers
+
+    @ViewBuilder
+    private func checksumRow(title: String, value: String) -> some View {
+        LabeledContent(title) {
+            HStack(spacing: 4) {
+                Text(value)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(value, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Copy")
+            }
+        }
+    }
+
+    private func calculateChecksums(for node: FileNode) {
+        let nodeID = node.id
+        let entry = node.toFileEntry()
+        computingChecksumNodeID = nodeID
+        Task {
+            do {
+                let result = try await appState.coordinator.computeChecksums(
+                    for: entry,
+                    appState: appState
+                )
+                if appState.selectedEntryIDs.contains(nodeID) {
+                    checksumsByNodeID[nodeID] = result
+                }
+            } catch is CancellationError {
+                // Ignored on cancellation
+            } catch {
+                FileListTreeSupport.handleExtractionError(
+                    error,
+                    appState: appState,
+                    retryAction: .preview([entry])
+                )
+            }
+            if computingChecksumNodeID == nodeID {
+                computingChecksumNodeID = nil
+            }
+        }
+    }
 
     private func parentLocation(for node: FileNode) -> String? {
         guard let rawPath = node.archiveRelativePath else { return nil }

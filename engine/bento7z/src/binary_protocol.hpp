@@ -21,6 +21,8 @@ enum class BinaryMsgType : uint8_t {
     Ping = 7,
     Rename = 8,
     Test = 9,
+    Move = 10,
+    UpdatePassword = 11,
 
     // Responses
     Progress = 101,
@@ -96,6 +98,8 @@ bool decode_add_request(const std::vector<uint8_t>& payload, AddParams& out);
 bool decode_delete_request(const std::vector<uint8_t>& payload, DeleteParams& out);
 bool decode_rename_request(const std::vector<uint8_t>& payload, RenameParams& out);
 bool decode_test_request(const std::vector<uint8_t>& payload, TestParams& out);
+bool decode_move_request(const std::vector<uint8_t>& payload, MoveParams& out);
+bool decode_update_password_request(const std::vector<uint8_t>& payload, UpdatePasswordParams& out);
 
 std::vector<uint8_t> encode_progress_frame(uint64_t req_id,
                                            uint8_t stage,
@@ -108,7 +112,8 @@ std::vector<uint8_t> encode_list_meta_frame(uint64_t req_id,
                                             uint64_t items_count,
                                             uint64_t total_size,
                                             uint64_t packed_size,
-                                            bool used_tar_cache);
+                                            bool used_tar_cache,
+                                            std::string_view comment = {});
 
 std::vector<uint8_t> encode_list_chunk_frame(uint64_t req_id,
                                              const std::vector<BinaryListRecord>& records);

@@ -37,6 +37,21 @@ extension FinderOutlineCoordinator {
             appState.navigateInto(node)
             return
         }
+        if appState.mode == .browseArchive,
+           appURL == nil,
+           !node.isDirectory,
+           FormatDetector.isArchiveFile(URL(fileURLWithPath: node.name)) {
+            guard !appState.isLoading, !progressState.isOperationInProgress else { return }
+            let entry = node.toFileEntry()
+            Task {
+                await appState.coordinator.openNestedArchive(
+                    entry: entry,
+                    appState: appState,
+                    progressState: progressState
+                )
+            }
+            return
+        }
         let entry = node.toFileEntry()
         let archiveURL = appState.sourceArchiveURL
         let password = appState.archivePassword
@@ -136,12 +151,37 @@ extension FinderOutlineCoordinator {
         proposedItem item: Any?,
         proposedChildIndex index: Int
     ) -> NSDragOperation {
-        if (info.draggingSource as? NSView) === outlineView {
+        guard !appState.isLoading, !progressState.isOperationInProgress else {
             return []
         }
-        guard !appState.isLoading,
-              !progressState.isOperationInProgress,
-              appState.mode == .compress || appState.isWritableArchive else {
+
+        if (info.draggingSource as? NSView) === outlineView {
+            guard appState.isWritableArchive else { return [] }
+            let dragged = activeDraggedNodes(in: outlineView)
+            guard !dragged.isEmpty else { return [] }
+            let draggedIDs = Set(dragged.map(\.id))
+
+            if let node = item as? FileNode {
+                let targetFolder = node.isDirectory ? node : node.parent
+                if let targetFolder {
+                    guard !isNodeOrDescendant(targetFolder, ofAnyIn: draggedIDs),
+                          !dragged.allSatisfy({ $0.parent?.id == targetFolder.id }) else {
+                        return []
+                    }
+                    outlineView.setDropItem(targetFolder, dropChildIndex: NSOutlineViewDropOnItemIndex)
+                    return .move
+                }
+            }
+
+            let currentNavID = appState.navigationNodes.last?.id
+            guard dragged.contains(where: { $0.parent?.id != currentNavID }) else {
+                return []
+            }
+            outlineView.setDropItem(nil, dropChildIndex: NSOutlineViewDropOnItemIndex)
+            return .move
+        }
+
+        guard appState.mode == .compress || appState.isWritableArchive else {
             return []
         }
         let urls = droppedFileURLs(from: info.draggingPasteboard)
@@ -168,12 +208,42 @@ extension FinderOutlineCoordinator {
         item: Any?,
         childIndex index: Int
     ) -> Bool {
-        if (info.draggingSource as? NSView) === outlineView {
+        guard !appState.isLoading, !progressState.isOperationInProgress else {
             return false
         }
-        guard !appState.isLoading,
-              !progressState.isOperationInProgress,
-              appState.mode == .compress || appState.isWritableArchive else {
+
+        if (info.draggingSource as? NSView) === outlineView {
+            guard appState.isWritableArchive else { return false }
+            let dragged = activeDraggedNodes(in: outlineView)
+            guard !dragged.isEmpty else { return false }
+            let draggedIDs = Set(dragged.map(\.id))
+
+            let targetDir: String
+            if let node = item as? FileNode,
+               let targetFolder = node.isDirectory ? node : node.parent {
+                guard !isNodeOrDescendant(targetFolder, ofAnyIn: draggedIDs),
+                      let rel = targetFolder.archiveRelativePath else {
+                    return false
+                }
+                targetDir = normalizedRelativePrefix(rel)
+            } else {
+                targetDir = appState.currentSubfolderPath
+            }
+
+            let entries = dragged.map { $0.toFileEntry() }
+            draggingSessionNodes.removeAll()
+            Task {
+                await appState.coordinator.moveEntries(
+                    appState: appState,
+                    entries: entries,
+                    toTargetDir: targetDir,
+                    progressState: progressState
+                )
+            }
+            return true
+        }
+
+        guard appState.mode == .compress || appState.isWritableArchive else {
             return false
         }
         let urls = droppedFileURLs(from: info.draggingPasteboard)
@@ -200,6 +270,21 @@ extension FinderOutlineCoordinator {
                 )
             }
             return true
+        }
+        return false
+    }
+
+    private func activeDraggedNodes(in outlineView: NSOutlineView) -> [FileNode] {
+        draggingSessionNodes.isEmpty ? selectedNodes(in: outlineView) : draggingSessionNodes
+    }
+
+    private func isNodeOrDescendant(_ candidate: FileNode, ofAnyIn ancestorIDs: Set<UUID>) -> Bool {
+        var current: FileNode? = candidate
+        while let node = current {
+            if ancestorIDs.contains(node.id) {
+                return true
+            }
+            current = node.parent
         }
         return false
     }

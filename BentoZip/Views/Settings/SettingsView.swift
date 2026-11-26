@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var unwrapSingleTopDirectory: Bool = true
     @State private var moveArchiveToTrashAfterExtract: Bool = false
     @State private var closeWindowAfterExtract: Bool = false
+    @State private var stripQuarantineOnExtract: Bool = false
 
     // Formats
     @State private var defaultFamilyStatus: [String: Bool] = [:]
@@ -81,6 +82,7 @@ struct SettingsView: View {
         .onChange(of: unwrapSingleTopDirectory) { _, _ in persistChanges() }
         .onChange(of: moveArchiveToTrashAfterExtract) { _, _ in persistChanges() }
         .onChange(of: closeWindowAfterExtract) { _, _ in persistChanges() }
+        .onChange(of: stripQuarantineOnExtract) { _, _ in persistChanges() }
     }
 
     // MARK: - General Tab
@@ -191,6 +193,7 @@ struct SettingsView: View {
                 Toggle("Unwrap single top-level folder", isOn: $unwrapSingleTopDirectory)
                 Toggle("Move archive to Trash after extracting", isOn: $moveArchiveToTrashAfterExtract)
                 Toggle("Close window after extracting", isOn: $closeWindowAfterExtract)
+                Toggle("Remove quarantine flag from extracted files", isOn: $stripQuarantineOnExtract)
             }
         }
         .formStyle(.grouped)
@@ -373,6 +376,7 @@ struct SettingsView: View {
         unwrapSingleTopDirectory = prefs.unwrapSingleTopDirectory
         moveArchiveToTrashAfterExtract = prefs.moveArchiveToTrashAfterExtract
         closeWindowAfterExtract = prefs.closeWindowAfterExtract
+        stripQuarantineOnExtract = prefs.stripQuarantineOnExtract
 
         hasLoaded = true
     }
@@ -393,7 +397,8 @@ struct SettingsView: View {
             || current.revealInFinderAfterExtract != revealInFinderAfterExtract
             || current.unwrapSingleTopDirectory != unwrapSingleTopDirectory
             || current.moveArchiveToTrashAfterExtract != moveArchiveToTrashAfterExtract
-            || current.closeWindowAfterExtract != closeWindowAfterExtract else {
+            || current.closeWindowAfterExtract != closeWindowAfterExtract
+            || current.stripQuarantineOnExtract != stripQuarantineOnExtract else {
             return
         }
 
@@ -411,6 +416,7 @@ struct SettingsView: View {
             prefs.unwrapSingleTopDirectory = unwrapSingleTopDirectory
             prefs.moveArchiveToTrashAfterExtract = moveArchiveToTrashAfterExtract
             prefs.closeWindowAfterExtract = closeWindowAfterExtract
+            prefs.stripQuarantineOnExtract = stripQuarantineOnExtract
         }
     }
 }

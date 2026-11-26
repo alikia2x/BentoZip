@@ -189,15 +189,23 @@ public class CompressionCoordinator {
         password: String? = nil,
         encoding: FilenameEncodingOption = .auto,
         preserveSearch: Bool = false,
+        preserveNestedStack: Bool = false,
         appState: AppState
     ) async {
         browseGeneration &+= 1
         let generation = browseGeneration
         browseTask?.cancel()
 
+        if !preserveNestedStack {
+            appState.externalEditMonitor.stopAll()
+            appState.pendingExternalEdits.removeAll()
+            appState.cleanupNestedArchives()
+        }
+
         pendingExtractDestinationURL = nil
         appState.lastError = nil
         appState.testArchiveResult = nil
+        appState.archiveComment = nil
         appState.selectedEncoding = encoding
         if !preserveSearch {
             appState.searchQuery = ""
@@ -257,6 +265,7 @@ public class CompressionCoordinator {
                 appState.sourceArchiveURL = url
                 appState.archivePassword = password
                 appState.archivePackedSize = result.archivePackedSize
+                appState.archiveComment = result.archiveComment
                 appState.clearNavigationAndSelection()
                 appState.cancelPasswordPrompt()
                 appState.setEntries(result.entries, unwrappedRootPath: result.unwrappedRootPath)
@@ -265,7 +274,9 @@ public class CompressionCoordinator {
                 appState.browseProcessedBytes = 0
                 appState.browseTotalBytes = 0
                 appState.isLoading = false
-                appState.preferencesManager?.recordArchive(url.path)
+                if !preserveNestedStack && !appState.isViewingNestedArchive {
+                    appState.preferencesManager?.recordArchive(url.path)
+                }
             } catch is CancellationError {
                 if self.browseGeneration == generation {
                     appState.browseProgress = nil
@@ -283,7 +294,11 @@ public class CompressionCoordinator {
                 appState.browseProgress = nil
                 appState.browseStage = .normal
                 appState.isLoading = false
-                appState.reset()
+                if preserveNestedStack && appState.isViewingNestedArchive {
+                    appState.popNestedArchive()
+                } else {
+                    appState.reset()
+                }
                 appState.lastError = String(localized: "Unable to read archive: \(error.localizedDescription)", bundle: .module)
             }
         }
@@ -306,10 +321,13 @@ public class CompressionCoordinator {
 
         switch action {
         case .browse(let targetURL):
+            let preserveNested = appState.isViewingNestedArchive
+                && targetURL.standardizedFileURL == appState.sourceArchiveURL?.standardizedFileURL
             await browseArchive(
                 at: targetURL,
                 password: password,
                 encoding: appState.selectedEncoding,
+                preserveNestedStack: preserveNested,
                 appState: appState
             )
 
@@ -364,6 +382,15 @@ public class CompressionCoordinator {
                 appURL: appURL,
                 appState: appState
             )
+
+        case .openNestedArchive(let entry):
+            guard let targetURL = fallbackURL else { return }
+            appState.mode = .browseArchive
+            appState.sourceArchiveURL = targetURL
+            appState.archivePassword = password
+            appState.needsPasswordPrompt = false
+            let effectiveProgressState = progressState ?? ProgressState()
+            await openNestedArchive(entry: entry, appState: appState, progressState: effectiveProgressState)
         }
     }
 
@@ -520,6 +547,7 @@ public class CompressionCoordinator {
         appState.setEntries(refreshed.entries, unwrappedRootPath: refreshed.unwrappedRootPath)
         appState.restoreNavigationPath(matchingArchiveRelativePath: previousSubfolder)
         appState.archivePackedSize = refreshed.archivePackedSize
+        appState.archiveComment = refreshed.archiveComment
     }
 
     func presentPasswordPrompt(

@@ -23,19 +23,45 @@ struct BreadcrumbView: View {
     }
 
     var body: some View {
-        if appState.canNavigateUp || appState.isLoading || appState.isCalculatingSizes {
+        if appState.canNavigateUp || appState.isViewingNestedArchive || appState.isLoading || appState.isCalculatingSizes {
             VStack(spacing: 0) {
                 Divider()
 
                 HStack(spacing: 4) {
-                    if appState.canNavigateUp {
+                    if appState.canNavigateUp || appState.isViewingNestedArchive {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 2) {
+                                ForEach(Array(appState.nestedArchiveStack.enumerated()), id: \.element.id) { stackIndex, frame in
+                                    if stackIndex > 0 {
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(.tertiary)
+                                            .padding(.horizontal, 2)
+                                    }
+
+                                    pathSegment(
+                                        title: frame.archiveName,
+                                        icon: FileIconCache.icon(forFileAt: frame.archiveURL.path),
+                                        index: stackIndex,
+                                        isCurrent: false
+                                    ) {
+                                        appState.popNestedArchive(toStackIndex: stackIndex)
+                                    }
+                                }
+
+                                if !appState.nestedArchiveStack.isEmpty {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(.tertiary)
+                                        .padding(.horizontal, 2)
+                                }
+
+                                let currentRootIndex = appState.nestedArchiveStack.count
                                 pathSegment(
                                     title: rootLabel,
                                     icon: rootIcon,
-                                    index: 0,
-                                    isCurrent: false
+                                    index: currentRootIndex,
+                                    isCurrent: appState.navigationNodes.isEmpty
                                 ) {
                                     appState.navigateBack(to: 0)
                                 }
@@ -50,7 +76,7 @@ struct BreadcrumbView: View {
                                     pathSegment(
                                         title: node.name,
                                         icon: FileIconCache.icon(for: node),
-                                        index: index + 1,
+                                        index: currentRootIndex + 1 + index,
                                         isCurrent: isLast
                                     ) {
                                         appState.navigateBack(to: index + 1)

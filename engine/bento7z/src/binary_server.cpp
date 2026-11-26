@@ -382,6 +382,12 @@ private:
                 case BinaryMsgType::Test:
                     handle_test(req_id, item.payload, cancel_flag);
                     break;
+                case BinaryMsgType::Move:
+                    handle_move(req_id, item.payload, cancel_flag);
+                    break;
+                case BinaryMsgType::UpdatePassword:
+                    handle_update_password(req_id, item.payload, cancel_flag);
+                    break;
                 default:
                     send_frame(encode_error_frame(req_id, "UNKNOWN_COMMAND", "Unknown binary message type"));
                     break;
@@ -459,9 +465,13 @@ private:
                     const uint64_t items_count = reader.itemsCount();
                     const uint64_t total_size = reader.size();
                     const uint64_t packed_size = outer_pack_size.value_or(reader.packSize());
+                    std::string comment = extract_archive_comment(reader);
+                    if (comment.empty() && outer_pack_size.has_value()) {
+                        comment = extract_archive_comment(*outer_reader);
+                    }
 
                     send_frame(encode_list_meta_frame(
-                        req_id, items_count, total_size, packed_size, used_tar_cache));
+                        req_id, items_count, total_size, packed_size, used_tar_cache, comment));
 
                     const ZipEncodingResolver zip_encoding(reader, params.encoding);
                     const bool emit_reading_progress =
@@ -762,6 +772,50 @@ private:
 
         const ProgressSink sink = make_progress_sink(req_id);
         const OperationOutcome out = run_test(lib_, params, &sink, cancel_flag);
+
+        if (!out.ok) {
+            send_frame(encode_error_frame(req_id, out.error_code, out.error_msg));
+            return;
+        }
+        send_frame(encode_result_frame(req_id, out.archive_deleted, out.output_size));
+    }
+
+    void handle_move(uint64_t req_id,
+                     const std::vector<uint8_t>& payload,
+                     std::atomic<bool>* cancel_flag) {
+        MoveParams params;
+        if (!decode_move_request(payload, params)) {
+            send_frame(encode_error_frame(
+                req_id, "INVALID_PARAMS", "Invalid MOVE request payload"));
+            return;
+        }
+
+        reader_pool_.invalidate(params.archive);
+        const ProgressSink sink = make_progress_sink(req_id);
+        const OperationOutcome out = run_move(lib_, params, &sink, cancel_flag);
+        reader_pool_.invalidate(params.archive);
+
+        if (!out.ok) {
+            send_frame(encode_error_frame(req_id, out.error_code, out.error_msg));
+            return;
+        }
+        send_frame(encode_result_frame(req_id, out.archive_deleted, out.output_size));
+    }
+
+    void handle_update_password(uint64_t req_id,
+                                const std::vector<uint8_t>& payload,
+                                std::atomic<bool>* cancel_flag) {
+        UpdatePasswordParams params;
+        if (!decode_update_password_request(payload, params)) {
+            send_frame(encode_error_frame(
+                req_id, "INVALID_PARAMS", "Invalid UPDATE_PASSWORD request payload"));
+            return;
+        }
+
+        reader_pool_.invalidate(params.archive);
+        const ProgressSink sink = make_progress_sink(req_id);
+        const OperationOutcome out = run_update_password(lib_, params, &sink, cancel_flag);
+        reader_pool_.invalidate(params.archive);
 
         if (!out.ok) {
             send_frame(encode_error_frame(req_id, out.error_code, out.error_msg));

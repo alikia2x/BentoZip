@@ -64,6 +64,59 @@ public struct TestArchiveResult: Identifiable, Sendable, Equatable {
     }
 }
 
+/// Snapshot of a parent archive session pushed when drilling into a nested archive.
+public struct NestedArchiveFrame: Identifiable, Sendable {
+    public let id: UUID
+    public let archiveURL: URL
+    public let archiveName: String
+    public let password: String?
+    public let encoding: FilenameEncodingOption
+    public let archiveComment: String?
+    public let rootNodes: [FileNode]
+    public let unwrappedRootPath: String?
+    public let navigationNodeIDs: [UUID]
+    public let totalSize: Int64
+    public let totalEntryCount: Int
+    public let totalPackedSize: Int64?
+    public let archivePackedSize: Int64?
+    public let isArchiveEncrypted: Bool
+    public let tempNestedDirectoryURL: URL?
+
+    public init(
+        id: UUID = UUID(),
+        archiveURL: URL,
+        archiveName: String,
+        password: String?,
+        encoding: FilenameEncodingOption,
+        archiveComment: String?,
+        rootNodes: [FileNode],
+        unwrappedRootPath: String?,
+        navigationNodeIDs: [UUID],
+        totalSize: Int64,
+        totalEntryCount: Int,
+        totalPackedSize: Int64?,
+        archivePackedSize: Int64? = nil,
+        isArchiveEncrypted: Bool,
+        tempNestedDirectoryURL: URL?
+    ) {
+        self.id = id
+        self.archiveURL = archiveURL
+        self.archiveName = archiveName
+        self.password = password
+        self.encoding = encoding
+        self.archiveComment = archiveComment
+        self.rootNodes = rootNodes
+        self.unwrappedRootPath = unwrappedRootPath
+        self.navigationNodeIDs = navigationNodeIDs
+        self.totalSize = totalSize
+        self.totalEntryCount = totalEntryCount
+        self.totalPackedSize = totalPackedSize
+        self.archivePackedSize = archivePackedSize
+        self.isArchiveEncrypted = isArchiveEncrypted
+        self.tempNestedDirectoryURL = tempNestedDirectoryURL
+    }
+}
+
 /// Owns a `NotificationCenter` observer token and unregisters it automatically on deallocation.
 private final class NotificationObserverToken: @unchecked Sendable {
     private let token: NSObjectProtocol
@@ -119,7 +172,18 @@ public class AppState {
     public var compressionSettings = CompressionSettings()
     public var showInspector: Bool = false
     public var sourceArchiveURL: URL?
+    public var archiveComment: String?
     public var lastError: String?
+
+    // Nested archive browsing stack
+    public private(set) var nestedArchiveStack: [NestedArchiveFrame] = []
+    public var isViewingNestedArchive: Bool { !nestedArchiveStack.isEmpty }
+    var activeNestedTempDirectoryURL: URL?
+
+    // External file edit monitoring
+    public var pendingExternalEdits: [PendingExternalEdit] = []
+    @ObservationIgnored public var onExternalFileModified: ((PendingExternalEdit) -> Void)?
+    @ObservationIgnored public let externalEditMonitor = ExternalEditMonitor()
 
     // Password flow state
     public var archivePassword: String?
@@ -138,6 +202,7 @@ public class AppState {
     public var extractConflictPolicy: ExtractConflictPolicy = .ask
     public var moveArchiveToTrashAfterExtract: Bool = false
     public var closeWindowAfterExtract: Bool = false
+    public var stripQuarantineOnExtract: Bool = false
     public var showHiddenFiles: Bool = false {
         didSet {
             if showHiddenFiles != oldValue {
@@ -181,6 +246,9 @@ public class AppState {
     private var preferencesObserver: NotificationObserverToken?
 
     public init() {
+        externalEditMonitor.onModified = { [weak self] edit in
+            self?.enqueuePendingExternalEdit(edit)
+        }
         preferencesObserver = NotificationObserverToken(
             name: PreferencesManager.preferencesDidChangeNotification,
             queue: nil
@@ -300,7 +368,7 @@ public class AppState {
 
     public var selectedNodes: [FileNode] { selectedEntryIDs.compactMap { nodesByID[$0] } }
     public func node(for id: UUID) -> FileNode? { nodesByID[id] }
-    public var canNavigateUp: Bool { !navigationNodeIDs.isEmpty }
+    public var canNavigateUp: Bool { !navigationNodeIDs.isEmpty || isViewingNestedArchive }
 
     // MARK: - Value-Type Compatibility Bridges
 
@@ -619,5 +687,125 @@ public class AppState {
     private func unregisterSubtree(_ node: FileNode) {
         nodesByID.removeValue(forKey: node.id)
         node.children?.forEach(unregisterSubtree)
+    }
+
+    // MARK: - Nested Archive Stack & External Edits
+
+    func pushNestedArchiveFrame(newTempDirectoryURL: URL?) {
+        guard let archiveURL = sourceArchiveURL else { return }
+        let frame = NestedArchiveFrame(
+            archiveURL: archiveURL,
+            archiveName: archiveURL.lastPathComponent,
+            password: archivePassword,
+            encoding: selectedEncoding,
+            archiveComment: archiveComment,
+            rootNodes: rootNodes,
+            unwrappedRootPath: unwrappedRootPath,
+            navigationNodeIDs: navigationNodeIDs,
+            totalSize: totalSize,
+            totalEntryCount: totalEntryCount,
+            totalPackedSize: totalPackedSize,
+            archivePackedSize: archivePackedSize,
+            isArchiveEncrypted: isArchiveEncrypted,
+            tempNestedDirectoryURL: activeNestedTempDirectoryURL
+        )
+        nestedArchiveStack.append(frame)
+        activeNestedTempDirectoryURL = newTempDirectoryURL
+    }
+
+    /// Pop back to a parent archive from the nested archive stack (`nil` pops one level).
+    public func popNestedArchive(toStackIndex targetIndex: Int? = nil) {
+        guard !nestedArchiveStack.isEmpty else { return }
+        let destinationIndex = targetIndex ?? (nestedArchiveStack.count - 1)
+        guard nestedArchiveStack.indices.contains(destinationIndex) else { return }
+
+        coordinator.cancelBrowse()
+        activeConflictPrompt?.cancel()
+        activeConflictPrompt = nil
+
+        var tempDirsToDelete: [URL] = []
+        if let activeNestedTempDirectoryURL {
+            tempDirsToDelete.append(activeNestedTempDirectoryURL)
+        }
+
+        let targetFrame = nestedArchiveStack[destinationIndex]
+        if destinationIndex + 1 < nestedArchiveStack.count {
+            for idx in (destinationIndex + 1)..<nestedArchiveStack.count {
+                if let tempDir = nestedArchiveStack[idx].tempNestedDirectoryURL {
+                    tempDirsToDelete.append(tempDir)
+                }
+            }
+        }
+        nestedArchiveStack.removeSubrange(destinationIndex..<nestedArchiveStack.count)
+        activeNestedTempDirectoryURL = targetFrame.tempNestedDirectoryURL
+
+        if !tempDirsToDelete.isEmpty {
+            Task.detached(priority: .utility) {
+                let fm = FileManager.default
+                for dir in tempDirsToDelete {
+                    try? fm.removeItem(at: dir)
+                }
+            }
+        }
+
+        clearSearchWithoutRevisionBump()
+        lastError = nil
+        testArchiveResult = nil
+        cancelPasswordPrompt()
+
+        mode = .browseArchive
+        sourceArchiveURL = targetFrame.archiveURL
+        archivePassword = targetFrame.password
+        selectedEncoding = targetFrame.encoding
+        archiveComment = targetFrame.archiveComment
+        unwrappedRootPath = targetFrame.unwrappedRootPath
+        archivePackedSize = targetFrame.archivePackedSize
+
+        replaceRootNodes(targetFrame.rootNodes)
+        navigationNodeIDs = targetFrame.navigationNodeIDs.filter { nodesByID[$0] != nil }
+        selectedEntryIDs.removeAll()
+        bumpTreeStructureRevision()
+    }
+
+    func cleanupNestedArchives() {
+        var tempDirsToDelete: [URL] = []
+        if let activeNestedTempDirectoryURL {
+            tempDirsToDelete.append(activeNestedTempDirectoryURL)
+            self.activeNestedTempDirectoryURL = nil
+        }
+        for frame in nestedArchiveStack {
+            if let dir = frame.tempNestedDirectoryURL {
+                tempDirsToDelete.append(dir)
+            }
+        }
+        nestedArchiveStack.removeAll()
+        if !tempDirsToDelete.isEmpty {
+            Task.detached(priority: .utility) {
+                let fm = FileManager.default
+                for dir in tempDirsToDelete {
+                    try? fm.removeItem(at: dir)
+                }
+            }
+        }
+    }
+
+    func enqueuePendingExternalEdit(_ edit: PendingExternalEdit) {
+        let stdTemp = edit.tempURL.standardizedFileURL
+        let stdArchive = edit.archiveURL.standardizedFileURL
+        if let existingIndex = pendingExternalEdits.firstIndex(where: {
+            $0.tempURL.standardizedFileURL == stdTemp &&
+            $0.archiveURL.standardizedFileURL == stdArchive &&
+            $0.archiveRelativePath == edit.archiveRelativePath
+        }) {
+            pendingExternalEdits[existingIndex] = edit
+        } else {
+            pendingExternalEdits.append(edit)
+        }
+        onExternalFileModified?(edit)
+    }
+
+    public func dismissExternalEdit(_ edit: PendingExternalEdit) {
+        pendingExternalEdits.removeAll { $0.id == edit.id }
+        externalEditMonitor.acknowledgeChange(at: edit.tempURL)
     }
 }

@@ -390,12 +390,14 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
                 var entries: [ArchiveTreeBuilder.FlatEntry] = []
                 var packedSize: Int64?
                 var usedTarCache = false
+                var comment: String?
             }
 
             func setMeta(_ meta: Bento7zBinaryProtocol.ListMetaPayload) {
                 lock.withLock { state in
                     state.packedSize = meta.packedSize > 0 ? meta.packedSize : nil
                     state.usedTarCache = meta.usedTarCache
+                    state.comment = meta.comment
                     if meta.itemsCount > 0 {
                         state.entries.reserveCapacity(Int(min(meta.itemsCount, 2_000_000)))
                     }
@@ -406,11 +408,11 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
                 lock.withLock { $0.entries.append(contentsOf: chunk) }
             }
 
-            func takeSnapshot() -> (entries: [ArchiveTreeBuilder.FlatEntry], packedSize: Int64?) {
+            func takeSnapshot() -> (entries: [ArchiveTreeBuilder.FlatEntry], packedSize: Int64?, comment: String?) {
                 lock.withLock { state in
                     let items = state.entries
                     state.entries.removeAll(keepingCapacity: false)
-                    return (items, state.packedSize)
+                    return (items, state.packedSize, state.comment)
                 }
             }
         }
@@ -453,7 +455,7 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             cacheManager.recordMaterializedTar(for: archiveURL, at: tarCacheURL)
         }
 
-        let (flatEntries, archivePackedSize) = collector.takeSnapshot()
+        let (flatEntries, archivePackedSize, archiveComment) = collector.takeSnapshot()
         let buildTask = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             let built = ArchiveTreeBuilder.buildTreeWithMetadata(
@@ -464,7 +466,8 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             return ArchiveListResult(
                 entries: built.entries,
                 archivePackedSize: archivePackedSize,
-                unwrappedRootPath: built.unwrappedRootPath
+                unwrappedRootPath: built.unwrappedRootPath,
+                archiveComment: archiveComment
             )
         }
         return try await withTaskCancellationHandler {
@@ -590,7 +593,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             paths: sourceURLs.map(\.path),
             exclude: settings.exclusionPatterns,
             volumeSizeBytes: settings.volumeSizeBytes,
-            encryptionMethod: encryptionMethod
+            encryptionMethod: encryptionMethod,
+            encryptHeaders: settings.encryptHeaders,
+            followSymlinks: settings.followSymlinks
         )
 
         let mapper = ProgressStageMapper(context: .compress)
@@ -648,6 +653,8 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             }
 
             let archivePackedSize = (boxedResult.value["packed_size"] as? NSNumber)?.int64Value
+            let rawComment = boxedResult.value["comment"] as? String
+            let archiveComment = (rawComment?.isEmpty == false) ? rawComment : nil
             var flatEntries: [ArchiveTreeBuilder.FlatEntry] = []
             flatEntries.reserveCapacity(items.count)
 
@@ -688,7 +695,8 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             return ArchiveListResult(
                 entries: built.entries,
                 archivePackedSize: archivePackedSize,
-                unwrappedRootPath: built.unwrappedRootPath
+                unwrappedRootPath: built.unwrappedRootPath,
+                archiveComment: archiveComment
             )
         }
 
@@ -743,7 +751,9 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             "paths": sourceURLs.map(\.path),
             "format": formatName,
             "level": levelString(from: settings.compressionLevel),
-            "preserve_paths": settings.preserveDirectoryStructure
+            "preserve_paths": settings.preserveDirectoryStructure,
+            "encrypt_headers": settings.encryptHeaders,
+            "follow_symlinks": settings.followSymlinks
         ]
         if let password = settings.password, !password.isEmpty {
             params["password"] = password

@@ -294,7 +294,8 @@ nlohmann::json build_list_result(const bit7z::BitArchiveReader& reader,
                                  const std::string& archive_path,
                                  std::optional<uint64_t> override_packed_size,
                                  bool used_tar_cache,
-                                 std::string_view forced_encoding = "") {
+                                 std::string_view forced_encoding = "",
+                                 const std::string& fallback_comment = "") {
     nlohmann::json result;
     result["archive"] = archive_path;
     result["items_count"] = reader.itemsCount();
@@ -303,6 +304,14 @@ nlohmann::json build_list_result(const bit7z::BitArchiveReader& reader,
     result["size"] = reader.size();
     result["packed_size"] = override_packed_size.value_or(reader.packSize());
     result["used_tar_cache"] = used_tar_cache;
+
+    std::string comment = extract_archive_comment(reader);
+    if (comment.empty() && !fallback_comment.empty()) {
+        comment = fallback_comment;
+    }
+    if (!comment.empty()) {
+        result["comment"] = comment;
+    }
 
     nlohmann::json items_arr = nlohmann::json::array();
     const ZipEncodingResolver zip_encoding(reader, forced_encoding);
@@ -326,6 +335,123 @@ nlohmann::json build_list_result(const bit7z::BitArchiveReader& reader,
     return result;
 }
 
+struct InplacePathUpdate {
+    uint32_t index = 0;
+    std::string orig_norm;
+    std::string new_norm;
+    bool is_dir = false;
+    bool is_symlink = false;
+};
+
+bool prepare_tar_inplace_updates(bit7z::BitArchiveReader& reader,
+                                 const std::vector<InplacePathUpdate>& updates,
+                                 const std::vector<uint32_t>& matched_list,
+                                 ScopedTempDir& tar_temp_dir,
+                                 std::atomic<bool>* cancel_flag,
+                                 OperationOutcome& out) {
+    for (const auto& t : updates) {
+        if (t.is_symlink) {
+            out.error_code = "UNSUPPORTED_INPLACE";
+            out.error_msg = "In-place path update of symbolic links in TAR archives is not supported";
+            return false;
+        }
+    }
+    std::string safety_err;
+    if (!validate_selected_items_safe(reader, matched_list, tar_temp_dir.string(), safety_err)) {
+        out.error_code = "PATH_TRAVERSAL";
+        out.error_msg = safety_err;
+        return false;
+    }
+    reader.extractTo(tar_temp_dir.string(), matched_list);
+    if (is_cancelled(cancel_flag)) {
+        out.error_code = "CANCELLED";
+        out.error_msg = "Operation cancelled";
+        return false;
+    }
+    return true;
+}
+
+bool apply_inplace_path_updates(const bit7z::Bit7zLibrary& lib,
+                                const std::string& archive,
+                                const bit7z::BitInOutFormat& fmt,
+                                const std::string& password,
+                                const std::vector<InplacePathUpdate>& updates,
+                                const std::vector<uint32_t>& matched_list,
+                                const ScopedTempDir& tar_temp_dir,
+                                const ProgressSink* progress_sink,
+                                std::atomic<bool>* cancel_flag,
+                                OperationOutcome& out) {
+    if (fmt == bit7z::BitFormat::Tar) {
+        for (const auto& t : updates) {
+            const fs::path extracted = tar_temp_dir.path() / fs::path(t.orig_norm);
+            std::error_code item_ec;
+            const fs::file_status st = fs::symlink_status(extracted, item_ec);
+            if (!item_ec && fs::exists(st) && fs::is_symlink(st)) {
+                out.error_code = "UNSUPPORTED_INPLACE";
+                out.error_msg = "In-place path update of symbolic links in TAR archives is not supported";
+                return false;
+            }
+        }
+
+        bit7z::BitArchiveEditor editor(lib, archive, fmt, password);
+        editor.setThreadsCount(hardware_threads_or_one());
+        editor.setRetainDirectories(false);
+        for (uint32_t idx : matched_list) {
+            editor.deleteItem(idx, bit7z::DeletePolicy::ItemOnly);
+        }
+        for (const auto& t : updates) {
+            const fs::path extracted = tar_temp_dir.path() / fs::path(t.orig_norm);
+            std::error_code item_ec;
+            const fs::file_status st = fs::symlink_status(extracted, item_ec);
+            if (item_ec || !fs::exists(st) || fs::is_symlink(st)) {
+                continue;
+            }
+            if (!t.is_dir) {
+                editor.addFile(extracted.string(), t.new_norm);
+            } else if (fs::is_empty(extracted, item_ec)) {
+                editor.addItems(std::vector<std::pair<std::string, std::string>>{
+                    {extracted.string(), t.new_norm}
+                });
+            }
+        }
+
+        ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
+        ProgressAdapter progress(std::move(sink), ProgressStage::Normal, cancel_flag);
+        progress.attach(editor);
+
+        editor.applyChanges();
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return false;
+        }
+        progress.flush();
+    } else {
+        bit7z::BitArchiveEditor editor(lib, archive, fmt, password);
+        editor.setThreadsCount(hardware_threads_or_one());
+        for (const auto& t : updates) {
+            editor.renameItem(t.index, t.new_norm);
+        }
+
+        ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
+        ProgressAdapter progress(std::move(sink), ProgressStage::Normal, cancel_flag);
+        progress.attach(editor);
+
+        editor.applyChanges();
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return false;
+        }
+        progress.flush();
+    }
+
+    out.ok = true;
+    out.archive_deleted = false;
+    out.output_size = file_size_or_zero(archive);
+    return true;
+}
+
 } // namespace
 
 std::string classify_bit7z_error(const bit7z::BitException& ex, bool password_provided) {
@@ -347,6 +473,14 @@ std::optional<int64_t> extract_item_mtime(const bit7z::BitArchiveItemOffset& ite
         }
     }
     return std::nullopt;
+}
+
+std::string extract_archive_comment(const bit7z::BitArchiveReader& reader) {
+    const auto prop = reader.archiveProperty(bit7z::BitProperty::Comment);
+    if (prop.isString()) {
+        return prop.getString();
+    }
+    return {};
 }
 
 const bit7z::BitInOutFormat* resolve_inplace_format(
@@ -628,13 +762,14 @@ OperationOutcome run_compress(const bit7z::Bit7zLibrary& lib,
             writer.setThreadsCount(hardware_threads_or_one());
             writer.setCompressionLevel(resolve_level(params.level));
             writer.setRetainDirectories(false);
+            writer.setStoreSymbolicLinks(!params.follow_symlinks);
 
             if (params.volume_size_bytes > 0) {
                 writer.setVolumeSize(params.volume_size_bytes);
             }
 
             if (!params.password.empty()) {
-                const bool crypt_headers = (*fmt == bit7z::BitFormat::SevenZip);
+                const bool crypt_headers = (*fmt == bit7z::BitFormat::SevenZip) && params.encrypt_headers;
                 writer.setPassword(params.password, crypt_headers);
                 if (*fmt == bit7z::BitFormat::Zip) {
                     const std::string em = to_lower_ascii(params.encryption_method);
@@ -989,14 +1124,7 @@ OperationOutcome run_rename(const bit7z::Bit7zLibrary& lib,
             return out;
         }
 
-        struct RenameTarget {
-            uint32_t index;
-            std::string orig_norm;
-            std::string new_norm;
-            bool is_dir;
-            bool is_symlink;
-        };
-        std::vector<RenameTarget> renames;
+        std::vector<InplacePathUpdate> renames;
         std::vector<uint32_t> matched_list;
         ScopedTempDir tar_temp_dir;
         {
@@ -1029,7 +1157,7 @@ OperationOutcome run_rename(const bit7z::Bit7zLibrary& lib,
                 if (updated_path.has_value()) {
                     matched_indices.insert(item.index());
                     matched_list.push_back(item.index());
-                    renames.push_back(RenameTarget{
+                    renames.push_back(InplacePathUpdate{
                         item.index(), raw_norm, std::move(*updated_path), item.isDir(), item.isSymLink()});
                 }
             }
@@ -1073,104 +1201,16 @@ OperationOutcome run_rename(const bit7z::Bit7zLibrary& lib,
             }
 
             if (*fmt == bit7z::BitFormat::Tar) {
-                for (const auto& t : renames) {
-                    if (t.is_symlink) {
-                        out.error_code = "UNSUPPORTED_INPLACE";
-                        out.error_msg = "In-place rename of symbolic links in TAR archives is not supported";
-                        return out;
-                    }
-                }
-                std::string safety_err;
-                if (!validate_selected_items_safe(reader, matched_list, tar_temp_dir.string(), safety_err)) {
-                    out.error_code = "PATH_TRAVERSAL";
-                    out.error_msg = safety_err;
-                    return out;
-                }
-                reader.extractTo(tar_temp_dir.string(), matched_list);
-                if (is_cancelled(cancel_flag)) {
-                    out.error_code = "CANCELLED";
-                    out.error_msg = "Operation cancelled";
+                if (!prepare_tar_inplace_updates(
+                        reader, renames, matched_list, tar_temp_dir, cancel_flag, out)) {
                     return out;
                 }
             }
         }
 
-        // bit7z's BitArchiveEditor::renameItem fails on TAR because 7-Zip's TAR handler
-        // does not expose BitProperty::Attrib (kpidAttrib). Delete matched items and
-        // re-add the extracted items under the new paths.
-        if (*fmt == bit7z::BitFormat::Tar) {
-            for (const auto& t : renames) {
-                const fs::path extracted = tar_temp_dir.path() / fs::path(t.orig_norm);
-                std::error_code item_ec;
-                const fs::file_status st = fs::symlink_status(extracted, item_ec);
-                if (!item_ec && fs::exists(st) && fs::is_symlink(st)) {
-                    out.error_code = "UNSUPPORTED_INPLACE";
-                    out.error_msg = "In-place rename of symbolic links in TAR archives is not supported";
-                    return out;
-                }
-            }
-
-            bit7z::BitArchiveEditor editor(lib, params.archive, *fmt, params.password);
-            editor.setThreadsCount(hardware_threads_or_one());
-            editor.setRetainDirectories(false);
-            for (uint32_t idx : matched_list) {
-                editor.deleteItem(idx, bit7z::DeletePolicy::ItemOnly);
-            }
-            for (const auto& t : renames) {
-                const fs::path extracted = tar_temp_dir.path() / fs::path(t.orig_norm);
-                std::error_code item_ec;
-                const fs::file_status st = fs::symlink_status(extracted, item_ec);
-                if (item_ec || !fs::exists(st) || fs::is_symlink(st)) {
-                    continue;
-                }
-                if (!t.is_dir) {
-                    editor.addFile(extracted.string(), t.new_norm);
-                } else if (fs::is_empty(extracted, item_ec)) {
-                    editor.addItems(std::vector<std::pair<std::string, std::string>>{
-                        {extracted.string(), t.new_norm}
-                    });
-                }
-            }
-
-            ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
-            ProgressAdapter progress(std::move(sink), ProgressStage::Normal, cancel_flag);
-            progress.attach(editor);
-
-            editor.applyChanges();
-            if (is_cancelled(cancel_flag)) {
-                out.error_code = "CANCELLED";
-                out.error_msg = "Operation cancelled";
-                return out;
-            }
-            progress.flush();
-
-            out.ok = true;
-            out.archive_deleted = false;
-            out.output_size = file_size_or_zero(params.archive);
-            return out;
-        }
-
-        bit7z::BitArchiveEditor editor(lib, params.archive, *fmt, params.password);
-        editor.setThreadsCount(hardware_threads_or_one());
-        for (const auto& t : renames) {
-            editor.renameItem(t.index, t.new_norm);
-        }
-
-        ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
-        ProgressAdapter progress(std::move(sink), ProgressStage::Normal, cancel_flag);
-        progress.attach(editor);
-
-        editor.applyChanges();
-        if (is_cancelled(cancel_flag)) {
-            out.error_code = "CANCELLED";
-            out.error_msg = "Operation cancelled";
-            return out;
-        }
-        progress.flush();
-
-        out.ok = true;
-        out.archive_deleted = false;
-        out.output_size = file_size_or_zero(params.archive);
+        apply_inplace_path_updates(
+            lib, params.archive, *fmt, params.password, renames, matched_list,
+            tar_temp_dir, progress_sink, cancel_flag, out);
         return out;
     } catch (const OperationCancelled&) {
         out.error_code = "CANCELLED";
@@ -1326,6 +1366,434 @@ OperationOutcome run_test(const bit7z::Bit7zLibrary& lib,
     }
 }
 
+OperationOutcome run_move(const bit7z::Bit7zLibrary& lib,
+                          const MoveParams& params,
+                          const ProgressSink* progress_sink,
+                          std::atomic<bool>* cancel_flag) {
+    OperationOutcome out;
+    if (params.archive.empty() || params.entries.empty()) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Invalid 'move' parameters";
+        return out;
+    }
+
+    std::string target_norm;
+    std::string path_err;
+    if (!normalize_strict_archive_path(params.target_dir, /*allow_empty=*/true, target_norm, path_err)) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Invalid target_dir: " + path_err;
+        return out;
+    }
+
+    std::vector<std::string> raw_norm_entries;
+    raw_norm_entries.reserve(params.entries.size());
+    for (const auto& raw_entry : params.entries) {
+        std::string norm;
+        if (!normalize_strict_archive_path(raw_entry, /*allow_empty=*/false, norm, path_err)) {
+            out.error_code = "INVALID_PARAMS";
+            out.error_msg = "Invalid entry path: " + path_err;
+            return out;
+        }
+        raw_norm_entries.push_back(std::move(norm));
+    }
+
+    // Sort shortest-first and deduplicate / drop redundant descendants of already-moved folders.
+    std::sort(raw_norm_entries.begin(), raw_norm_entries.end(),
+              [](const std::string& a, const std::string& b) {
+                  return a.size() < b.size() || (a.size() == b.size() && a < b);
+              });
+    std::vector<std::string> norm_entries;
+    norm_entries.reserve(raw_norm_entries.size());
+    for (const auto& cand : raw_norm_entries) {
+        bool covered = false;
+        for (const auto& prev : norm_entries) {
+            if (cand == prev || starts_with(cand, prev + "/")) {
+                covered = true;
+                break;
+            }
+        }
+        if (!covered) {
+            norm_entries.push_back(cand);
+        }
+    }
+
+    struct MoveSpec {
+        std::string entry_norm;
+        std::string entry_prefix;
+        std::string dest_norm;
+        std::string dest_prefix;
+        bool matched = false;
+    };
+    std::vector<MoveSpec> specs;
+    specs.reserve(norm_entries.size());
+    std::unordered_set<std::string> dest_set;
+
+    for (const auto& entry_norm : norm_entries) {
+        if (target_norm == entry_norm || starts_with(target_norm, entry_norm + "/")) {
+            out.error_code = "INVALID_PARAMS";
+            out.error_msg = "Cannot move an entry into itself or its own descendant path: " + entry_norm;
+            return out;
+        }
+        const size_t slash = entry_norm.find_last_of('/');
+        const std::string leaf = (slash == std::string::npos) ? entry_norm : entry_norm.substr(slash + 1);
+        const std::string dest_norm = target_norm.empty() ? leaf : (target_norm + "/" + leaf);
+        if (!dest_set.insert(dest_norm).second) {
+            out.error_code = "CONFLICT";
+            out.error_msg = "Multiple entries map to the same destination path: " + dest_norm;
+            return out;
+        }
+        specs.push_back(MoveSpec{
+            entry_norm, entry_norm + "/", dest_norm, dest_norm + "/", false});
+    }
+
+    const bit7z::BitInOutFormat* fmt = resolve_inplace_format(
+        lib, params.archive, params.format, params.password, out.error_code, out.error_msg);
+    if (!fmt) {
+        return out;
+    }
+
+    std::error_code ec;
+    if (!fs::exists(params.archive, ec)) {
+        out.error_code = "PATH_NOT_FOUND";
+        out.error_msg = "Archive not found: " + params.archive;
+        return out;
+    }
+
+    const bool password_provided = !params.password.empty();
+    try {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return out;
+        }
+
+        std::vector<InplacePathUpdate> updates;
+        std::vector<uint32_t> matched_list;
+        ScopedTempDir tar_temp_dir;
+        {
+            bit7z::BitArchiveReader reader(lib, params.archive, *fmt, params.password);
+            const ZipEncodingResolver zip_encoding(reader);
+            std::unordered_set<uint32_t> matched_indices;
+
+            for (const auto& item : reader) {
+                const std::string raw_norm = normalize_archive_path(item.path());
+                if (raw_norm.empty()) continue;
+
+                const std::string decoded_norm = zip_encoding.has_remapping()
+                    ? normalize_archive_path(zip_encoding.decode(item.path()))
+                    : raw_norm;
+
+                std::optional<std::string> updated_path;
+                for (auto& spec : specs) {
+                    if (raw_norm == spec.entry_norm) {
+                        spec.matched = true;
+                        updated_path = spec.dest_norm;
+                        break;
+                    }
+                    if (starts_with(raw_norm, spec.entry_prefix)) {
+                        spec.matched = true;
+                        updated_path = spec.dest_norm + raw_norm.substr(spec.entry_norm.size());
+                        break;
+                    }
+                    if (zip_encoding.has_remapping() && !decoded_norm.empty()) {
+                        if (decoded_norm == spec.entry_norm) {
+                            spec.matched = true;
+                            updated_path = spec.dest_norm;
+                            break;
+                        }
+                        if (starts_with(decoded_norm, spec.entry_prefix)) {
+                            spec.matched = true;
+                            updated_path = spec.dest_norm + decoded_norm.substr(spec.entry_norm.size());
+                            break;
+                        }
+                    }
+                }
+
+                if (updated_path.has_value()) {
+                    matched_indices.insert(item.index());
+                    matched_list.push_back(item.index());
+                    updates.push_back(InplacePathUpdate{
+                        item.index(), raw_norm, std::move(*updated_path), item.isDir(), item.isSymLink()});
+                }
+            }
+
+            if (updates.empty()) {
+                out.error_code = "PATH_NOT_FOUND";
+                out.error_msg = "None of the requested entries were found in the archive";
+                return out;
+            }
+            for (const auto& spec : specs) {
+                if (!spec.matched) {
+                    out.error_code = "PATH_NOT_FOUND";
+                    out.error_msg = "Path not found in archive: " + spec.entry_norm;
+                    return out;
+                }
+            }
+
+            bool any_changed = false;
+            for (const auto& u : updates) {
+                if (u.orig_norm != u.new_norm) {
+                    any_changed = true;
+                    break;
+                }
+            }
+            if (!any_changed) {
+                out.ok = true;
+                out.archive_deleted = false;
+                out.output_size = file_size_or_zero(params.archive);
+                return out;
+            }
+
+            for (const auto& item : reader) {
+                if (matched_indices.find(item.index()) != matched_indices.end()) {
+                    continue;
+                }
+                const std::string other_raw = normalize_archive_path(item.path());
+                if (other_raw.empty()) continue;
+                const std::string other_decoded = zip_encoding.has_remapping()
+                    ? normalize_archive_path(zip_encoding.decode(item.path()))
+                    : other_raw;
+
+                auto conflicts_with = [&](const std::string& candidate) -> bool {
+                    if (candidate.empty()) return false;
+                    for (const auto& spec : specs) {
+                        if (spec.entry_norm == spec.dest_norm) {
+                            continue;
+                        }
+                        if (candidate == spec.dest_norm ||
+                            starts_with(candidate, spec.dest_prefix) ||
+                            (!item.isDir() && starts_with(spec.dest_norm, candidate + "/"))) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
+                if (conflicts_with(other_raw) || (zip_encoding.has_remapping() && conflicts_with(other_decoded))) {
+                    out.error_code = "CONFLICT";
+                    out.error_msg = "Destination path already exists in archive";
+                    return out;
+                }
+            }
+
+            if (*fmt == bit7z::BitFormat::Tar) {
+                if (!prepare_tar_inplace_updates(
+                        reader, updates, matched_list, tar_temp_dir, cancel_flag, out)) {
+                    return out;
+                }
+            }
+        }
+
+        apply_inplace_path_updates(
+            lib, params.archive, *fmt, params.password, updates, matched_list,
+            tar_temp_dir, progress_sink, cancel_flag, out);
+        return out;
+    } catch (const OperationCancelled&) {
+        out.error_code = "CANCELLED";
+        out.error_msg = "Operation cancelled";
+        return out;
+    } catch (const bit7z::BitException& ex) {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+        } else if (is_inplace_unsupported_error(ex)) {
+            out.error_code = "UNSUPPORTED_INPLACE";
+            out.error_msg = ex.what();
+        } else {
+            out.error_code = classify_bit7z_error(ex, password_provided);
+            out.error_msg = ex.what();
+        }
+        return out;
+    } catch (const std::exception& ex) {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+        } else {
+            out.error_code = "INTERNAL_ERROR";
+            out.error_msg = ex.what();
+        }
+        return out;
+    }
+}
+
+OperationOutcome run_update_password(const bit7z::Bit7zLibrary& lib,
+                                     const UpdatePasswordParams& params,
+                                     const ProgressSink* progress_sink,
+                                     std::atomic<bool>* cancel_flag) {
+    OperationOutcome out;
+    if (params.archive.empty()) {
+        out.error_code = "INVALID_PARAMS";
+        out.error_msg = "Invalid 'update_password' parameters";
+        return out;
+    }
+
+    if (detect_split_volume_info(params.archive).is_split) {
+        out.error_code = "UNSUPPORTED_INPLACE";
+        out.error_msg = "Cannot update password on a multi-volume archive";
+        return out;
+    }
+
+    const bit7z::BitInOutFormat* fmt = resolve_inplace_format(
+        lib, params.archive, params.format, params.old_password, out.error_code, out.error_msg);
+    if (!fmt) {
+        return out;
+    }
+    if (*fmt != bit7z::BitFormat::Zip && *fmt != bit7z::BitFormat::SevenZip) {
+        out.error_code = "UNSUPPORTED_INPLACE";
+        out.error_msg = "Password updates are only supported for zip and 7z archives";
+        return out;
+    }
+
+    std::error_code ec;
+    if (!fs::exists(params.archive, ec)) {
+        out.error_code = "PATH_NOT_FOUND";
+        out.error_msg = "Archive not found: " + params.archive;
+        return out;
+    }
+
+    struct ScopedTempArchive {
+        fs::path path;
+        bool keep = false;
+        ~ScopedTempArchive() {
+            if (!keep && !path.empty()) {
+                std::error_code rem_ec;
+                fs::remove(path, rem_ec);
+            }
+        }
+    };
+
+    static std::atomic<uint64_t> tmp_seq{0};
+    const auto seq = tmp_seq.fetch_add(1, std::memory_order_relaxed);
+    const fs::path archive_fs(params.archive);
+    const fs::path tmp_path = archive_fs.parent_path().empty()
+        ? fs::path(params.archive + ".bento7z_tmp_" + std::to_string(seq))
+        : (archive_fs.parent_path() /
+           (archive_fs.filename().string() + ".bento7z_tmp_" + std::to_string(seq)));
+    ScopedTempArchive tmp_guard{tmp_path, false};
+    ScopedTempDir temp_dir;
+
+    const bool old_password_provided = !params.old_password.empty();
+    try {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return out;
+        }
+
+        {
+            bit7z::BitArchiveReader reader(lib, params.archive, *fmt, params.old_password);
+            ExtractParams ext;
+            ext.archive = params.archive;
+            ext.output = temp_dir.string();
+            ext.password = params.old_password;
+            ext.format = params.format;
+            if (reader.itemsCount() > 0) {
+                std::string err_msg;
+                std::string err_code = "BIT7Z_ERROR";
+                if (!extract_from_reader(
+                        reader, ext, progress_sink, cancel_flag, err_msg, err_code, ProgressStage::Normal)) {
+                    out.error_code = err_code;
+                    out.error_msg = err_msg;
+                    return out;
+                }
+            }
+        }
+
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return out;
+        }
+
+        bit7z::BitArchiveWriter writer(lib, *fmt);
+        writer.setThreadsCount(hardware_threads_or_one());
+        writer.setCompressionLevel(bit7z::BitCompressionLevel::Normal);
+        writer.setRetainDirectories(false);
+        writer.setStoreSymbolicLinks(true);
+
+        if (!params.new_password.empty()) {
+            const bool crypt_headers = (*fmt == bit7z::BitFormat::SevenZip) && params.encrypt_headers;
+            writer.setPassword(params.new_password, crypt_headers);
+            if (*fmt == bit7z::BitFormat::Zip) {
+                const std::string em = to_lower_ascii(params.encryption_method);
+                if (em == "zipcrypto") {
+                    writer.setFormatProperty(L"em", L"ZipCrypto");
+                } else if (em == "aes256" || em == "aes") {
+                    writer.setFormatProperty(L"em", L"AES256");
+                }
+            }
+        }
+
+        CompressParams repack;
+        repack.archive = tmp_path.string();
+        repack.preserve_paths = true;
+        repack.follow_symlinks = false;
+        for (const auto& entry : fs::directory_iterator(temp_dir.path(), ec)) {
+            repack.paths.push_back(entry.path().string());
+        }
+        if (ec) {
+            out.error_code = "INTERNAL_ERROR";
+            out.error_msg = "Failed to enumerate extracted entries: " + ec.message();
+            return out;
+        }
+
+        ProgressSink sink = (progress_sink != nullptr) ? *progress_sink : ProgressSink{};
+        ProgressAdapter progress(std::move(sink), ProgressStage::Normal, cancel_flag);
+        progress.attach(writer);
+
+        std::string missing_path;
+        if (!repack.paths.empty() && !add_paths_to_writer(writer, repack, missing_path, cancel_flag)) {
+            out.error_code = "INTERNAL_ERROR";
+            out.error_msg = "Missing extracted temp path: " + missing_path;
+            return out;
+        }
+
+        writer.compressTo(tmp_path.string());
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+            return out;
+        }
+        progress.flush();
+
+        std::error_code ren_ec;
+        fs::rename(tmp_path, archive_fs, ren_ec);
+        if (ren_ec) {
+            out.error_code = "INTERNAL_ERROR";
+            out.error_msg = "Failed to replace archive atomically: " + ren_ec.message();
+            return out;
+        }
+        tmp_guard.keep = true;
+
+        out.ok = true;
+        out.archive_deleted = false;
+        out.output_size = file_size_or_zero(params.archive);
+        return out;
+    } catch (const OperationCancelled&) {
+        out.error_code = "CANCELLED";
+        out.error_msg = "Operation cancelled";
+        return out;
+    } catch (const bit7z::BitException& ex) {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+        } else {
+            out.error_code = classify_bit7z_error(ex, old_password_provided);
+            out.error_msg = ex.what();
+        }
+        return out;
+    } catch (const std::exception& ex) {
+        if (is_cancelled(cancel_flag)) {
+            out.error_code = "CANCELLED";
+            out.error_msg = "Operation cancelled";
+        } else {
+            out.error_code = "INTERNAL_ERROR";
+            out.error_msg = ex.what();
+        }
+        return out;
+    }
+}
+
 CommandHandler::CommandHandler(const std::string& lib_path)
     : lib_(lib_path) {}
 
@@ -1345,6 +1813,10 @@ void CommandHandler::execute(const Request& req) {
             handle_rename(req);
         } else if (req.command == "test") {
             handle_test(req);
+        } else if (req.command == "move") {
+            handle_move(req);
+        } else if (req.command == "update_password") {
+            handle_update_password(req);
         } else {
             make_error(req.id, "Unknown command: " + req.command, "UNKNOWN_COMMAND")
                 .write(std::cout);
@@ -1384,8 +1856,11 @@ void CommandHandler::handle_list(const Request& req) {
         with_resolved_reader(
             lib_, outer_reader, params->archive, fmt_lower, params->tar_cache_path, &sink, nullptr,
             [&](bit7z::BitArchiveReader& reader, std::optional<uint64_t> outer_pack_size, bool used_tar_cache) {
+                const std::string outer_comment = outer_pack_size.has_value()
+                    ? extract_archive_comment(outer_reader)
+                    : std::string{};
                 auto result = build_list_result(
-                    reader, params->archive, outer_pack_size, used_tar_cache, params->encoding);
+                    reader, params->archive, outer_pack_size, used_tar_cache, params->encoding, outer_comment);
                 make_result(req.id, std::move(result)).write(std::cout);
             });
     } catch (const bit7z::BitException& ex) {
@@ -1565,6 +2040,47 @@ void CommandHandler::handle_test(const Request& req) {
     nlohmann::json result;
     result["archive"] = params->archive;
     result["items_tested"] = out.output_size;
+    result["output_size"] = out.output_size;
+    make_result(req.id, std::move(result)).write(std::cout);
+}
+
+void CommandHandler::handle_move(const Request& req) {
+    auto params = req.as_move();
+    if (!params) {
+        make_error(req.id, "Invalid 'move' parameters", "INVALID_PARAMS").write(std::cout);
+        return;
+    }
+
+    const ProgressSink sink = make_jsonl_progress_sink(req.id);
+    const OperationOutcome out = run_move(lib_, *params, &sink, nullptr);
+    if (!out.ok) {
+        make_error(req.id, out.error_msg, out.error_code).write(std::cout);
+        return;
+    }
+
+    nlohmann::json result;
+    result["archive"] = params->archive;
+    result["target_dir"] = params->target_dir;
+    result["output_size"] = out.output_size;
+    make_result(req.id, std::move(result)).write(std::cout);
+}
+
+void CommandHandler::handle_update_password(const Request& req) {
+    auto params = req.as_update_password();
+    if (!params) {
+        make_error(req.id, "Invalid 'update_password' parameters", "INVALID_PARAMS").write(std::cout);
+        return;
+    }
+
+    const ProgressSink sink = make_jsonl_progress_sink(req.id);
+    const OperationOutcome out = run_update_password(lib_, *params, &sink, nullptr);
+    if (!out.ok) {
+        make_error(req.id, out.error_msg, out.error_code).write(std::cout);
+        return;
+    }
+
+    nlohmann::json result;
+    result["archive"] = params->archive;
     result["output_size"] = out.output_size;
     make_result(req.id, std::move(result)).write(std::cout);
 }

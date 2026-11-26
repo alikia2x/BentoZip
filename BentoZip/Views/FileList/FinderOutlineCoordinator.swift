@@ -9,9 +9,20 @@ struct FilePromisePayload: Sendable {
 }
 
 @MainActor
-final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
     weak var outlineView: FinderOutlineView?
     weak var packedColumn: NSTableColumn?
+    weak var ratioColumn: NSTableColumn?
+    weak var crcColumn: NSTableColumn?
+    var draggingSessionNodes: [FileNode] = []
+
+    private static let hiddenColumnsDefaultsKey = "BentoZipOutlineHiddenColumns"
+    private var hiddenColumnIDs: Set<String> = {
+        if let stored = UserDefaults.standard.stringArray(forKey: "BentoZipOutlineHiddenColumns") {
+            return Set(stored)
+        }
+        return [FinderColumnID.ratio.rawValue, FinderColumnID.crc.rawValue]
+    }()
 
     var appState: AppState
     var progressState: ProgressState
@@ -104,7 +115,8 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
         guard let outlineView else { return }
         bindResumePreview()
 
-        packedColumn?.isHidden = (appState.mode != .browseArchive)
+        outlineView.setDraggingSourceOperationMask(appState.isWritableArchive ? .move : [], forLocal: true)
+        applyColumnVisibility(for: outlineView)
 
         let modeOrArchiveChanged = (lastMode != appState.mode || lastArchiveURL != appState.sourceArchiveURL)
         lastMode = appState.mode
@@ -338,6 +350,97 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
 
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> (any NSPasteboardWriting)? {
         makePasteboardWriter(for: item)
+    }
+
+    func outlineView(
+        _ outlineView: NSOutlineView,
+        draggingSession session: NSDraggingSession,
+        willBeginAt screenPoint: NSPoint,
+        forItems draggedItems: [Any]
+    ) {
+        draggingSessionNodes = draggedItems.compactMap { $0 as? FileNode }
+    }
+
+    func outlineView(
+        _ outlineView: NSOutlineView,
+        draggingSession session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        draggingSessionNodes.removeAll()
+    }
+
+    // MARK: - Header Column Visibility Menu
+
+    func configureColumnsAndHeaderMenu(for outlineView: NSOutlineView) {
+        applyColumnVisibility(for: outlineView)
+
+        let menu = NSMenu(title: String(localized: "Columns"))
+        menu.delegate = self
+        menu.autoenablesItems = false
+
+        let items: [(NSUserInterfaceItemIdentifier, String)] = [
+            (FinderColumnID.date, String(localized: "Date Modified")),
+            (FinderColumnID.size, String(localized: "Size")),
+            (FinderColumnID.packed, String(localized: "Packed")),
+            (FinderColumnID.ratio, String(localized: "Ratio")),
+            (FinderColumnID.crc, String(localized: "CRC32")),
+            (FinderColumnID.kind, String(localized: "Kind")),
+        ]
+        for (id, title) in items {
+            let item = NSMenuItem(title: title, action: #selector(toggleColumnVisibility(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = id.rawValue
+            menu.addItem(item)
+        }
+        outlineView.headerView?.menu = menu
+    }
+
+    func applyColumnVisibility(for outlineView: NSOutlineView) {
+        let archiveOnlyIDs: Set<String> = [
+            FinderColumnID.packed.rawValue,
+            FinderColumnID.ratio.rawValue,
+            FinderColumnID.crc.rawValue,
+        ]
+        for column in outlineView.tableColumns where column.identifier != FinderColumnID.name {
+            let id = column.identifier.rawValue
+            if archiveOnlyIDs.contains(id) && appState.mode != .browseArchive {
+                column.isHidden = true
+            } else {
+                column.isHidden = hiddenColumnIDs.contains(id)
+            }
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        let archiveOnlyIDs: Set<String> = [
+            FinderColumnID.packed.rawValue,
+            FinderColumnID.ratio.rawValue,
+            FinderColumnID.crc.rawValue,
+        ]
+        for item in menu.items {
+            guard let id = item.representedObject as? String else { continue }
+            let isArchiveOnly = archiveOnlyIDs.contains(id)
+            item.isEnabled = !isArchiveOnly || appState.mode == .browseArchive
+            if isArchiveOnly && appState.mode != .browseArchive {
+                item.state = .off
+            } else {
+                item.state = hiddenColumnIDs.contains(id) ? .off : .on
+            }
+        }
+    }
+
+    @objc private func toggleColumnVisibility(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        if hiddenColumnIDs.contains(id) {
+            hiddenColumnIDs.remove(id)
+        } else {
+            hiddenColumnIDs.insert(id)
+        }
+        UserDefaults.standard.set(Array(hiddenColumnIDs), forKey: Self.hiddenColumnsDefaultsKey)
+        if let outlineView {
+            applyColumnVisibility(for: outlineView)
+        }
     }
 
     // MARK: - NSOutlineViewDelegate

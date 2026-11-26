@@ -13,6 +13,9 @@ extension AppState {
         recentValidationTask = nil
         activeConflictPrompt?.cancel()
         activeConflictPrompt = nil
+        externalEditMonitor.stopAll()
+        pendingExternalEdits.removeAll()
+        cleanupNestedArchives()
         isLoading = false
         browseProgress = nil
         browseStage = .normal
@@ -341,7 +344,13 @@ extension AppState {
         await navigateIntoAsync(node(for: entry.id) ?? FileNode(entry: entry))
     }
 
-    public func navigateUp() { popNavigationNode() }
+    public func navigateUp() {
+        if !navigationNodeIDs.isEmpty {
+            popNavigationNode()
+        } else if isViewingNestedArchive {
+            popNestedArchive()
+        }
+    }
 
     public func navigateBack(to level: Int = 0) { truncateNavigation(to: level) }
 

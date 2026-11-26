@@ -209,6 +209,14 @@ bool decode_compress_request(const std::vector<uint8_t>& payload, CompressParams
             !r.read_string(out.encryption_method)) {
             return false;
         }
+        if (r.remaining() > 0) {
+            uint8_t flags = 0;
+            if (!r.read_u8(flags)) {
+                return false;
+            }
+            out.encrypt_headers = ((flags & 0x01u) != 0u);
+            out.follow_symlinks = ((flags & 0x02u) != 0u);
+        }
     }
     return true;
 }
@@ -254,6 +262,30 @@ bool decode_test_request(const std::vector<uint8_t>& payload, TestParams& out) {
            r.read_string(out.tar_cache_path);
 }
 
+bool decode_move_request(const std::vector<uint8_t>& payload, MoveParams& out) {
+    BinaryReader r(payload.data(), payload.size());
+    return r.read_string(out.archive) &&
+           r.read_string(out.password) &&
+           r.read_string(out.format) &&
+           r.read_string_array(out.entries) &&
+           r.read_string(out.target_dir);
+}
+
+bool decode_update_password_request(const std::vector<uint8_t>& payload, UpdatePasswordParams& out) {
+    BinaryReader r(payload.data(), payload.size());
+    uint8_t encrypt_headers = 1;
+    if (!r.read_string(out.archive) ||
+        !r.read_string(out.old_password) ||
+        !r.read_string(out.new_password) ||
+        !r.read_string(out.format) ||
+        !r.read_string(out.encryption_method) ||
+        !r.read_u8(encrypt_headers)) {
+        return false;
+    }
+    out.encrypt_headers = (encrypt_headers != 0);
+    return true;
+}
+
 std::vector<uint8_t> encode_progress_frame(uint64_t req_id,
                                            uint8_t stage,
                                            uint64_t processed_bytes,
@@ -273,12 +305,14 @@ std::vector<uint8_t> encode_list_meta_frame(uint64_t req_id,
                                             uint64_t items_count,
                                             uint64_t total_size,
                                             uint64_t packed_size,
-                                            bool used_tar_cache) {
-    BinaryFrameBuilder b(8 + 8 + 8 + 1);
+                                            bool used_tar_cache,
+                                            std::string_view comment) {
+    BinaryFrameBuilder b(8 + 8 + 8 + 1 + 4 + comment.size());
     b.write_u64(items_count);
     b.write_u64(total_size);
     b.write_u64(packed_size);
     b.write_u8(used_tar_cache ? 1 : 0);
+    b.write_string(comment);
     return b.finalize(BinaryMsgType::ListMeta, req_id);
 }
 

@@ -51,11 +51,14 @@ public final class DragDropManager {
             ) else {
                 return
             }
-            let prefix = "BentoZip-drag-"
+            let prefixes = ["BentoZip-drag-", "BentoZip-nested-"]
             for item in contents {
                 let name = item.lastPathComponent
-                guard name.hasPrefix(prefix), name != currentSessionName else { continue }
-                let suffix = name.dropFirst(prefix.count)
+                guard name != currentSessionName,
+                      let matchedPrefix = prefixes.first(where: { name.hasPrefix($0) }) else {
+                    continue
+                }
+                let suffix = name.dropFirst(matchedPrefix.count)
                 guard let firstSegment = suffix.split(separator: "-").first,
                       let pid = pid_t(firstSegment),
                       pid > 0,

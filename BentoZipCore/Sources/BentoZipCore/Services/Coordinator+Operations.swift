@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 
 extension CompressionCoordinator {
 
@@ -110,6 +111,7 @@ extension CompressionCoordinator {
         let shouldReveal = appState.revealInFinderAfterExtract
         let shouldTrashAfterExtract = isFullExtract && appState.moveArchiveToTrashAfterExtract
         let shouldCloseAfterExtract = isFullExtract && appState.closeWindowAfterExtract
+        let shouldStripQuarantine = appState.stripQuarantineOnExtract
         let destinationExistedBefore = Bento7zPathSafety.itemExists(at: destinationURL)
 
         let estimatedBytes: Int64 = if let entries, !entries.isEmpty {
@@ -177,6 +179,19 @@ extension CompressionCoordinator {
                         appState.cancelPasswordPrompt()
                     }
                     self.pendingExtractDestinationURL = nil
+                }
+
+                if shouldStripQuarantine {
+                    let stripTargets: [URL] = if !isFullExtract, !mergedURLs.isEmpty {
+                        mergedURLs
+                    } else if isFullExtract && (!mergedURLs.isEmpty || Bento7zPathSafety.itemExists(at: finalDestinationURL)) {
+                        [finalDestinationURL]
+                    } else {
+                        []
+                    }
+                    if !stripTargets.isEmpty {
+                        await Self.stripQuarantineAttributes(at: stripTargets)
+                    }
                 }
 
                 if shouldReveal {
@@ -250,6 +265,7 @@ extension CompressionCoordinator {
         let shouldUnwrap = prefs.unwrapSingleTopDirectory
         let shouldReveal = prefs.revealInFinderAfterExtract
         let shouldTrash = prefs.moveArchiveToTrashAfterExtract
+        let shouldStripQuarantine = prefs.stripQuarantineOnExtract
 
         guard let destinationURL = resolveDirectExtractDestinationURL(
             archiveURL: archiveURL,
@@ -310,6 +326,10 @@ extension CompressionCoordinator {
 
                 await self.completeOperation(context.id) {
                     preferencesManager?.recordArchive(archiveURL.path)
+                }
+
+                if shouldStripQuarantine && Bento7zPathSafety.itemExists(at: mergeResult.finalDestinationURL) {
+                    await Self.stripQuarantineAttributes(at: [mergeResult.finalDestinationURL])
                 }
 
                 if shouldReveal && Bento7zPathSafety.itemExists(at: mergeResult.finalDestinationURL) {
@@ -628,8 +648,333 @@ extension CompressionCoordinator {
             password: appState.archivePassword,
             encoding: encoding,
             preserveSearch: true,
+            preserveNestedStack: appState.isViewingNestedArchive,
             appState: appState
         )
+    }
+
+    public func moveEntries(
+        appState: AppState,
+        entries: [FileEntry],
+        toTargetDir targetDir: String,
+        progressState: ProgressState
+    ) async {
+        guard !progressState.isOperationInProgress,
+              appState.mode == .browseArchive,
+              !appState.isViewingNestedArchive,
+              let archiveURL = appState.sourceArchiveURL,
+              !entries.isEmpty else { return }
+
+        let password = appState.archivePassword
+        let context = startOperation(
+            progressState: progressState,
+            description: String(localized: "Moving items…", bundle: .module),
+            kind: .moveEntries,
+            totalFiles: entries.count,
+            destinationURL: archiveURL,
+            sourceArchiveURL: archiveURL
+        )
+
+        await runManagedTask(context: context, progressState: progressState) {
+            do {
+                try await self.engine.moveEntries(
+                    in: archiveURL,
+                    entries: entries,
+                    toTargetDir: targetDir,
+                    password: password,
+                    onProgress: context.progressHandler
+                )
+                DragDropManager.shared.invalidateCache(for: archiveURL)
+                ArchiveCacheManager.shared.invalidate(for: archiveURL)
+                try Task.checkCancellation()
+                try await self.refreshArchiveContentsIfStillViewing(at: archiveURL, password: password, into: appState)
+                appState.lastError = nil
+                await self.completeOperation(context.id)
+            } catch is CancellationError {
+                self.abortOperation(context.id)
+            } catch {
+                self.abortOperation(context.id)
+                appState.lastError = String(localized: "Failed to move items: \(error.localizedDescription)", bundle: .module)
+            }
+        }
+    }
+
+    public func updatePassword(
+        appState: AppState,
+        newPassword: String?,
+        encryptionMethod: ZipEncryptionMethod = .aes256,
+        encryptHeaders: Bool = true,
+        progressState: ProgressState
+    ) async {
+        guard !progressState.isOperationInProgress,
+              appState.mode == .browseArchive,
+              !appState.isViewingNestedArchive,
+              let archiveURL = appState.sourceArchiveURL else { return }
+
+        let oldPassword = appState.archivePassword
+        let normalizedNewPassword = (newPassword?.isEmpty == false) ? newPassword : nil
+        let context = startOperation(
+            progressState: progressState,
+            description: String(localized: "Updating archive password…", bundle: .module),
+            kind: .updatePassword,
+            totalBytes: appState.totalSize,
+            destinationURL: archiveURL,
+            sourceArchiveURL: archiveURL
+        )
+
+        await runManagedTask(context: context, progressState: progressState) {
+            do {
+                try await self.engine.updatePassword(
+                    in: archiveURL,
+                    oldPassword: oldPassword,
+                    newPassword: normalizedNewPassword,
+                    encryptionMethod: encryptionMethod.bento7zValue,
+                    encryptHeaders: encryptHeaders,
+                    onProgress: context.progressHandler
+                )
+                DragDropManager.shared.invalidateCache(for: archiveURL)
+                ArchiveCacheManager.shared.invalidate(for: archiveURL)
+                appState.archivePassword = normalizedNewPassword
+                try Task.checkCancellation()
+                try await self.refreshArchiveContentsIfStillViewing(at: archiveURL, password: normalizedNewPassword, into: appState)
+                appState.lastError = nil
+                await self.completeOperation(context.id)
+            } catch is CancellationError {
+                self.abortOperation(context.id)
+            } catch {
+                self.abortOperation(context.id)
+                appState.lastError = String(localized: "Failed to update password: \(error.localizedDescription)", bundle: .module)
+            }
+        }
+    }
+
+    /// Extract a nested archive entry into a temporary directory, push the parent archive onto `nestedArchiveStack`, and browse it.
+    public func openNestedArchive(
+        entry: FileEntry,
+        appState: AppState,
+        progressState: ProgressState
+    ) async {
+        guard !progressState.isOperationInProgress,
+              appState.mode == .browseArchive,
+              !entry.isDirectory,
+              entry.isFromArchive,
+              let parentArchiveURL = appState.sourceArchiveURL else { return }
+
+        let trimmedName = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              !trimmedName.contains("/"),
+              !trimmedName.contains("\\"),
+              !trimmedName.contains("\0"),
+              trimmedName != ".",
+              trimmedName != ".." else {
+            appState.lastError = String(localized: "Invalid archive entry name.", bundle: .module)
+            return
+        }
+
+        let parentPassword = appState.archivePassword
+        let encodingName = appState.selectedEncoding.iconvName
+        let relPath = Bento7zPathSafety.archiveRelativePath(for: entry)
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let nestedDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BentoZip-nested-\(pid)-\(UUID().uuidString)", isDirectory: true)
+        let nestedArchiveURL = nestedDir.appendingPathComponent(trimmedName)
+
+        let context = startOperation(
+            progressState: progressState,
+            description: String(localized: "Opening \(trimmedName)…", bundle: .module),
+            kind: .extract,
+            totalBytes: max(0, entry.size),
+            totalFiles: 1,
+            destinationURL: nestedArchiveURL,
+            sourceArchiveURL: parentArchiveURL
+        )
+
+        var didOpenNested = false
+        await runManagedTask(context: context, progressState: progressState) {
+            do {
+                try FileManager.default.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+                if let b7z = self.engine as? Bento7zEngine {
+                    try await b7z.extractEntry(
+                        from: parentArchiveURL,
+                        entryPath: relPath,
+                        to: nestedArchiveURL,
+                        password: parentPassword,
+                        encoding: encodingName,
+                        onProgress: context.progressHandler
+                    )
+                } else {
+                    try await self.engine.extract(
+                        archiveURL: parentArchiveURL,
+                        entries: [entry],
+                        to: nestedDir,
+                        password: parentPassword,
+                        encoding: encodingName,
+                        onProgress: context.progressHandler
+                    )
+                    let directCandidate = try Bento7zPathSafety.verifiedDescendantURL(relativePath: relPath, baseDirectory: nestedDir)
+                    if directCandidate.standardizedFileURL != nestedArchiveURL.standardizedFileURL,
+                       Bento7zPathSafety.itemExists(at: directCandidate) {
+                        if Bento7zPathSafety.itemExists(at: nestedArchiveURL) {
+                            try FileManager.default.removeItem(at: nestedArchiveURL)
+                        }
+                        try FileManager.default.moveItem(at: directCandidate, to: nestedArchiveURL)
+                    }
+                }
+                try Task.checkCancellation()
+                guard Bento7zPathSafety.itemExists(at: nestedArchiveURL) else {
+                    throw Bento7zError.fileNotFound(relPath)
+                }
+
+                await self.completeOperation(context.id) {
+                    appState.lastError = nil
+                }
+                didOpenNested = true
+            } catch is CancellationError {
+                try? FileManager.default.removeItem(at: nestedDir)
+                self.abortOperation(context.id)
+            } catch let error as Bento7zError where error == .passwordRequired || error == .wrongPassword {
+                try? FileManager.default.removeItem(at: nestedDir)
+                if error == .wrongPassword && appState.sourceArchiveURL?.standardizedFileURL == parentArchiveURL.standardizedFileURL {
+                    appState.archivePassword = nil
+                }
+                self.abortOperation(context.id)
+                self.presentPasswordPrompt(
+                    for: parentArchiveURL,
+                    action: .openNestedArchive(entry),
+                    error: error,
+                    in: appState
+                )
+            } catch {
+                try? FileManager.default.removeItem(at: nestedDir)
+                self.abortOperation(context.id)
+                appState.lastError = String(localized: "Unable to open nested archive: \(error.localizedDescription)", bundle: .module)
+            }
+        }
+
+        if didOpenNested {
+            appState.pushNestedArchiveFrame(newTempDirectoryURL: nestedDir)
+            await browseArchive(
+                at: nestedArchiveURL,
+                password: nil,
+                encoding: .auto,
+                preserveNestedStack: true,
+                appState: appState
+            )
+        }
+    }
+
+    /// Save an externally modified temporary file back into its parent writable archive at its original path.
+    public func saveBackExternalEdit(
+        _ edit: PendingExternalEdit,
+        appState: AppState,
+        progressState: ProgressState
+    ) async {
+        guard !progressState.isOperationInProgress,
+              appState.mode == .browseArchive,
+              appState.isWritableArchive,
+              appState.sourceArchiveURL?.standardizedFileURL == edit.archiveURL.standardizedFileURL else { return }
+
+        guard Bento7zPathSafety.itemExists(at: edit.tempURL) else {
+            appState.pendingExternalEdits.removeAll { $0.id == edit.id }
+            appState.lastError = String(localized: "Modified temporary file could not be found.", bundle: .module)
+            return
+        }
+
+        let cleanRelPath: String
+        do {
+            cleanRelPath = try Bento7zPathSafety.validatedRelativePath(edit.archiveRelativePath)
+        } catch {
+            appState.lastError = error.localizedDescription
+            return
+        }
+
+        let components = cleanRelPath.split(separator: "/").map(String.init)
+        let leafName = components.last ?? edit.fileName
+        let parentPrefix: String? = components.count > 1 ? components.dropLast().joined(separator: "/") : nil
+        let password = appState.archivePassword
+        let archiveURL = edit.archiveURL
+
+        let context = startOperation(
+            progressState: progressState,
+            description: String(localized: "Saving \(leafName) to archive…", bundle: .module),
+            kind: .addEntries,
+            totalFiles: 1,
+            destinationURL: archiveURL,
+            sourceArchiveURL: archiveURL
+        )
+
+        await runManagedTask(context: context, progressState: progressState) {
+            var stagingDir: URL?
+            defer {
+                if let stagingDir {
+                    try? FileManager.default.removeItem(at: stagingDir)
+                }
+            }
+
+            do {
+                let sourceURLToAdd: URL
+                if edit.tempURL.lastPathComponent == leafName {
+                    sourceURLToAdd = edit.tempURL
+                } else {
+                    let tempStage = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("BentoZip_saveback_\(UUID().uuidString)", isDirectory: true)
+                    try FileManager.default.createDirectory(at: tempStage, withIntermediateDirectories: true)
+                    stagingDir = tempStage
+                    let renamed = tempStage.appendingPathComponent(leafName)
+                    try FileManager.default.copyItem(at: edit.tempURL, to: renamed)
+                    sourceURLToAdd = renamed
+                }
+
+                try await self.engine.addEntries(
+                    to: archiveURL,
+                    from: [sourceURLToAdd],
+                    targetPrefix: parentPrefix,
+                    password: password,
+                    onProgress: context.progressHandler
+                )
+                DragDropManager.shared.invalidateCache(for: archiveURL)
+                ArchiveCacheManager.shared.invalidate(for: archiveURL)
+                appState.externalEditMonitor.acknowledgeChange(at: edit.tempURL)
+                appState.pendingExternalEdits.removeAll { $0.id == edit.id }
+                try Task.checkCancellation()
+                try await self.refreshArchiveContentsIfStillViewing(at: archiveURL, password: password, into: appState)
+                appState.lastError = nil
+                await self.completeOperation(context.id)
+            } catch is CancellationError {
+                self.abortOperation(context.id)
+            } catch {
+                self.abortOperation(context.id)
+                appState.lastError = String(localized: "Failed to save modified file back to archive: \(error.localizedDescription)", bundle: .module)
+            }
+        }
+    }
+
+    /// Compute SHA-256 and MD5 checksums for a local or archive file entry.
+    public func computeChecksums(
+        for entry: FileEntry,
+        appState: AppState
+    ) async throws -> FileChecksums {
+        guard !entry.isDirectory else {
+            throw Bento7zError.operationFailed(
+                String(localized: "Checksums can only be computed for files.", bundle: .module),
+                "INVALID_PARAMS"
+            )
+        }
+        if !entry.isFromArchive {
+            return try await FileHashUtils.computeHashes(for: entry.url)
+        }
+        guard let archiveURL = appState.sourceArchiveURL else {
+            throw Bento7zError.fileNotFound(entry.name)
+        }
+        guard let extractedURL = try await DragDropManager.shared.prepareForDragThrowing(
+            entry,
+            sourceArchiveURL: archiveURL,
+            password: appState.archivePassword,
+            encoding: appState.selectedEncoding.iconvName
+        ) else {
+            throw Bento7zError.fileNotFound(entry.name)
+        }
+        return try await FileHashUtils.computeHashes(for: extractedURL)
     }
 
     public func extractEntryForOpen(
@@ -664,6 +1009,16 @@ extension CompressionCoordinator {
                 }
                 appState.cancelPasswordPrompt()
                 appState.lastError = nil
+
+                if appState.isWritableArchive,
+                   appState.sourceArchiveURL?.standardizedFileURL == effectiveArchiveURL.standardizedFileURL {
+                    appState.externalEditMonitor.watch(
+                        tempURL: extractedURL,
+                        archiveURL: effectiveArchiveURL,
+                        archiveRelativePath: Bento7zPathSafety.archiveRelativePath(for: entry),
+                        password: appState.archivePassword
+                    )
+                }
             }
             await openLocalURL(extractedURL, withApplicationAt: appURL)
         } catch is CancellationError {
@@ -692,6 +1047,26 @@ extension CompressionCoordinator {
         } else {
             NSWorkspace.shared.open(fileURL)
         }
+    }
+
+    private static func stripQuarantineAttributes(at urls: [URL]) async {
+        await Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            let attrName = "com.apple.quarantine"
+            for rootURL in urls {
+                _ = removexattr(rootURL.path, attrName, XATTR_NOFOLLOW)
+                if Bento7zPathSafety.itemStatus(at: rootURL).isDirectory,
+                   let enumerator = fm.enumerator(
+                    at: rootURL,
+                    includingPropertiesForKeys: nil,
+                    options: []
+                   ) {
+                    while let child = enumerator.nextObject() as? URL {
+                        _ = removexattr(child.path, attrName, XATTR_NOFOLLOW)
+                    }
+                }
+            }
+        }.value
     }
 
     private static func trashArchiveAndSplitVolumes(at archiveURL: URL) async {
