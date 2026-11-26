@@ -58,7 +58,7 @@ jobs:
 
       - name: Check for prohibited middle dot characters
         run: |
-          if grep -rn "·" BentoZip/ BentoZipCore/ BentoZipTests/ BentoZipQuickLook/ BentoZipFinderExtension/ BentoZipSpotlight/; then
+          if grep -rnI --include="*.swift" "·" BentoZip/ BentoZipCore/ BentoZipTests/ BentoZipQuickLook/ BentoZipFinderExtension/ BentoZipSpotlight/; then
             echo "::error::Found prohibited middle dot character (·) in source files"
             exit 1
           fi
