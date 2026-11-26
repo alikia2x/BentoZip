@@ -238,9 +238,7 @@ private struct WorkspaceMenuCommands: Commands {
             Button("Find…") {
                 guard let appState = activeAppState,
                       appState.mode == .compress || appState.mode == .browseArchive else { return }
-                if !appState.isSearchVisible {
-                    appState.isSearchVisible = true
-                }
+                appState.isSearchVisible = true
                 activeUIState?.requestSearchFocus()
             }
             .keyboardShortcut("f", modifiers: .command)

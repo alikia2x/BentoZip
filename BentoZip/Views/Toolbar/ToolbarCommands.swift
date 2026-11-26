@@ -16,6 +16,8 @@ struct ToolbarCommands: ToolbarContent {
     private var isBusy: Bool { isLoading || isOperationInProgress }
 
     var body: some ToolbarContent {
+        @Bindable var appState = appState
+
         if appState.mode != .empty {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -147,20 +149,52 @@ struct ToolbarCommands: ToolbarContent {
                 }
             }
 
-            ToolbarItemGroup(placement: .automatic) {
-                Button {
-                    if appState.isSearchVisible {
-                        appState.searchQuery = ""
-                        appState.isSearchVisible = false
-                    } else {
-                        appState.isSearchVisible = true
-                        uiState.requestSearchFocus()
+            if #available(macOS 26.0, *) {
+                if appState.isSearchVisible {
+                    ToolbarItem(placement: .automatic) {
+                        ToolbarSearchField(
+                            text: $appState.searchQuery,
+                            isPresented: $appState.isSearchVisible,
+                            focusRequestID: uiState.searchFocusRequestID
+                        )
+                        .frame(width: 210)
                     }
-                } label: {
-                    Label("Find", systemImage: "magnifyingglass")
-                }
-                .help("Find")
+                    .sharedBackgroundVisibility(.hidden)
 
+                    ToolbarSpacer(.fixed, placement: .automatic)
+                } else {
+                    ToolbarItem(placement: .automatic) {
+                        Button {
+                            appState.isSearchVisible = true
+                            uiState.requestSearchFocus()
+                        } label: {
+                            Label("Find", systemImage: "magnifyingglass")
+                        }
+                        .help("Find")
+                    }
+                }
+            } else {
+                ToolbarItem(placement: .automatic) {
+                    if appState.isSearchVisible {
+                        ToolbarSearchField(
+                            text: $appState.searchQuery,
+                            isPresented: $appState.isSearchVisible,
+                            focusRequestID: uiState.searchFocusRequestID
+                        )
+                        .frame(width: 210)
+                    } else {
+                        Button {
+                            appState.isSearchVisible = true
+                            uiState.requestSearchFocus()
+                        } label: {
+                            Label("Find", systemImage: "magnifyingglass")
+                        }
+                        .help("Find")
+                    }
+                }
+            }
+
+            ToolbarItem(placement: .automatic) {
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) {
                         appState.showInspector.toggle()
@@ -210,6 +244,97 @@ struct ToolbarCommands: ToolbarContent {
                         progressState: progressState
                     )
                 }
+            }
+        }
+    }
+}
+
+private struct ToolbarSearchField: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var isPresented: Bool
+    let focusRequestID: UInt64
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isPresented: $isPresented)
+    }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let searchField = FocusableToolbarSearchField()
+        searchField.placeholderString = String(localized: "Search")
+        searchField.sendsWholeSearchString = false
+        searchField.sendsSearchStringImmediately = true
+        searchField.centersPlaceholder = false
+        searchField.bezelStyle = .roundedBezel
+        searchField.controlSize = .regular
+        searchField.delegate = context.coordinator
+        searchField.stringValue = text
+        searchField.lastHandledFocusRequestID = focusRequestID
+        return searchField
+    }
+
+    func updateNSView(_ nsView: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.isPresented = $isPresented
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        if let field = nsView as? FocusableToolbarSearchField,
+           field.lastHandledFocusRequestID != focusRequestID {
+            field.lastHandledFocusRequestID = focusRequestID
+            field.focusInWindow()
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+        var isPresented: Binding<Bool>
+
+        init(text: Binding<String>, isPresented: Binding<Bool>) {
+            self.text = text
+            self.isPresented = isPresented
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSSearchField else { return }
+            if text.wrappedValue != field.stringValue {
+                text.wrappedValue = field.stringValue
+            }
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                text.wrappedValue = ""
+                isPresented.wrappedValue = false
+                return true
+            }
+            return false
+        }
+    }
+
+    private final class FocusableToolbarSearchField: NSSearchField {
+        private var hasRequestedInitialFocus = false
+        var lastHandledFocusRequestID: UInt64 = 0
+
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: 210, height: super.intrinsicContentSize.height)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, !hasRequestedInitialFocus else { return }
+            hasRequestedInitialFocus = true
+            focusInWindow()
+        }
+
+        func focusInWindow() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.window else { return }
+                window.makeFirstResponder(self)
             }
         }
     }

@@ -11,6 +11,7 @@ struct FinderFileListRepresentable: NSViewRepresentable {
     let showInspector: Bool
     let treeStructureRevision: UInt64
     let nodeUpdateRevision: UInt64
+    let isSearchVisible: Bool
     let selectedEntryIDs: Set<UUID>
     let onRequestArchiveDelete: ([FileEntry]) -> Void
 

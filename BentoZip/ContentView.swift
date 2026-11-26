@@ -55,6 +55,11 @@ struct ContentView: View {
                 workspaceView(showInspector: $appState.showInspector)
             }
         }
+        .onChange(of: appState.isSearchVisible) { _, visible in
+            if !visible && !appState.searchQuery.isEmpty {
+                appState.searchQuery = ""
+            }
+        }
         .background(
             WindowDocumentBridge(
                 appState: appState,

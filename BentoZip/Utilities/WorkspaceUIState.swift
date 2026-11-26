@@ -2,7 +2,7 @@ import BentoZipCore
 import Observation
 import SwiftUI
 
-/// Per-window ephemeral UI state for sheets and inline search focus requests.
+/// Per-window ephemeral UI state for sheets and toolbar search focus requests.
 @Observable
 @MainActor
 final class WorkspaceUIState {

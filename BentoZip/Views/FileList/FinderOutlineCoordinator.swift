@@ -23,6 +23,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
     private var lastMode: ArchiveMode?
     private var lastArchiveURL: URL?
     private var lastShowInspector: Bool?
+    private var lastSearchVisible: Bool = false
     private var isUpdatingSelectionFromModel = false
     private var needsInitialWindowFocus = true
     private var hasScheduledDeferredFocusCheck = false
@@ -111,6 +112,9 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
         let inspectorOpenedInCompress = (lastShowInspector == false && appState.showInspector && appState.mode == .compress)
         lastShowInspector = appState.showInspector
 
+        let searchDismissed = (lastSearchVisible && !appState.isSearchVisible)
+        lastSearchVisible = appState.isSearchVisible
+
         if modeOrArchiveChanged {
             needsInitialWindowFocus = true
             QuickLookHelper.shared.closeIfVisible(for: outlineView)
@@ -135,7 +139,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
 
         syncSelectionFromModel(in: outlineView)
 
-        if inspectorOpenedInCompress {
+        if inspectorOpenedInCompress || searchDismissed {
             claimFirstResponderIfAppropriate()
         }
     }
@@ -261,7 +265,11 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        (item as? FileNode)?.isExpandable ?? false
+        let hasSearch = !appState.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if hasSearch {
+            return false
+        }
+        return (item as? FileNode)?.isExpandable ?? false
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
