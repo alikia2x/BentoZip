@@ -114,21 +114,19 @@ struct ArchiveInfoInspectorView: View {
                 }
             }
             .disabled(isBusy)
-        }
 
-        Section {
-            Button {
-                Task {
-                    await appState.coordinator.testArchive(
-                        appState: appState,
-                        progressState: progressState
-                    )
+            LabeledContent("Integrity") {
+                Button("Verify") {
+                    Task {
+                        await appState.coordinator.testArchive(
+                            appState: appState,
+                            progressState: progressState
+                        )
+                    }
                 }
-            } label: {
-                Label("Test Archive", systemImage: "checkmark.shield")
-                    .frame(maxWidth: .infinity)
+                .buttonStyle(InspectorPillButtonStyle(compact: true))
+                .disabled(isBusy)
             }
-            .disabled(isBusy)
         }
     }
 
@@ -137,39 +135,93 @@ struct ArchiveInfoInspectorView: View {
     @ViewBuilder
     private func singleSelectionSections(for node: FileNode) -> some View {
         let kind = FileKindCache.localizedKind(for: node)
+        let location = parentLocation(for: node)
 
         Section {
-            HStack(spacing: 10) {
-                Image(nsImage: FileIconCache.icon(for: node))
-                    .resizable()
-                    .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(nsImage: FileIconCache.icon(for: node))
+                        .resizable()
+                        .frame(width: 32, height: 32)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(node.name)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(node.name)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .lineLimit(2)
+                            .truncationMode(.middle)
 
-                    Text(kind)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        Text(kind)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !node.isDirectory {
+                    HStack(spacing: 8) {
+                        Button {
+                            let entry = node.toFileEntry()
+                            QuickLookHelper.shared.preview(
+                                nodes: [node],
+                                sourceArchiveURL: appState.sourceArchiveURL,
+                                password: appState.archivePassword,
+                                encoding: appState.selectedEncoding.iconvName
+                            ) { error in
+                                FileListTreeSupport.handleExtractionError(
+                                    error,
+                                    appState: appState,
+                                    retryAction: .preview([entry])
+                                )
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "eye")
+                                    .symbolRenderingMode(.monochrome)
+                                    .foregroundStyle(Color(nsColor: .labelColor))
+                                    .font(.system(size: 11.5, weight: .medium))
+                                Text("Quick Look")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(InspectorPillButtonStyle())
+                        .disabled(isBusy)
+
+                        Button {
+                            let entry = node.toFileEntry()
+                            Task {
+                                await appState.coordinator.extractEntryForOpen(
+                                    entry,
+                                    archiveURL: appState.sourceArchiveURL,
+                                    password: appState.archivePassword,
+                                    appState: appState
+                                )
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.up.forward.app")
+                                    .symbolRenderingMode(.monochrome)
+                                    .foregroundStyle(Color(nsColor: .labelColor))
+                                    .font(.system(size: 11.5, weight: .medium))
+                                Text("Open")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(InspectorPillButtonStyle())
+                        .disabled(isBusy)
+                    }
                 }
             }
             .padding(.vertical, 2)
         }
 
         Section("Info") {
-            LabeledContent("Kind") {
-                Text(kind)
-                    .foregroundStyle(.secondary)
-            }
-
-            LabeledContent("Path") {
-                Text(node.archiveRelativePath ?? node.name)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(3)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
+            if let location {
+                LabeledContent("Location") {
+                    Text(location)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(3)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
             }
 
             LabeledContent("Size") {
@@ -214,63 +266,10 @@ struct ArchiveInfoInspectorView: View {
             if let crc = node.crc {
                 LabeledContent("CRC32") {
                     Text(String(format: "%08X", crc))
-                        .font(.system(.body, design: .monospaced))
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
-            }
-        }
-
-        Section("Actions") {
-            if !node.isDirectory {
-                Button {
-                    let entry = node.toFileEntry()
-                    QuickLookHelper.shared.preview(
-                        nodes: [node],
-                        sourceArchiveURL: appState.sourceArchiveURL,
-                        password: appState.archivePassword,
-                        encoding: appState.selectedEncoding.iconvName
-                    ) { error in
-                        FileListTreeSupport.handleExtractionError(
-                            error,
-                            appState: appState,
-                            retryAction: .preview([entry])
-                        )
-                    }
-                } label: {
-                    Label("Quick Look", systemImage: "eye")
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(isBusy)
-            }
-
-            Button {
-                if node.isDirectory {
-                    appState.navigateInto(node)
-                } else {
-                    let entry = node.toFileEntry()
-                    Task {
-                        await appState.coordinator.extractEntryForOpen(
-                            entry,
-                            archiveURL: appState.sourceArchiveURL,
-                            password: appState.archivePassword,
-                            appState: appState
-                        )
-                    }
-                }
-            } label: {
-                Label("Open", systemImage: "arrow.up.forward.app")
-                    .frame(maxWidth: .infinity)
-            }
-            .disabled(isBusy)
-
-            if appState.isWritableArchive {
-                Button {
-                    uiState.renameTargetEntry = node.toFileEntry()
-                } label: {
-                    Label("Rename…", systemImage: "pencil")
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(isBusy)
             }
         }
     }
@@ -327,9 +326,11 @@ struct ArchiveInfoInspectorView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .disabled(isBusy)
 
-                    Spacer()
+                    Spacer(minLength: 8)
 
                     Button {
                         Task {
@@ -345,6 +346,8 @@ struct ArchiveInfoInspectorView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .disabled(isBusy)
                 } else {
                     Button("Extract All") {
@@ -358,9 +361,11 @@ struct ArchiveInfoInspectorView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .disabled(isBusy)
 
-                    Spacer()
+                    Spacer(minLength: 8)
 
                     Button {
                         let entries = selectedNodes.map { $0.toFileEntry() }
@@ -373,10 +378,13 @@ struct ArchiveInfoInspectorView: View {
                             )
                         }
                     } label: {
-                        Text(String(localized: "Extract Selected (\(selectedNodes.count))…"))
+                        Text(String(localized: "Extract (\(selectedNodes.count))"))
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help("Extract Selected…")
                     .disabled(isBusy)
                 }
             }
@@ -387,6 +395,16 @@ struct ArchiveInfoInspectorView: View {
     }
 
     // MARK: - Helpers
+
+    private func parentLocation(for node: FileNode) -> String? {
+        guard let rawPath = node.archiveRelativePath else { return nil }
+        var normalized = rawPath.replacingOccurrences(of: "\\", with: "/")
+        while normalized.hasPrefix("./") { normalized.removeFirst(2) }
+        while normalized.hasPrefix("/") { normalized.removeFirst() }
+        while normalized.hasSuffix("/") { normalized.removeLast() }
+        let parent = (normalized as NSString).deletingLastPathComponent
+        return (parent.isEmpty || parent == ".") ? nil : parent
+    }
 
     private var archiveMetaSummary: String {
         let format = appState.archiveFormatName ?? String(localized: "Archive")
@@ -425,5 +443,23 @@ struct ArchiveInfoInspectorView: View {
         }
         guard let children = node.children else { return 0 }
         return children.reduce(Int64(0)) { $0 + packedSubtreeSize(of: $1) }
+    }
+}
+
+private struct InspectorPillButtonStyle: ButtonStyle {
+    var compact: Bool = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: compact ? 11.5 : 12, weight: .medium))
+            .foregroundStyle(isEnabled ? .primary : .tertiary)
+            .padding(.horizontal, compact ? 10 : 8)
+            .padding(.vertical, compact ? 3 : 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.14 : 0.08))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }

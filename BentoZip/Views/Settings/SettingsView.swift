@@ -241,8 +241,11 @@ struct SettingsView: View {
                     Text("Set BentoZip as the default application when opening archive files in Finder.")
                 }
             }
-
-            Section {
+        }
+        .formStyle(.grouped)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider()
                 HStack {
                     Spacer()
                     Button("Set All as Default") {
@@ -253,9 +256,11 @@ struct SettingsView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(isUpdatingDefaults || allFamiliesDefault)
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(.bar)
             }
         }
-        .formStyle(.grouped)
     }
 
     // MARK: - Helpers

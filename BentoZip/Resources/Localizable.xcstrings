@@ -184,6 +184,7 @@
     },
     "%lld%%": {},
     "*.log": {},
+    "--": {},
     "1 GB": {},
     "10 MB": {},
     "100 MB": {},
@@ -369,6 +370,7 @@
       }
     },
     "Behavior": {
+      "extractionState": "stale",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -574,6 +576,7 @@
       }
     },
     "Compression": {
+      "extractionState": "stale",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -1097,6 +1100,22 @@
         }
       }
     },
+    "Extract (%lld)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extract (%lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "解压 (%lld)"
+          }
+        }
+      }
+    },
     "Extract All": {
       "localizations": {
         "en": {
@@ -1473,6 +1492,22 @@
         }
       }
     },
+    "Integrity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Integrity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完整性"
+          }
+        }
+      }
+    },
     "Invalid folder name.": {
       "localizations": {
         "en": {
@@ -1579,6 +1614,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在加载…"
+          }
+        }
+      }
+    },
+    "Location": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Location"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "位置"
           }
         }
       }
@@ -2329,12 +2380,12 @@
         }
       }
     },
-    "Show Hidden Files": {
+    "Show hidden files": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show Hidden Files"
+            "value": "Show hidden files"
           }
         },
         "zh-Hans": {
@@ -2345,12 +2396,12 @@
         }
       }
     },
-    "Show hidden files": {
+    "Show Hidden Files": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show hidden files"
+            "value": "Show Hidden Files"
           }
         },
         "zh-Hans": {
@@ -2566,11 +2617,28 @@
       }
     },
     "Unwrap single top-level folder on extract": {
+      "extractionState": "stale",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "自动展开单一顶层文件夹"
+          }
+        }
+      }
+    },
+    "Verify": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "校验"
           }
         }
       }

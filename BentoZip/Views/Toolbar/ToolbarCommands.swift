@@ -68,14 +68,6 @@ struct ToolbarCommands: ToolbarContent {
                         .help("Add to Archive")
 
                         Button {
-                            uiState.showNewFolderSheet = true
-                        } label: {
-                            Label("New Folder", systemImage: "folder.badge.plus")
-                        }
-                        .disabled(isBusy)
-                        .help("New Folder")
-
-                        Button {
                             showDeleteConfirmation = true
                         } label: {
                             Label("Delete", systemImage: "trash")
@@ -83,19 +75,6 @@ struct ToolbarCommands: ToolbarContent {
                         .disabled(selectedCount == 0 || isBusy)
                         .help("Delete Selected from Archive")
                     }
-
-                    Button {
-                        Task {
-                            await appState.coordinator.testArchive(
-                                appState: appState,
-                                progressState: progressState
-                            )
-                        }
-                    } label: {
-                        Label("Test Archive", systemImage: "checkmark.shield")
-                    }
-                    .disabled(isBusy)
-                    .help("Test Archive")
 
                     Menu {
                         Button {
