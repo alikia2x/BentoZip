@@ -122,6 +122,9 @@ public enum ArchiveFormat: String, CaseIterable, Identifiable, Codable, Sendable
     case tarGz = "TAR.GZ"
     case tarBz2 = "TAR.BZ2"
     case tarXz = "TAR.XZ"
+    case tarZstd = "TAR.ZST"
+    case zstd = "ZSTD"
+    case dmg = "DMG"
     case aar = "AAR"
 
     public var id: String { rawValue }
@@ -134,6 +137,9 @@ public enum ArchiveFormat: String, CaseIterable, Identifiable, Codable, Sendable
         case .tarGz: return "tar.gz"
         case .tarBz2: return "tar.bz2"
         case .tarXz: return "tar.xz"
+        case .tarZstd: return "tar.zst"
+        case .zstd: return "zst"
+        case .dmg: return "dmg"
         case .aar: return "aar"
         }
     }
@@ -155,6 +161,9 @@ public enum ArchiveFormat: String, CaseIterable, Identifiable, Codable, Sendable
         case .tarGz: return "tar.gz"
         case .tarBz2: return "tar.bz2"
         case .tarXz: return "tar.xz"
+        case .tarZstd: return "tar.zst"
+        case .zstd: return "zst"
+        case .dmg: return "dmg"
         case .aar: return "aar"
         }
     }
@@ -167,6 +176,9 @@ public enum ArchiveFormat: String, CaseIterable, Identifiable, Codable, Sendable
         switch rawValue.uppercased() {
         case "BZ2", "BZIP2": return .tarBz2
         case "XZ": return .tarXz
+        case "ZST", "ZSTD": return .zstd
+        case "TAR.ZST", "TZST", "TAR.ZSTD": return .tarZstd
+        case "DMG": return .dmg
         default: return nil
         }
     }
@@ -196,6 +208,14 @@ public enum ReadableArchiveFormat: String, CaseIterable, Identifiable, Sendable,
     case deb
     case rpm
     case lzh
+    case squashfs
+    case vmdk
+    case chm
+    case arj
+    case tarLz4
+    case lz4
+    case brotli
+    case epub
     case split7z
     case splitZip
     case splitTar
@@ -230,6 +250,14 @@ public enum ReadableArchiveFormat: String, CaseIterable, Identifiable, Sendable,
         case .deb: return "DEB"
         case .rpm: return "RPM"
         case .lzh: return "LZH"
+        case .squashfs: return "SquashFS"
+        case .vmdk: return "VMDK"
+        case .chm: return "CHM"
+        case .arj: return "ARJ"
+        case .tarLz4: return "TAR.LZ4"
+        case .lz4: return "LZ4"
+        case .brotli: return "Brotli"
+        case .epub: return "EPUB"
         case .split7z: return "7z (Split)"
         case .splitZip: return "ZIP (Split)"
         case .splitTar: return "TAR (Split)"
@@ -248,9 +276,11 @@ public enum ReadableArchiveFormat: String, CaseIterable, Identifiable, Sendable,
         case .tarGz: return .tarGz
         case .tarBz2: return .tarBz2
         case .tarXz: return .tarXz
+        case .tarZst: return .tarZstd
         case .aar: return .aar
-        case .gz, .bz2, .xz, .tarZst, .zst, .rar, .dmg, .iso, .xar,
+        case .gz, .bz2, .xz, .zst, .rar, .dmg, .iso, .xar,
              .cab, .wim, .cpio, .lzma, .deb, .rpm, .lzh,
+             .squashfs, .vmdk, .chm, .arj, .tarLz4, .lz4, .brotli, .epub,
              .split7z, .splitZip, .splitTar, .splitRar, .splitGeneric:
             return nil
         }
@@ -261,17 +291,18 @@ public enum ReadableArchiveFormat: String, CaseIterable, Identifiable, Sendable,
     }
 
     /// Format hint passed to bento7z when opening the container.
-    /// Single-stream compressed containers (`.gz`, `.bz2`, `.xz`, `.zst`) use `"auto"` so compound `.tar.*` streams unwrap cleanly.
+    /// Single-stream compressed containers (`.gz`, `.bz2`, `.xz`, `.zst`, `.lz4`, `.br`) use `"auto"` so compound `.tar.*` streams unwrap cleanly.
     public var bento7zFormatName: String {
         switch self {
-        case .zip, .splitZip: return "zip"
+        case .zip, .splitZip, .epub: return "zip"
         case .sevenZip, .split7z: return "7z"
         case .tar, .splitTar: return "tar"
         case .tarGz: return "tar.gz"
         case .tarBz2: return "tar.bz2"
         case .tarXz: return "tar.xz"
         case .tarZst: return "tar.zst"
-        case .gz, .bz2, .xz, .zst: return "auto"
+        case .tarLz4: return "tar.lz4"
+        case .gz, .bz2, .xz, .zst, .lz4, .brotli: return "auto"
         case .rar, .splitRar: return "rar"
         case .dmg: return "dmg"
         case .iso: return "iso"
@@ -283,6 +314,10 @@ public enum ReadableArchiveFormat: String, CaseIterable, Identifiable, Sendable,
         case .deb: return "deb"
         case .rpm: return "rpm"
         case .lzh: return "lzh"
+        case .squashfs: return "squashfs"
+        case .vmdk: return "vmdk"
+        case .chm: return "chm"
+        case .arj: return "arj"
         case .splitGeneric: return "split"
         case .aar: return "aar"
         }

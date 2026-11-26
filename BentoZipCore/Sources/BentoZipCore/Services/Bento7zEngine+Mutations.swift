@@ -650,7 +650,7 @@ extension Bento7zEngine {
         switch format {
         case .zip, .sevenZip, .tar:
             return true
-        case .tarGz, .tarBz2, .tarXz, .aar:
+        case .tarGz, .tarBz2, .tarXz, .tarZstd, .zstd, .dmg, .aar:
             return false
         }
     }

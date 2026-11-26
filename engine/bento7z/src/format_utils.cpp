@@ -87,7 +87,7 @@ const bit7z::BitInOutFormat* resolve_out_format(std::string_view fmt_lower) {
 const bit7z::BitInFormat* resolve_in_format(std::string_view fmt_lower) {
     if (fmt_lower.empty() || fmt_lower == "auto")   return &bit7z::BitFormat::Auto;
     if (fmt_lower == "7z")                          return &bit7z::BitFormat::SevenZip;
-    if (fmt_lower == "zip")                         return &bit7z::BitFormat::Zip;
+    if (fmt_lower == "zip" || fmt_lower == "epub")  return &bit7z::BitFormat::Zip;
     if (fmt_lower == "tar")                         return &bit7z::BitFormat::Tar;
     if (fmt_lower == "gz" || fmt_lower == "gzip")   return &bit7z::BitFormat::GZip;
     if (fmt_lower == "bz2" || fmt_lower == "bzip2") return &bit7z::BitFormat::BZip2;
@@ -100,7 +100,10 @@ const bit7z::BitInFormat* resolve_in_format(std::string_view fmt_lower) {
     if (fmt_lower == "dmg")                         return &bit7z::BitFormat::Dmg;
     if (fmt_lower == "xar" || fmt_lower == "pkg")   return &bit7z::BitFormat::Xar;
     if (fmt_lower == "zst" || fmt_lower == "zstd")  return &bit7z::BitFormat::Zstd;
+    if (fmt_lower == "z")                           return &bit7z::BitFormat::Z;
     if (fmt_lower == "lzma")                        return &bit7z::BitFormat::Lzma;
+    if (fmt_lower == "lzma86")                      return &bit7z::BitFormat::Lzma86;
+    if (fmt_lower == "ppmd")                        return &bit7z::BitFormat::Ppmd;
     if (fmt_lower == "cpio")                        return &bit7z::BitFormat::Cpio;
     if (fmt_lower == "rpm")                         return &bit7z::BitFormat::Rpm;
     if (fmt_lower == "deb")                         return &bit7z::BitFormat::Deb;
@@ -109,16 +112,25 @@ const bit7z::BitInFormat* resolve_in_format(std::string_view fmt_lower) {
     if (fmt_lower == "chm")                         return &bit7z::BitFormat::Chm;
     if (fmt_lower == "udf")                         return &bit7z::BitFormat::Udf;
     if (fmt_lower == "nsis")                        return &bit7z::BitFormat::Nsis;
+    if (fmt_lower == "squashfs")                    return &bit7z::BitFormat::SquashFS;
+    if (fmt_lower == "cramfs")                      return &bit7z::BitFormat::CramFS;
     if (fmt_lower == "vhd")                         return &bit7z::BitFormat::Vhd;
     if (fmt_lower == "vhdx")                        return &bit7z::BitFormat::Vhdx;
     if (fmt_lower == "vmdk")                        return &bit7z::BitFormat::VMDK;
     if (fmt_lower == "vdi")                         return &bit7z::BitFormat::VDI;
     if (fmt_lower == "qcow" || fmt_lower == "qcow2") return &bit7z::BitFormat::QCow;
+    if (fmt_lower == "gpt")                         return &bit7z::BitFormat::GPT;
+    if (fmt_lower == "mbr")                         return &bit7z::BitFormat::Mbr;
+    if (fmt_lower == "apm")                         return &bit7z::BitFormat::APM;
     if (fmt_lower == "ext")                         return &bit7z::BitFormat::Ext;
     if (fmt_lower == "fat")                         return &bit7z::BitFormat::Fat;
     if (fmt_lower == "ntfs")                        return &bit7z::BitFormat::Ntfs;
     if (fmt_lower == "hfs")                         return &bit7z::BitFormat::Hfs;
     if (fmt_lower == "apfs")                        return &bit7z::BitFormat::APFS;
+    if (fmt_lower == "pe")                          return &bit7z::BitFormat::Pe;
+    if (fmt_lower == "elf")                         return &bit7z::BitFormat::Elf;
+    if (fmt_lower == "macho")                       return &bit7z::BitFormat::Macho;
+    if (fmt_lower == "compound")                    return &bit7z::BitFormat::Compound;
     if (fmt_lower == "split" || fmt_lower == "001") return &bit7z::BitFormat::Split;
     return nullptr;
 }

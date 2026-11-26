@@ -17,7 +17,38 @@ if [ -z "${VERSION}" ]; then
   exit 1
 fi
 
-ARCH_MODE="${ARCH_MODE:-arm64}"
+HOST_ARCH="$(uname -m)"
+ARCH_MODE="${ARCH_MODE:-${HOST_ARCH}}"
+UNIVERSAL=0
+
+for arg in "$@"; do
+  case "${arg}" in
+    --universal)
+      UNIVERSAL=1
+      ;;
+    *)
+      echo "error: Unknown option '${arg}' (supported: --universal)" >&2
+      exit 1
+      ;;
+  esac
+done
+
+case "${ARCH_MODE}" in
+  universal|"arm64;x86_64"|"x86_64;arm64"|"arm64 x86_64"|"x86_64 arm64")
+    UNIVERSAL=1
+    ;;
+esac
+
+if [ "${UNIVERSAL}" = "1" ]; then
+  ENGINE_BUILD_ARGS=("--universal")
+  XCODE_ARCHS="arm64 x86_64"
+  ARTIFACT_ARCH="universal"
+else
+  ENGINE_BUILD_ARGS=()
+  XCODE_ARCHS="${ARCH_MODE}"
+  ARTIFACT_ARCH="${ARCH_MODE}"
+fi
+
 DO_CODESIGN="${CODESIGN:-0}"
 DO_NOTARIZE="${NOTARIZE:-0}"
 # Unset CODESIGN so xcodebuild does not treat it as the path to the codesign binary.
@@ -53,16 +84,16 @@ fi
 
 mkdir -p "${OUT_DIR}" "${STAGE_DIR}"
 
-echo "==> Step 1: Building bento7z engine (arch=${ARCH_MODE})"
-ARCH_MODE="${ARCH_MODE}" "${ROOT_DIR}/scripts/build-engine.sh"
+echo "==> Step 1: Building bento7z engine (arch=${ARTIFACT_ARCH})"
+ARCH_MODE="${ARCH_MODE}" "${ROOT_DIR}/scripts/build-engine.sh" "${ENGINE_BUILD_ARGS[@]+"${ENGINE_BUILD_ARGS[@]}"}"
 
-echo "==> Step 2: Building BentoZip.app (Release, arch=${ARCH_MODE}, CODESIGN=${DO_CODESIGN})"
+echo "==> Step 2: Building BentoZip.app (Release, arch=${XCODE_ARCHS}, CODESIGN=${DO_CODESIGN})"
 XCODEBUILD_ARGS=(
   -project "${ROOT_DIR}/BentoZip.xcodeproj"
   -scheme BentoZip
   -configuration Release
   -derivedDataPath "${DERIVED_DATA_DIR}"
-  "ARCHS=${ARCH_MODE}"
+  "ARCHS=${XCODE_ARCHS}"
   ONLY_ACTIVE_ARCH=NO
   CODE_SIGN_STYLE=Manual
 )
@@ -116,8 +147,8 @@ if [ "${DO_NOTARIZE}" = "1" ]; then
   spctl -a -vvv -t exec "${APP_OUT}"
 fi
 
-ZIP_NAME="BentoZip-${VERSION}-macos-${ARCH_MODE}.zip"
-DMG_NAME="BentoZip-${VERSION}-macos-${ARCH_MODE}.dmg"
+ZIP_NAME="BentoZip-${VERSION}-macos-${ARTIFACT_ARCH}.zip"
+DMG_NAME="BentoZip-${VERSION}-macos-${ARTIFACT_ARCH}.dmg"
 ZIP_PATH="${OUT_DIR}/${ZIP_NAME}"
 DMG_PATH="${OUT_DIR}/${DMG_NAME}"
 

@@ -36,27 +36,69 @@ set(BIT7Z_USE_NATIVE_STRING OFF CACHE BOOL "Use UTF-8 strings" FORCE)
 FetchContent_MakeAvailable(bit7z)
 
 # ---- Build 7z.so from the 7-Zip source that bit7z already downloaded ----
-# The source lives at ${CMAKE_BINARY_DIR}/_deps/7-zip-src
-set(SEVEN_ZIP_SRC "${CMAKE_BINARY_DIR}/_deps/7-zip-src")
+# The source lives at ${FETCHCONTENT_BASE_DIR}/7-zip-src (defaults to ${CMAKE_BINARY_DIR}/_deps/7-zip-src)
+set(SEVEN_ZIP_SRC "${FETCHCONTENT_BASE_DIR}/7-zip-src")
 set(SEVEN_ZIP_BUNDLE_DIR "${SEVEN_ZIP_SRC}/CPP/7zip/Bundles/Format7zF")
 set(SEVEN_ZIP_SO "${CMAKE_BINARY_DIR}/7z.so")
 
 if(APPLE)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-        set(SEVEN_ZIP_MAKEFILE "../../cmpl_mac_arm64.mak")
-        set(SEVEN_ZIP_OUT_SO "${SEVEN_ZIP_BUNDLE_DIR}/b/m_arm64/7z.so")
-        set(SEVEN_ZIP_ARCH_DESC "Apple Silicon arm64")
-    else()
-        set(SEVEN_ZIP_MAKEFILE "../../cmpl_mac_x64.mak")
-        set(SEVEN_ZIP_OUT_SO "${SEVEN_ZIP_BUNDLE_DIR}/b/m_x64/7z.so")
-        set(SEVEN_ZIP_ARCH_DESC "macOS x86_64")
+    set(_osx_archs "${CMAKE_OSX_ARCHITECTURES}")
+    if(NOT _osx_archs)
+        set(_osx_archs "${CMAKE_SYSTEM_PROCESSOR}")
     endif()
-    set(SEVEN_ZIP_MAKE_ARGS
-        -f "${SEVEN_ZIP_MAKEFILE}"
-        LOCAL_FLAGS=
-        "-j"
-    )
-    set(SEVEN_ZIP_MAKEFILE_DEP "${SEVEN_ZIP_BUNDLE_DIR}/${SEVEN_ZIP_MAKEFILE}")
+    list(LENGTH _osx_archs _osx_arch_count)
+    if(_osx_arch_count GREATER 1)
+        set(SEVEN_ZIP_ARCH_DESC "Universal arm64 + x86_64")
+        add_custom_command(
+            OUTPUT ${SEVEN_ZIP_SO}
+            COMMAND ${CMAKE_COMMAND} -E echo "Building 7z.so from 7-Zip (${SEVEN_ZIP_ARCH_DESC}, no external codecs)..."
+            COMMAND ${CMAKE_MAKE_PROGRAM} -C ${SEVEN_ZIP_BUNDLE_DIR} -f ../../cmpl_mac_arm64.mak LOCAL_FLAGS= "-j"
+            COMMAND ${CMAKE_MAKE_PROGRAM} -C ${SEVEN_ZIP_BUNDLE_DIR} -f ../../cmpl_mac_x64.mak LOCAL_FLAGS= "-j"
+            COMMAND lipo -create
+                "${SEVEN_ZIP_BUNDLE_DIR}/b/m_arm64/7z.so"
+                "${SEVEN_ZIP_BUNDLE_DIR}/b/m_x64/7z.so"
+                -output "${SEVEN_ZIP_SO}"
+            DEPENDS "${SEVEN_ZIP_SRC}/CPP/7zip/cmpl_mac_arm64.mak"
+                    "${SEVEN_ZIP_SRC}/CPP/7zip/cmpl_mac_x64.mak"
+                    ${SEVEN_ZIP_BUNDLE_DIR}/makefile.gcc
+                    ${SEVEN_ZIP_BUNDLE_DIR}/Arc_gcc.mak
+                    ${CMAKE_CURRENT_LIST_FILE}
+            COMMENT "Compiling Universal 7z.so from 7-Zip source (${SEVEN_ZIP_ARCH_DESC})"
+            VERBATIM
+        )
+    else()
+        if(_osx_archs MATCHES "x86_64|amd64|x64")
+            set(SEVEN_ZIP_MAKEFILE "../../cmpl_mac_x64.mak")
+            set(SEVEN_ZIP_MAKEFILE_DEP "${SEVEN_ZIP_SRC}/CPP/7zip/cmpl_mac_x64.mak")
+            set(SEVEN_ZIP_OUT_SO "${SEVEN_ZIP_BUNDLE_DIR}/b/m_x64/7z.so")
+            set(SEVEN_ZIP_ARCH_DESC "macOS x86_64")
+        else()
+            set(SEVEN_ZIP_MAKEFILE "../../cmpl_mac_arm64.mak")
+            set(SEVEN_ZIP_MAKEFILE_DEP "${SEVEN_ZIP_SRC}/CPP/7zip/cmpl_mac_arm64.mak")
+            set(SEVEN_ZIP_OUT_SO "${SEVEN_ZIP_BUNDLE_DIR}/b/m_arm64/7z.so")
+            set(SEVEN_ZIP_ARCH_DESC "Apple Silicon arm64")
+        endif()
+        set(SEVEN_ZIP_MAKE_ARGS
+            -f "${SEVEN_ZIP_MAKEFILE}"
+            LOCAL_FLAGS=
+            "-j"
+        )
+        add_custom_command(
+            OUTPUT ${SEVEN_ZIP_SO}
+            COMMAND ${CMAKE_COMMAND} -E echo "Building 7z.so from 7-Zip (${SEVEN_ZIP_ARCH_DESC}, no external codecs)..."
+            COMMAND ${CMAKE_MAKE_PROGRAM} -C ${SEVEN_ZIP_BUNDLE_DIR}
+                ${SEVEN_ZIP_MAKE_ARGS}
+            COMMAND ${CMAKE_COMMAND} -E copy
+                ${SEVEN_ZIP_OUT_SO}
+                ${SEVEN_ZIP_SO}
+            DEPENDS ${SEVEN_ZIP_MAKEFILE_DEP}
+                    ${SEVEN_ZIP_BUNDLE_DIR}/makefile.gcc
+                    ${SEVEN_ZIP_BUNDLE_DIR}/Arc_gcc.mak
+                    ${CMAKE_CURRENT_LIST_FILE}
+            COMMENT "Compiling 7z.so from 7-Zip source (${SEVEN_ZIP_ARCH_DESC})"
+            VERBATIM
+        )
+    endif()
 else()
     set(SEVEN_ZIP_MAKEFILE "makefile.gcc")
     set(SEVEN_ZIP_OUT_SO "${SEVEN_ZIP_BUNDLE_DIR}/_o/7z.so")
@@ -70,23 +112,22 @@ else()
         "-j"
     )
     set(SEVEN_ZIP_MAKEFILE_DEP "${SEVEN_ZIP_BUNDLE_DIR}/makefile.gcc")
+    add_custom_command(
+        OUTPUT ${SEVEN_ZIP_SO}
+        COMMAND ${CMAKE_COMMAND} -E echo "Building 7z.so from 7-Zip (${SEVEN_ZIP_ARCH_DESC}, no external codecs)..."
+        COMMAND ${CMAKE_MAKE_PROGRAM} -C ${SEVEN_ZIP_BUNDLE_DIR}
+            ${SEVEN_ZIP_MAKE_ARGS}
+        COMMAND ${CMAKE_COMMAND} -E copy
+            ${SEVEN_ZIP_OUT_SO}
+            ${SEVEN_ZIP_SO}
+        DEPENDS ${SEVEN_ZIP_MAKEFILE_DEP}
+                ${SEVEN_ZIP_BUNDLE_DIR}/makefile.gcc
+                ${SEVEN_ZIP_BUNDLE_DIR}/Arc_gcc.mak
+                ${CMAKE_CURRENT_LIST_FILE}
+        COMMENT "Compiling 7z.so from 7-Zip source (${SEVEN_ZIP_ARCH_DESC})"
+        VERBATIM
+    )
 endif()
-
-add_custom_command(
-    OUTPUT ${SEVEN_ZIP_SO}
-    COMMAND ${CMAKE_COMMAND} -E echo "Building 7z.so from 7-Zip (${SEVEN_ZIP_ARCH_DESC}, no external codecs)..."
-    COMMAND ${CMAKE_MAKE_PROGRAM} -C ${SEVEN_ZIP_BUNDLE_DIR}
-        ${SEVEN_ZIP_MAKE_ARGS}
-    COMMAND ${CMAKE_COMMAND} -E copy
-        ${SEVEN_ZIP_OUT_SO}
-        ${SEVEN_ZIP_SO}
-    DEPENDS ${SEVEN_ZIP_MAKEFILE_DEP}
-            ${SEVEN_ZIP_BUNDLE_DIR}/makefile.gcc
-            ${SEVEN_ZIP_BUNDLE_DIR}/Arc_gcc.mak
-            ${CMAKE_CURRENT_LIST_FILE}
-    COMMENT "Compiling 7z.so from 7-Zip source (${SEVEN_ZIP_ARCH_DESC})"
-    VERBATIM
-)
 
 add_custom_target(sevenzip_so DEPENDS ${SEVEN_ZIP_SO})
 

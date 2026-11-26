@@ -14,6 +14,10 @@ struct SettingsView: View {
     @State private var exclusionPatterns: [String] = [".DS_Store", "__MACOSX"]
     @State private var maxCacheSizeMB: Int = 2048
     @State private var cacheUsageBytes: Int64 = 0
+    @State private var isCLIInstalled: Bool = false
+    @State private var isUpdatingCLI: Bool = false
+    @State private var cliErrorMessage: String?
+    @State private var cliSuccessMessage: String?
 
     // Extraction
     @State private var archiveOpenAction: ArchiveOpenAction = .browse
@@ -90,6 +94,7 @@ struct SettingsView: View {
             loadFromPreferences()
             refreshCacheStats()
             refreshFormatDefaults()
+            refreshCLIStatus()
         }
         .onReceive(NotificationCenter.default.publisher(for: PreferencesManager.preferencesDidChangeNotification)) { _ in
             loadFromPreferences()
@@ -170,6 +175,63 @@ struct SettingsView: View {
                     persistChanges()
                 }
                 .padding(.vertical, 2)
+            }
+
+            Section("Command-Line Tool") {
+                LabeledContent("Status") {
+                    if isCLIInstalled {
+                        Label("Installed", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.green)
+                    } else {
+                        Text("Not Installed")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                LabeledContent("Path") {
+                    Text(CLIToolInstaller.defaultInstallPath)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                HStack(spacing: 8) {
+                    if let cliErrorMessage {
+                        Text(cliErrorMessage)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.red)
+                    } else if let cliSuccessMessage {
+                        Text(cliSuccessMessage)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if isUpdatingCLI {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    if isCLIInstalled {
+                        Button("Uninstall") {
+                            Task {
+                                await uninstallCLITool()
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(isUpdatingCLI)
+                    } else {
+                        Button("Install CLI Tool…") {
+                            Task {
+                                await installCLITool()
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(isUpdatingCLI)
+                    }
+                }
             }
         }
         .formStyle(.grouped)
@@ -633,6 +695,46 @@ struct SettingsView: View {
             await MainActor.run {
                 cacheUsageBytes = stats.totalBytes
             }
+        }
+    }
+
+    private func refreshCLIStatus() {
+        isCLIInstalled = CLIToolInstaller().isInstalled
+    }
+
+    private func installCLITool() async {
+        isUpdatingCLI = true
+        cliErrorMessage = nil
+        cliSuccessMessage = nil
+        defer {
+            isUpdatingCLI = false
+            refreshCLIStatus()
+        }
+        do {
+            try await CLIToolInstaller().install()
+            cliSuccessMessage = String(localized: "Installed to \(CLIToolInstaller.defaultInstallPath).")
+        } catch let error as CLIToolInstallerError where error == .cancelled {
+            return
+        } catch {
+            cliErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func uninstallCLITool() async {
+        isUpdatingCLI = true
+        cliErrorMessage = nil
+        cliSuccessMessage = nil
+        defer {
+            isUpdatingCLI = false
+            refreshCLIStatus()
+        }
+        do {
+            try await CLIToolInstaller().uninstall()
+            cliSuccessMessage = String(localized: "CLI tool removed.")
+        } catch let error as CLIToolInstallerError where error == .cancelled {
+            return
+        } catch {
+            cliErrorMessage = error.localizedDescription
         }
     }
 

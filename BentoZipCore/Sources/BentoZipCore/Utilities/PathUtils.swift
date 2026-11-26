@@ -2,7 +2,7 @@ import Foundation
 
 enum PathUtils {
     private static let compoundArchiveExtensions = [
-        "tar.gz", "tar.bz2", "tar.xz", "tar.zst",
+        "tar.gz", "tar.bz2", "tar.xz", "tar.zst", "tar.lz4",
         "7z.001", "zip.001", "tar.001"
     ]
 

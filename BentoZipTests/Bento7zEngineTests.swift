@@ -42,6 +42,14 @@ struct Bento7zEngineTests {
         ], in: srcDir)
 
         for format in ArchiveFormat.allCases {
+            // Single-file `.zstd` and HFS+ partition-wrapped `.dmg` are tested in dedicated Phase3FeatureTests cases.
+            if format == .zstd || format == .dmg {
+                continue
+            }
+            if format == .tarZstd && ZstdEngine.findZstdBinary() == nil {
+                continue
+            }
+
             let archiveURL = dir.appendingPathComponent("archive.\(format.fileExtension)")
             let settings = CompressionSettings(format: format, compressionLevel: .normal)
             var lastFraction = 0.0

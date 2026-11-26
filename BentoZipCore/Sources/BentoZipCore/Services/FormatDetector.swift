@@ -49,6 +49,9 @@ public struct FormatDetector {
         if fileName.hasSuffix(".tar.zst") || fileName.hasSuffix(".tzst") {
             return .tarZst
         }
+        if fileName.hasSuffix(".tar.lz4") || fileName.hasSuffix(".tlz4") {
+            return .tarLz4
+        }
         if let split = detectSplitVolumeExtension(fileName: fileName) {
             return split
         }
@@ -107,6 +110,13 @@ public struct FormatDetector {
         case "deb": return .deb
         case "rpm": return .rpm
         case "lzh", "lha": return .lzh
+        case "squashfs", "sfs": return .squashfs
+        case "vmdk": return .vmdk
+        case "chm": return .chm
+        case "arj": return .arj
+        case "lz4": return .lz4
+        case "br": return .brotli
+        case "epub": return .epub
         case "aar", "yaa": return .aar
         default: return nil
         }
@@ -189,6 +199,31 @@ public struct FormatDetector {
         // DEB / ar: "!<arch>\n"
         if bytes.starts(with: [0x21, 0x3C, 0x61, 0x72, 0x63, 0x68, 0x3E, 0x0A]) {
             return .deb
+        }
+
+        // SquashFS: "hsqs" (little-endian) or "sqsh" (big-endian)
+        if bytes.starts(with: [0x68, 0x73, 0x71, 0x73]) || bytes.starts(with: [0x73, 0x71, 0x73, 0x68]) {
+            return .squashfs
+        }
+
+        // VMDK: "KDMV"
+        if bytes.starts(with: [0x4B, 0x44, 0x4D, 0x56]) {
+            return .vmdk
+        }
+
+        // CHM: "ITSF"
+        if bytes.starts(with: [0x49, 0x54, 0x53, 0x46]) {
+            return .chm
+        }
+
+        // ARJ: 0x60 0xEA
+        if bytes.starts(with: [0x60, 0xEA]) {
+            return .arj
+        }
+
+        // LZ4 frame: 0x04 0x22 0x4D 0x18
+        if bytes.starts(with: [0x04, 0x22, 0x4D, 0x18]) {
+            return .lz4
         }
 
         // TAR: "ustar" at offset 257

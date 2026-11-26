@@ -10,6 +10,7 @@ struct BentoZipApp: App {
     private let preferencesManager: PreferencesManager
     private let sharedModelContainer: ModelContainer
     @State private var menuRecents: RecentMenuModel
+    @State private var updateChecker = UpdateChecker()
 
     init() {
         let manager = PreferencesManager()
@@ -33,6 +34,12 @@ struct BentoZipApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(after: .appSettings) {
+                Button("Check for Updates…") {
+                    UpdateCheckWindowController.shared.showAndCheck(using: updateChecker)
+                }
+            }
+
             InspectorCommands()
 
             CommandGroup(replacing: .newItem) {

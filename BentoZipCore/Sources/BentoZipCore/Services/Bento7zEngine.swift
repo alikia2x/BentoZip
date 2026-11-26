@@ -76,10 +76,20 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             throw Bento7zError.fileNotFound(archiveURL.path)
         }
 
-        if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
+        let detectedFormat = FormatDetector.detectReadableFormat(of: archiveURL)
+        if detectedFormat == .aar {
             return try await AppleArchiveEngine().listArchive(
                 in: archiveURL,
                 unwrapSingleTopDirectory: unwrapSingleTopDirectory,
+                onProgress: onProgress
+            )
+        }
+        if let detectedFormat, ExternalStreamEngine.handles(detectedFormat) {
+            return try await ExternalStreamEngine().listArchive(
+                in: archiveURL,
+                format: detectedFormat,
+                unwrapSingleTopDirectory: unwrapSingleTopDirectory,
+                tarEngine: self,
                 onProgress: onProgress
             )
         }
@@ -133,11 +143,23 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
 
         try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
 
-        if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
+        let detectedFormat = FormatDetector.detectReadableFormat(of: archiveURL)
+        if detectedFormat == .aar {
             try await AppleArchiveEngine().extract(
                 archiveURL: archiveURL,
                 entries: entries,
                 to: destinationURL,
+                onProgress: onProgress
+            )
+            return
+        }
+        if let detectedFormat, ExternalStreamEngine.handles(detectedFormat) {
+            try await ExternalStreamEngine().extract(
+                archiveURL: archiveURL,
+                format: detectedFormat,
+                entries: entries,
+                to: destinationURL,
+                tarEngine: self,
                 onProgress: onProgress
             )
             return
@@ -191,8 +213,17 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             throw Bento7zError.fileNotFound(archiveURL.path)
         }
 
-        if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
+        let detectedFormat = FormatDetector.detectReadableFormat(of: archiveURL)
+        if detectedFormat == .aar {
             return try await AppleArchiveEngine().testArchive(at: archiveURL, onProgress: onProgress)
+        }
+        if let detectedFormat, ExternalStreamEngine.handles(detectedFormat) {
+            return try await ExternalStreamEngine().testArchive(
+                at: archiveURL,
+                format: detectedFormat,
+                tarEngine: self,
+                onProgress: onProgress
+            )
         }
 
         if prefersBinaryServer {
@@ -240,6 +271,52 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
             }
         }
 
+        if settings.format == .dmg {
+            do {
+                try await DiskImageEngine().create(
+                    from: sourceURLs,
+                    to: archiveURL,
+                    settings: settings,
+                    onProgress: onProgress
+                )
+                return
+            } catch {
+                try? fm.removeItem(at: archiveURL)
+                throw error
+            }
+        }
+
+        if settings.format == .zstd {
+            do {
+                try await ZstdEngine().createZstd(
+                    from: sourceURLs,
+                    to: archiveURL,
+                    settings: settings,
+                    onProgress: onProgress
+                )
+                return
+            } catch {
+                try? fm.removeItem(at: archiveURL)
+                throw error
+            }
+        }
+
+        if settings.format == .tarZstd {
+            do {
+                try await ZstdEngine().createTarZstd(
+                    from: sourceURLs,
+                    to: archiveURL,
+                    settings: settings,
+                    tarBuilder: self,
+                    onProgress: onProgress
+                )
+                return
+            } catch {
+                try? fm.removeItem(at: archiveURL)
+                throw error
+            }
+        }
+
         do {
             if prefersBinaryServer {
                 try await compressBinary(
@@ -278,11 +355,23 @@ public struct Bento7zEngine: ArchiveEngine, Sendable {
         encoding: String? = nil,
         onProgress: (@Sendable (ArchiveProgress) -> Void)? = nil
     ) async throws {
-        if FormatDetector.detectReadableFormat(of: archiveURL) == .aar {
+        let detectedFormat = FormatDetector.detectReadableFormat(of: archiveURL)
+        if detectedFormat == .aar {
             try await AppleArchiveEngine().extractEntry(
                 from: archiveURL,
                 entryPath: entryPath,
                 to: destinationURL
+            )
+            onProgress?(ArchiveProgress(fractionCompleted: 1.0))
+            return
+        }
+        if let detectedFormat, ExternalStreamEngine.handles(detectedFormat) {
+            try await ExternalStreamEngine().extractEntry(
+                from: archiveURL,
+                format: detectedFormat,
+                entryPath: entryPath,
+                to: destinationURL,
+                tarEngine: self
             )
             onProgress?(ArchiveProgress(fractionCompleted: 1.0))
             return

@@ -271,6 +271,22 @@
     "2 GB": {},
     "4 GB": {},
     "500 MB": {},
+    "A New Version is Available": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A New Version is Available"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发现新版本"
+          }
+        }
+      }
+    },
     "Actions": {
       "extractionState": "stale",
       "localizations": {
@@ -392,6 +408,22 @@
         }
       }
     },
+    "Archive Format": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive Format"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "压缩格式"
+          }
+        }
+      }
+    },
     "Archive Integrity Failed": {
       "localizations": {
         "en": {
@@ -420,6 +452,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "压缩包校验通过"
+          }
+        }
+      }
+    },
+    "Archive integrity verification failed.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive integrity verification failed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "压缩包完整性校验失败。"
           }
         }
       }
@@ -574,6 +622,22 @@
       }
     },
     "BentoZip": {},
+    "BentoZip is Up to Date": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BentoZip is Up to Date"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BentoZip 已是最新版本"
+          }
+        }
+      }
+    },
     "Browse Contents": {
       "localizations": {
         "en": {
@@ -586,6 +650,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "浏览内容"
+          }
+        }
+      }
+    },
+    "CLI tool removed.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI tool removed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已移除命令行工具。"
           }
         }
       }
@@ -692,6 +772,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "更改…"
+          }
+        }
+      }
+    },
+    "Check Again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check Again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再次检查"
+          }
+        }
+      }
+    },
+    "Check for Updates…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check for Updates…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查更新…"
+          }
+        }
+      }
+    },
+    "Checking for Updates…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking for Updates…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在检查更新…"
           }
         }
       }
@@ -855,6 +983,22 @@
         }
       }
     },
+    "Command-Line Tool": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command-Line Tool"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令行工具"
+          }
+        }
+      }
+    },
     "Comment": {
       "localizations": {
         "en": {
@@ -881,6 +1025,22 @@
         }
       }
     },
+    "Compress Files": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compress Files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "压缩文件"
+          }
+        }
+      }
+    },
     "Compress each item separately": {
       "localizations": {
         "en": {
@@ -893,6 +1053,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "单独压缩每一项"
+          }
+        }
+      }
+    },
+    "Compress files with ${applicationName}": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compress files with ${applicationName}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 ${applicationName} 压缩文件"
+          }
+        }
+      }
+    },
+    "Compress one or more files or folders into an archive using BentoZip.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compress one or more files or folders into an archive using BentoZip."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 BentoZip 将一个或多个文件或文件夹压缩为归档文件。"
           }
         }
       }
@@ -1056,6 +1248,22 @@
         }
       }
     },
+    "Create archive with ${applicationName}": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create archive with ${applicationName}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 ${applicationName} 创建压缩包"
+          }
+        }
+      }
+    },
     "Current Usage": {
       "localizations": {
         "en": {
@@ -1068,6 +1276,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "当前占用"
+          }
+        }
+      }
+    },
+    "Current version: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current version: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前版本：%@"
           }
         }
       }
@@ -1320,6 +1544,22 @@
         }
       }
     },
+    "Destination Folder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destination Folder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目标文件夹"
+          }
+        }
+      }
+    },
     "Disk Cache Limit": {
       "localizations": {
         "en": {
@@ -1423,6 +1663,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "双击压缩包"
+          }
+        }
+      }
+    },
+    "Download Release": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download Release"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载更新"
           }
         }
       }
@@ -1583,6 +1839,22 @@
         }
       }
     },
+    "Extract Archive": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extract Archive"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "解压压缩包"
+          }
+        }
+      }
+    },
     "Extract Destination": {
       "localizations": {
         "en": {
@@ -1668,6 +1940,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "解压到…"
+          }
+        }
+      }
+    },
+    "Extract archive with ${applicationName}": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extract archive with ${applicationName}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 ${applicationName} 解压压缩包"
+          }
+        }
+      }
+    },
+    "Extract the contents of an archive using BentoZip.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extract the contents of an archive using BentoZip."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 BentoZip 解压压缩包中的内容。"
+          }
+        }
+      }
+    },
+    "Extracted %lld items to %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extracted %lld items to %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已将 %lld 项解压至“%@”。"
           }
         }
       }
@@ -1852,6 +2172,22 @@
         }
       }
     },
+    "Found %lld entries in %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Found %lld entries in %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在“%2$@”中找到 %1$lld 项。"
+          }
+        }
+      }
+    },
     "General": {
       "localizations": {
         "en": {
@@ -2008,6 +2344,70 @@
         }
       }
     },
+    "Install CLI Tool…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install CLI Tool…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装命令行工具…"
+          }
+        }
+      }
+    },
+    "Installed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装"
+          }
+        }
+      }
+    },
+    "Installed to %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed to %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装至 %@。"
+          }
+        }
+      }
+    },
+    "Installed: %@, Latest: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed: %@, Latest: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装：%@，最新版本：%@"
+          }
+        }
+      }
+    },
     "Integrity": {
       "localizations": {
         "en": {
@@ -2140,6 +2540,22 @@
         }
       }
     },
+    "Later": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Later"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "稍后"
+          }
+        }
+      }
+    },
     "Leave blank to remove password.": {
       "localizations": {
         "en": {
@@ -2182,6 +2598,38 @@
         }
       }
     },
+    "List Archive": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List Archive"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列出压缩包内容"
+          }
+        }
+      }
+    },
+    "List Archive Contents": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List Archive Contents"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列出压缩包内容"
+          }
+        }
+      }
+    },
     "List View": {
       "localizations": {
         "en": {
@@ -2194,6 +2642,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "列表视图"
+          }
+        }
+      }
+    },
+    "List all file and folder paths contained inside an archive.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List all file and folder paths contained inside an archive."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列出压缩包中包含的所有文件和文件夹路径。"
+          }
+        }
+      }
+    },
+    "List archive contents with ${applicationName}": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List archive contents with ${applicationName}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 ${applicationName} 列出压缩包内容"
           }
         }
       }
@@ -2501,6 +2981,22 @@
         }
       }
     },
+    "No input files were provided.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No input files were provided."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未提供输入文件。"
+          }
+        }
+      }
+    },
     "No matches": {
       "localizations": {
         "en": {
@@ -2545,6 +3041,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "暂无已保存的预设。"
+          }
+        }
+      }
+    },
+    "Not Installed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Installed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未安装"
           }
         }
       }
@@ -2974,6 +3486,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "最近"
+          }
+        }
+      }
+    },
+    "Release Notes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Release Notes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发行说明"
           }
         }
       }
@@ -3531,6 +4059,22 @@
         }
       }
     },
+    "Software Update": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Software Update"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "软件更新"
+          }
+        }
+      }
+    },
     "Speed": {
       "localizations": {
         "en": {
@@ -3559,6 +4103,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "分卷大小"
+          }
+        }
+      }
+    },
+    "Status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状态"
           }
         }
       }
@@ -3611,6 +4171,22 @@
         }
       }
     },
+    "Test archive integrity with ${applicationName}": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test archive integrity with ${applicationName}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 ${applicationName} 测试压缩包完整性"
+          }
+        }
+      }
+    },
     "The archive failed integrity verification.": {
       "localizations": {
         "en": {
@@ -3633,6 +4209,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "此操作将修改原压缩包文件且不可撤销。"
+          }
+        }
+      }
+    },
+    "Try Again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
           }
         }
       }
@@ -3665,6 +4257,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法载入图片"
+          }
+        }
+      }
+    },
+    "Uninstall": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uninstall"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "卸载"
           }
         }
       }
@@ -3754,6 +4362,22 @@
         }
       }
     },
+    "Unzip file with ${applicationName}": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unzip file with ${applicationName}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 ${applicationName} 解压缩文件"
+          }
+        }
+      }
+    },
     "Update": {
       "localizations": {
         "en": {
@@ -3786,6 +4410,22 @@
         }
       }
     },
+    "Update Check Failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update Check Failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查更新失败"
+          }
+        }
+      }
+    },
     "Vault Locked": {
       "localizations": {
         "en": {
@@ -3814,6 +4454,86 @@
           "stringUnit": {
             "state": "translated",
             "value": "校验"
+          }
+        }
+      }
+    },
+    "Verify Archive": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify Archive"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "校验压缩包"
+          }
+        }
+      }
+    },
+    "Verify Archive Integrity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify Archive Integrity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "校验压缩包完整性"
+          }
+        }
+      }
+    },
+    "Verify archive with ${applicationName}": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify archive with ${applicationName}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 ${applicationName} 校验压缩包"
+          }
+        }
+      }
+    },
+    "Verify the integrity of an archive and report any corruption or errors.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify the integrity of an archive and report any corruption or errors."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "校验压缩包的完整性并报告损坏或错误。"
+          }
+        }
+      }
+    },
+    "Version %@ is currently the newest version available.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version %@ is currently the newest version available."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本 %@ 已是目前可用的最新版本。"
           }
         }
       }
