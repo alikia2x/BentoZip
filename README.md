@@ -4,8 +4,6 @@ A native macOS archive manager built with SwiftUI, AppKit (`NSOutlineView` + Qui
 
 BentoZip lets you browse archive contents like a Finder window, drag individual files out lazily without extracting an entire archive, inspect and edit writable archives in place, and run heavy compression or extraction jobs in a decoupled background Tasks window.
 
-For competitor research and planned milestones, see [docs/ROADMAP.md](docs/ROADMAP.md).
-
 ## Key Capabilities
 
 - **Three-Mode Finder Workspace**: Welcome drop view (`.empty`), staging/configuration view (`.compress`), and archive browser (`.browseArchive`) with a unified `NSOutlineView`, column sorting, type-ahead navigation, breadcrumbs, and a resizable right inspector.
@@ -30,12 +28,10 @@ BentoZip/
 ├── engine/
 │   └── bento7z/               # C++17 archive engine (bit7z + 7z.so)
 ├── website/                   # Astro + React + Tailwind landing page
-├── scripts/                   # Build, DMG packaging, and release automation scripts
-│   ├── build-engine.sh
-│   ├── build-release.sh
-│   └── create-dmg.sh
-└── docs/
-    └── ROADMAP.md             # Competitor analysis & product roadmap
+└── scripts/                   # Build, DMG packaging, and release automation scripts
+    ├── build-engine.sh
+    ├── build-release.sh
+    └── create-dmg.sh
 ```
 
 ## Development Prerequisites

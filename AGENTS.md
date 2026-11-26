@@ -13,7 +13,6 @@ BentoZip is a macOS compression and decompression app with a Finder-like UI. Use
 - `engine/bento7z/`: Bundled C++17 `bento7z` engine (`bit7z` + `7z.so`, binary Unix-socket server, JSONL fallback, and CJK ZIP encoding recovery)
 - `scripts/`: Local and CI helper scripts (`build-engine.sh`, `build-release.sh`, `create-dmg.sh`)
 - `website/`: Astro + React + Tailwind landing page
-- `docs/`: Product documentation including [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Architecture
 

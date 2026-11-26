@@ -7,8 +7,8 @@ interface Props {
 }
 
 const {
-  title = 'BentoZip — Native macOS Archive Manager',
-  description = 'Browse inside archives like Finder, drag out single files, press Space for Quick Look, and pack with AES-256 encryption.',
+  title = 'BentoZip — Archives, the Mac way.',
+  description = 'Browse inside any archive like Finder, pull out a single file without unpacking the rest, and preview before you extract.',
 } = Astro.props;
 ---
 
@@ -23,10 +23,10 @@ const {
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/images/hero-workspace.png" />
-    <meta name="theme-color" content="#FAFAF8" />
+    <meta property="og:image" content="/images/hero-browse-quicklook.png" />
+    <meta name="theme-color" content="#FFFFFF" />
   </head>
-  <body class="bg-[#FAFAF8] text-[#111113] antialiased selection:bg-[#0071E3]/15 selection:text-[#111113]">
+  <body class="bg-[#FFFFFF] text-[#1D1D1F] antialiased selection:bg-[#0071E3]/15 selection:text-[#1D1D1F]">
     <slot />
   </body>
 </html>

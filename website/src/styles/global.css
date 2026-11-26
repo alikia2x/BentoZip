@@ -1,22 +1,10 @@
 @import "tailwindcss";
 
 @layer base {
-  :root {
-    --canvas: #FAFAF8;
-    --surface: #FFFFFF;
-    --well: #F3F3F1;
-    --ink: #111113;
-    --ink-secondary: #5C5C62;
-    --hairline: rgba(17, 17, 19, 0.08);
-    --hairline-strong: rgba(17, 17, 19, 0.14);
-    --macos-blue: #0071E3;
-    --macos-blue-hover: #0077ED;
-  }
-
   html {
-    background-color: var(--canvas);
-    color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif;
+    background-color: #FFFFFF;
+    color: #1D1D1F;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
@@ -24,8 +12,8 @@
 
   body {
     margin: 0;
-    background-color: var(--canvas);
-    color: var(--ink);
+    background-color: #FFFFFF;
+    color: #1D1D1F;
     overflow-x: hidden;
   }
 
@@ -37,26 +25,4 @@
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
-}
-
-.hairline-border {
-  border: 1px solid rgba(17, 17, 19, 0.08);
-}
-
-.keycap {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 7px;
-  border-radius: 6px;
-  background: #FFFFFF;
-  border: 1px solid rgba(17, 17, 19, 0.12);
-  box-shadow: 0 1px 0 rgba(17, 17, 19, 0.06);
-  font-family: "SF Mono", ui-monospace, Menlo, monospace;
-  font-size: 11px;
-  font-weight: 500;
-  color: #111113;
-  line-height: 1;
 }
