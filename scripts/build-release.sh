@@ -125,6 +125,11 @@ ditto "${BUILT_APP}" "${APP_OUT}"
 
 if [ "${DO_CODESIGN}" = "1" ]; then
   echo "==> Step 4: Hardening runtime & signing inside-out"
+  if [ -d "${APP_OUT}/Contents/Frameworks" ]; then
+    while IFS= read -r -d '' fw_item; do
+      codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${fw_item}"
+    done < <(find "${APP_OUT}/Contents/Frameworks" -maxdepth 1 \( -name "*.dylib" -o -name "*.framework" \) -print0 | sort -z)
+  fi
   if [ -d "${APP_OUT}/Contents/PlugIns" ]; then
     while IFS= read -r -d '' appex; do
       while IFS= read -r -d '' nested_bin; do

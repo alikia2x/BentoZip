@@ -164,7 +164,7 @@ public enum UpdateCheckStatus: Sendable, Equatable {
 @Observable
 @MainActor
 public final class UpdateChecker {
-    public nonisolated static let defaultOwner = "alikia"
+    public nonisolated static let defaultOwner = "alikia2x"
     public nonisolated static let defaultRepo = "BentoZip"
 
     public private(set) var status: UpdateCheckStatus = .idle

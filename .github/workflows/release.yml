@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Optional version override (e.g. 1.0)"
+        description: "Optional version override (e.g. 1.0.0)"
         required: false
         type: string
 
@@ -19,15 +19,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build macOS release (arm64)
+  verify:
+    name: Verify source, version and tests
     runs-on: macos-15
-    timeout-minutes: 45
-    env:
-      MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+    timeout-minutes: 30
+    outputs:
+      release_version: ${{ steps.version.outputs.release_version }}
+      marketing_version: ${{ steps.version.outputs.marketing_version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +41,7 @@ jobs:
 
           if [ "${{ github.event_name }}" = "push" ]; then
             tag_version="${GITHUB_REF_NAME#v}"
-            if [ "$tag_version" != "$marketing_version" ] && [ "$tag_version" != "${marketing_version}.0" ]; then
+            if [ "$tag_version" != "$marketing_version" ]; then
               echo "::error::Tag ${GITHUB_REF_NAME} does not match MARKETING_VERSION (${marketing_version})"
               exit 1
             fi
@@ -56,7 +54,63 @@ jobs:
 
           echo "release_version=${release_version}" >> "$GITHUB_OUTPUT"
           echo "marketing_version=${marketing_version}" >> "$GITHUB_OUTPUT"
-          echo "Building BentoZip ${release_version} (MARKETING_VERSION=${marketing_version})"
+          echo "Verifying BentoZip ${release_version} (MARKETING_VERSION=${marketing_version})"
+
+      - name: Check for prohibited middle dot characters
+        run: |
+          if grep -rn "·" BentoZip/ BentoZipCore/ BentoZipTests/ BentoZipQuickLook/ BentoZipFinderExtension/ BentoZipSpotlight/; then
+            echo "::error::Found prohibited middle dot character (·) in source files"
+            exit 1
+          fi
+
+      - name: Cache bento7z dependencies
+        uses: actions/cache@v4
+        with:
+          path: engine/bento7z/build/_deps
+          key: bento7z-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/bento7z/CMakeLists.txt') }}
+
+      - name: Build bento7z engine
+        run: ./scripts/build-engine.sh
+
+      - name: Build BentoZipCore Swift package
+        run: cd BentoZipCore && swift build -Xswiftc -warnings-as-errors
+
+      - name: Run BentoZip unit tests
+        run: xcodebuild -project BentoZip.xcodeproj -scheme BentoZip -configuration Debug -only-testing:BentoZipTests test
+
+  verify_website:
+    name: Verify website build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install website dependencies
+        run: pnpm --dir website install --frozen-lockfile || pnpm --dir website install
+
+      - name: Build website
+        run: pnpm --dir website build
+
+  build:
+    name: Build macOS Universal release
+    needs: [verify, verify_website]
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Cache bento7z dependencies
         uses: actions/cache@v4
@@ -115,11 +169,10 @@ jobs:
           rm -f "$RUNNER_TEMP/certificate.p12"
           security find-identity -v -p codesigning "$KEYCHAIN"
 
-      - name: Build release artifacts
-        run: ./scripts/build-release.sh
+      - name: Build Universal release artifacts
+        run: ./scripts/build-release.sh --universal
         env:
-          VERSION: ${{ steps.version.outputs.release_version }}
-          ARCH_MODE: arm64
+          VERSION: ${{ needs.verify.outputs.release_version }}
           CODESIGN: ${{ steps.signing.outputs.enabled == 'true' && '1' || '0' }}
           NOTARIZE: ${{ steps.signing.outputs.enabled == 'true' && '1' || '0' }}
 
@@ -152,7 +205,7 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: BentoZip-${{ steps.version.outputs.release_version }}-macos-arm64
+          name: BentoZip-${{ needs.verify.outputs.release_version }}-macos-universal
           path: |
             dist/*.dmg
             dist/*.zip
@@ -160,12 +213,34 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Extract release notes
-        if: startsWith(github.ref, 'refs/tags/')
+  publish:
+    name: Publish GitHub release
+    needs: [verify, build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: BentoZip-${{ needs.verify.outputs.release_version }}-macos-universal
+          path: release-assets
+
+      - name: Verify and regenerate checksums
         run: |
           set -euo pipefail
-          version="${{ steps.version.outputs.release_version }}"
-          marketing_version="${{ steps.version.outputs.marketing_version }}"
+          cd release-assets
+          rm -f SHA256SUMS.txt
+          sha256sum *.dmg *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Extract release notes
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify.outputs.release_version }}"
+          marketing_version="${{ needs.verify.outputs.marketing_version }}"
           extract_notes() {
             awk -v version="$1" '
               $0 ~ "^## \\[" version "\\]" { capture = 1; next }
@@ -183,7 +258,6 @@ jobs:
           cat "$RUNNER_TEMP/release-notes.md"
 
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           name: BentoZip ${{ github.ref_name }}
@@ -191,7 +265,4 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          files: |
-            dist/*.dmg
-            dist/*.zip
-            dist/SHA256SUMS.txt
+          files: release-assets/*
