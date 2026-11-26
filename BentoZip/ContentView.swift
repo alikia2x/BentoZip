@@ -1,3 +1,4 @@
+import AppKit
 import BentoZipCore
 import SwiftUI
 
@@ -6,9 +7,16 @@ struct ContentView: View {
     @Environment(ProgressState.self) private var progressState
     @Environment(WorkspaceUIState.self) private var uiState
 
+    @AppStorage("BentoZipInspectorWidth") private var storedInspectorWidth: Double = 272
+    @State private var keepInspectorMounted = false
+    @State private var animatedInspectorProgress: CGFloat = 0
     @State private var showErrorAlert = false
     @State private var showToolbarDeleteConfirmation = false
     @State private var isTargeted = false
+
+    private static let minInspectorWidth: CGFloat = 240
+    private static let idealInspectorWidth: CGFloat = 272
+    private static let maxInspectorWidth: CGFloat = 400
 
     private var canAcceptFileDrop: Bool {
         appState.mode == .compress || appState.isWritableArchive
@@ -183,52 +191,174 @@ struct ContentView: View {
             : String(localized: "Archive Integrity Failed")
     }
 
+    private var resolvedInspectorWidth: CGFloat {
+        min(max(CGFloat(storedInspectorWidth), Self.minInspectorWidth), Self.maxInspectorWidth)
+    }
+
     private func workspaceView(showInspector: Binding<Bool>) -> some View {
-        VStack(spacing: 0) {
-            FileListView()
-            BreadcrumbView()
-            StatusBarView()
+        GeometryReader { proxy in
+            let containerWidth = proxy.size.width > 0 ? proxy.size.width : 960
+            let maxAllowedInspector = max(Self.minInspectorWidth, min(Self.maxInspectorWidth, containerWidth - 360))
+            let effectiveInspectorWidth = min(resolvedInspectorWidth, maxAllowedInspector)
+            let maxTrailingForMinLeft = max(0, containerWidth - 280)
+            let totalTrailingWidth = min(effectiveInspectorWidth + 1, maxTrailingForMinLeft)
+            let clampedPanelWidth = max(0, totalTrailingWidth - 1)
+
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    FileListView()
+                    BreadcrumbView()
+                    StatusBarView()
+                }
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .clipped()
+                .contentShape(Rectangle())
+                .dropDestination(for: URL.self) { items, _ in
+                    guard !items.isEmpty, canAcceptFileDrop else { return false }
+                    if appState.mode == .compress {
+                        appState.addEntries(from: items)
+                        return true
+                    } else if appState.isWritableArchive {
+                        let targetPrefix = appState.currentSubfolderPath
+                        Task {
+                            await appState.coordinator.addEntries(
+                                appState: appState,
+                                urls: items,
+                                targetPrefix: targetPrefix,
+                                progressState: progressState
+                            )
+                        }
+                        return true
+                    }
+                    return false
+                } isTargeted: { targeted in
+                    isTargeted = targeted && canAcceptFileDrop
+                }
+                .overlay {
+                    if isTargeted && canAcceptFileDrop {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.05))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 2)
+                            )
+                            .padding(6)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.14), value: isTargeted)
+
+                if keepInspectorMounted && totalTrailingWidth > 0 {
+                    HStack(spacing: 0) {
+                        InspectorResizeDivider(
+                            width: Binding(
+                                get: { clampedPanelWidth },
+                                set: { newWidth in
+                                    let clamped = min(max(newWidth, Self.minInspectorWidth), maxAllowedInspector)
+                                    storedInspectorWidth = Double(clamped)
+                                }
+                            ),
+                            idealWidth: min(Self.idealInspectorWidth, maxAllowedInspector)
+                        )
+
+                        CompressionSettingsView()
+                            .frame(width: clampedPanelWidth)
+                            .frame(maxHeight: .infinity, alignment: .topLeading)
+                    }
+                    .frame(width: totalTrailingWidth)
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
+                    .background(InspectorBackdropView())
+                    .frame(width: totalTrailingWidth * animatedInspectorProgress, alignment: .leading)
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
+                    .clipped()
+                    .allowsHitTesting(showInspector.wrappedValue)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .dropDestination(for: URL.self) { items, _ in
-            guard !items.isEmpty, canAcceptFileDrop else { return false }
-            if appState.mode == .compress {
-                appState.addEntries(from: items)
-                return true
-            } else if appState.isWritableArchive {
-                let targetPrefix = appState.currentSubfolderPath
-                Task {
-                    await appState.coordinator.addEntries(
-                        appState: appState,
-                        urls: items,
-                        targetPrefix: targetPrefix,
-                        progressState: progressState
-                    )
+        .onAppear {
+            keepInspectorMounted = showInspector.wrappedValue
+            animatedInspectorProgress = showInspector.wrappedValue ? 1 : 0
+        }
+        .onChange(of: showInspector.wrappedValue) { _, newValue in
+            if newValue {
+                keepInspectorMounted = true
+                withAnimation(.easeOut(duration: 0.20)) {
+                    animatedInspectorProgress = 1
                 }
-                return true
+            } else {
+                withAnimation(.easeOut(duration: 0.20)) {
+                    animatedInspectorProgress = 0
+                } completion: {
+                    if !appState.showInspector {
+                        keepInspectorMounted = false
+                    }
+                }
             }
-            return false
-        } isTargeted: { targeted in
-            isTargeted = targeted && canAcceptFileDrop
         }
-        .overlay {
-            if isTargeted && canAcceptFileDrop {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 2)
+    }
+}
+
+private struct InspectorBackdropView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .withinWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+private struct InspectorResizeDivider: View {
+    @Binding var width: CGFloat
+    let idealWidth: CGFloat
+
+    @State private var dragStartWidth: CGFloat?
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .frame(maxHeight: .infinity)
+            .overlay {
+                ResizeCursorOverlay()
+                    .frame(width: 7)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                if dragStartWidth == nil {
+                                    dragStartWidth = width
+                                }
+                                let baseline = dragStartWidth ?? width
+                                width = baseline - value.translation.width
+                            }
+                            .onEnded { _ in
+                                dragStartWidth = nil
+                            }
                     )
-                    .padding(6)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
+                    .onTapGesture(count: 2) {
+                        width = idealWidth
+                    }
             }
-        }
-        .animation(.easeOut(duration: 0.14), value: isTargeted)
-        .inspector(isPresented: showInspector) {
-            CompressionSettingsView()
-                .inspectorColumnWidth(min: 240, ideal: 272, max: 400)
+    }
+}
+
+private struct ResizeCursorOverlay: NSViewRepresentable {
+    func makeNSView(context: Context) -> CursorRectView {
+        CursorRectView()
+    }
+
+    func updateNSView(_ nsView: CursorRectView, context: Context) {}
+
+    final class CursorRectView: NSView {
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
         }
     }
 }

@@ -111,6 +111,9 @@
         }
       }
     },
+    "Brotli decompression requires the brotli binary. Install brotli (e.g. brew install brotli) to open .br archives." : {
+
+    },
     "Browse Archive" : {
       "localizations" : {
         "en" : {
@@ -131,6 +134,9 @@
 
     },
     "Checksums can only be computed for files." : {
+
+    },
+    "Compressing %lld items…" : {
 
     },
     "Compressing…" : {
@@ -409,6 +415,12 @@
         }
       }
     },
+    "Failed to encode password vault entries." : {
+
+    },
+    "Failed to install CLI tool: %@" : {
+
+    },
     "Failed to move items: %@" : {
 
     },
@@ -441,6 +453,9 @@
     "Failed to save modified file back to archive: %@" : {
 
     },
+    "Failed to uninstall CLI tool: %@" : {
+
+    },
     "Failed to update password: %@" : {
 
     },
@@ -463,6 +478,9 @@
           }
         }
       }
+    },
+    "Folders cannot be compressed directly into a single .zst stream. Choose TAR.ZST (.tar.zst) instead." : {
+
     },
     "Incorrect password. Please try again." : {
       "localizations" : {
@@ -603,6 +621,16 @@
         }
       }
     },
+    "Keychain operation failed: %@ (%d)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Keychain operation failed: %1$@ (%2$d)"
+          }
+        }
+      }
+    },
     "Korean (EUC-KR)" : {
       "localizations" : {
         "en" : {
@@ -618,6 +646,9 @@
           }
         }
       }
+    },
+    "LZ4 decompression requires the lz4 binary. Install lz4 (e.g. brew install lz4) to open .lz4 archives." : {
+
     },
     "Malformed output: %@" : {
       "localizations" : {
@@ -722,6 +753,9 @@
           }
         }
       }
+    },
+    "Operation was cancelled." : {
+
     },
     "Overwrite" : {
       "localizations" : {
@@ -855,6 +889,9 @@
         }
       }
     },
+    "Single-file .zst compression only supports one file. Choose TAR.ZST (.tar.zst) for multiple items or folders." : {
+
+    },
     "Skip" : {
       "localizations" : {
         "en" : {
@@ -968,6 +1005,15 @@
         }
       }
     },
+    "Unsupported external stream format." : {
+
+    },
+    "Update release URL must use HTTPS: %@" : {
+
+    },
+    "Update server returned HTTP %lld." : {
+
+    },
     "Updating archive password is not supported by this engine." : {
 
     },
@@ -989,6 +1035,15 @@
           }
         }
       }
+    },
+    "Write permission denied for %@." : {
+
+    },
+    "Zstandard (.tar.zst) compression requires the zstd binary. Install zstd (e.g. brew install zstd) to create .tar.zst archives." : {
+
+    },
+    "Zstandard (.zst) compression requires the zstd binary. Install zstd (e.g. brew install zstd) to create .zst archives." : {
+
     }
   },
   "version" : "1.0"

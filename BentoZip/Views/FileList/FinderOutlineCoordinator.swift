@@ -411,6 +411,9 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
                 column.isHidden = hiddenColumnIDs.contains(id)
             }
         }
+        if let finderOutline = outlineView as? FinderOutlineView {
+            finderOutline.fitColumnsToVisibleWidthIfNeeded()
+        }
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {

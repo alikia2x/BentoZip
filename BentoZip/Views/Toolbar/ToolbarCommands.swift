@@ -176,9 +176,7 @@ struct ToolbarCommands: ToolbarContent {
 
             ToolbarItem(placement: .automatic) {
                 Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        appState.showInspector.toggle()
-                    }
+                    appState.showInspector.toggle()
                 } label: {
                     Label("Inspector", systemImage: "sidebar.trailing")
                 }

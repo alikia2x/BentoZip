@@ -15,12 +15,17 @@ final class FinderOutlineView: NSOutlineView {
     var onMovedToWindow: (() -> Void)?
     var onBecameQuickLookOwner: (() -> Void)?
 
+    private var isFittingColumns = false
+    private var lastFittedVisibleWidth: CGFloat = -1
+    private var lastFittedVisibleColumnCount: Int = -1
+
     override var acceptsFirstResponder: Bool { true }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
             onMovedToWindow?()
+            fitColumnsToVisibleWidthIfNeeded()
         }
     }
 
@@ -29,20 +34,43 @@ final class FinderOutlineView: NSOutlineView {
         fitColumnsToVisibleWidthIfNeeded()
     }
 
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        fitColumnsToVisibleWidthIfNeeded()
+    }
+
     func fitColumnsToVisibleWidthIfNeeded() {
-        guard let clipView = enclosingScrollView?.contentView else { return }
+        guard !isFittingColumns,
+              let clipView = enclosingScrollView?.contentView else {
+            return
+        }
+        isFittingColumns = true
+        defer { isFittingColumns = false }
+
+        if abs(clipView.bounds.origin.x) > 0.5 {
+            clipView.setBoundsOrigin(NSPoint(x: 0, y: clipView.bounds.origin.y))
+        }
         let availableWidth = clipView.bounds.width
+        let visibleColumnCount = tableColumns.reduce(0) { $0 + ($1.isHidden ? 0 : 1) }
         guard availableWidth > 0,
               let lastVisibleIndex = tableColumns.lastIndex(where: { !$0.isHidden }) else {
             return
         }
+        if abs(availableWidth - lastFittedVisibleWidth) <= 0.5
+            && visibleColumnCount == lastFittedVisibleColumnCount {
+            return
+        }
+
         let trailingEdge = rect(ofColumn: lastVisibleIndex).maxX
         let delta = availableWidth - trailingEdge
-        guard abs(delta) > 0.5, let nameColumn = outlineTableColumn else { return }
-        let updatedWidth = max(nameColumn.minWidth, nameColumn.width + delta)
-        if abs(updatedWidth - nameColumn.width) > 0.5 {
-            nameColumn.width = updatedWidth
+        if abs(delta) > 0.5, let nameColumn = outlineTableColumn {
+            let updatedWidth = max(nameColumn.minWidth, nameColumn.width + delta)
+            if abs(updatedWidth - nameColumn.width) > 0.5 {
+                nameColumn.width = updatedWidth
+            }
         }
+        lastFittedVisibleWidth = availableWidth
+        lastFittedVisibleColumnCount = visibleColumnCount
     }
 
     @objc func copy(_ sender: Any?) {

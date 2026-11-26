@@ -40,8 +40,6 @@ struct BentoZipApp: App {
                 }
             }
 
-            InspectorCommands()
-
             CommandGroup(replacing: .newItem) {
                 Button("New Window") {
                     DocumentWindowRouter.shared.openNewEmptyWindow()
@@ -305,6 +303,14 @@ private struct WorkspaceMenuCommands: Commands {
                 }
             ))
             .keyboardShortcut(".", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button(activeAppState?.showInspector == true ? "Hide Inspector" : "Show Inspector") {
+                activeAppState?.showInspector.toggle()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .disabled(!canSearch)
         }
 
         CommandMenu("Archive") {
