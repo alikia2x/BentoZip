@@ -2,45 +2,22 @@
 
 @layer base {
   html {
-    background-color: #0a0b0e;
-    color: #f5f5f7;
+    background-color: #F7F6F3;
+    color: #191816;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
-    overflow-x: clip;
   }
 
   body {
     margin: 0;
-    background-color: #0a0b0e;
-    color: #f5f5f7;
-    overflow-x: clip;
-  }
-
-  code,
-  kbd,
-  pre,
-  .font-mono {
-    font-family: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-variant-numeric: tabular-nums;
+    background-color: #F7F6F3;
+    color: #191816;
+    overflow-x: hidden;
   }
 }
 
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
-}
-
-.bg-studio-grid-dark {
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 48px 48px;
-}
-
-.bg-studio-grid-light {
-  background-image:
-    linear-gradient(to right, rgba(10, 11, 14, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(10, 11, 14, 0.04) 1px, transparent 1px);
-  background-size: 48px 48px;
+.font-serif-editorial {
+  font-family: "Newsreader", Georgia, "Times New Roman", serif;
 }

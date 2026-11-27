@@ -1,61 +1,37 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import DownloadWidget from '../components/DownloadWidget';
-import WorkspaceShowcase from '../components/WorkspaceShowcase';
-import MacEcosystem from '../components/MacEcosystem';
-import FormatMatrix from '../components/FormatMatrix';
-import {
-  Archive,
-  Cpu,
-  FolderSync,
-  Layers,
-  Languages,
-  ShieldCheck,
-} from 'lucide-react';
+import { FORMAT_DIRECTORY_GROUPS } from '../data/formats';
 
 const RELEASES_URL = 'https://github.com/alikia2x/BentoZip/releases/latest';
 const GITHUB_URL = 'https://github.com/alikia2x/BentoZip';
-const CHANGELOG_URL = 'https://github.com/alikia2x/BentoZip/blob/main/CHANGELOG.md';
 const ISSUES_URL = 'https://github.com/alikia2x/BentoZip/issues';
 ---
 
 <Layout>
-  <!-- Sticky Translucent Studio Header -->
-  <header class="sticky top-0 z-50 h-14 bg-[#0A0B0E]/82 backdrop-blur-xl border-b border-white/[0.08]">
-    <div class="max-w-[1180px] mx-auto h-full px-5 sm:px-8 flex items-center justify-between gap-4">
-      <a href="#" class="flex items-center gap-2.5 text-white no-underline group shrink-0">
+  <!-- Floating Minimal Navigation Capsule -->
+  <div class="sticky top-3 z-50 px-4 sm:px-6 pt-3">
+    <header class="max-w-[1160px] mx-auto h-13 px-4 sm:px-5 rounded-full bg-white/82 backdrop-blur-xl border border-black/[0.07] shadow-[0_6px_24px_rgba(20,20,18,0.06)] flex items-center justify-between gap-4">
+      <a href="#" class="flex items-center gap-2.5 text-[#191816] no-underline shrink-0">
         <img
           src="/images/app-icon.png"
           alt="BentoZip"
           width="26"
           height="26"
-          class="w-[26px] h-[26px] rounded-[6px] ring-1 ring-white/15 shadow-sm"
+          class="w-[26px] h-[26px] rounded-[6px] ring-1 ring-black/[0.06] shadow-[0_1px_3px_rgba(0,0,0,0.10)]"
         />
         <span class="text-[15px] font-semibold tracking-[-0.015em]">BentoZip</span>
       </a>
 
       <nav aria-label="Primary" class="flex items-center gap-5 sm:gap-7">
         <a
-          href="#workspace"
-          class="hidden md:inline-block text-[13.5px] font-medium text-[#A1A1A6] hover:text-white transition-colors"
+          href="#features"
+          class="hidden sm:inline-block text-[13.5px] font-medium text-[#57544E] hover:text-[#191816] transition-colors"
         >
-          Workspace
-        </a>
-        <a
-          href="#engine"
-          class="hidden md:inline-block text-[13.5px] font-medium text-[#A1A1A6] hover:text-white transition-colors"
-        >
-          Engine
-        </a>
-        <a
-          href="#macos"
-          class="hidden sm:inline-block text-[13.5px] font-medium text-[#A1A1A6] hover:text-white transition-colors"
-        >
-          macOS
+          Features
         </a>
         <a
           href="#formats"
-          class="hidden sm:inline-block text-[13.5px] font-medium text-[#A1A1A6] hover:text-white transition-colors"
+          class="hidden sm:inline-block text-[13.5px] font-medium text-[#57544E] hover:text-[#191816] transition-colors"
         >
           Formats
         </a>
@@ -63,369 +39,331 @@ const ISSUES_URL = 'https://github.com/alikia2x/BentoZip/issues';
           href={GITHUB_URL}
           target="_blank"
           rel="noopener noreferrer"
-          class="text-[13.5px] font-medium text-[#A1A1A6] hover:text-white transition-colors"
+          class="text-[13.5px] font-medium text-[#57544E] hover:text-[#191816] transition-colors"
         >
           GitHub
         </a>
         <a
           href={RELEASES_URL}
+          data-dmg-link
           target="_blank"
           rel="noopener noreferrer"
-          class="inline-flex items-center justify-center h-8 px-4 rounded-full bg-white text-[#0A0B0E] hover:bg-[#E5E5EA] text-[13px] font-semibold tracking-[-0.01em] transition-colors"
+          class="inline-flex items-center justify-center h-8 px-4 rounded-full bg-[#191816] hover:bg-[#32302C] text-white text-[13px] font-medium tracking-[-0.01em] transition-colors"
         >
           Download
         </a>
       </nav>
-    </div>
-  </header>
+    </header>
+  </div>
 
   <main>
-    <!-- 1. Obsidian Studio Hero -->
-    <section class="relative overflow-hidden bg-[#0A0B0E] bg-studio-grid-dark pt-16 sm:pt-24 pb-20 sm:pb-28 border-b border-white/[0.08]">
-      <div
-        class="pointer-events-none absolute inset-x-0 top-0 h-[520px] opacity-60"
-        style="background: radial-gradient(65% 60% at 50% 0%, rgba(10, 132, 255, 0.16) 0%, rgba(10, 11, 14, 0) 100%);"
-        aria-hidden="true"
-      ></div>
-
-      <div class="relative max-w-[1180px] mx-auto px-5 sm:px-8">
-        <div class="flex flex-col items-center text-center">
+    <!-- 1. Framed Editorial Hero -->
+    <section class="max-w-[1200px] mx-auto px-4 sm:px-6 pt-5 sm:pt-7">
+      <div class="rounded-[28px] sm:rounded-[34px] overflow-hidden border border-black/[0.07] bg-gradient-to-b from-[#EAF1F8] via-[#F2F5F9] to-[#EDEAE3] pt-10 sm:pt-14 px-5 sm:px-10 pb-8 sm:pb-12 shadow-[0_12px_40px_rgba(20,20,18,0.04)]">
+        <div class="max-w-[860px] mx-auto text-center">
           <img
             src="/images/app-icon.png"
-            alt="BentoZip macOS app icon"
-            width="80"
-            height="80"
-            class="w-[78px] h-[78px] rounded-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.6)] ring-1 ring-white/15 mb-7"
+            alt="BentoZip app icon"
+            width="64"
+            height="64"
+            class="w-[64px] h-[64px] mx-auto rounded-[15px] drop-shadow-[0_14px_26px_rgba(0,0,0,0.12)] mb-5"
           />
 
           <h1
-            class="text-white font-semibold tracking-[-0.04em] leading-[1.03] max-w-[780px]"
-            style="font-size: clamp(34px, 6.2vw, 74px);"
+            class="font-serif-editorial text-[#191816] font-normal tracking-[-0.025em] leading-[1.04]"
+            style="font-size: clamp(38px, 4.8vw, 60px);"
           >
-            Archives, the Mac way.
+            Archives without the mess.
           </h1>
 
-          <p class="mt-5 text-[18px] sm:text-[20px] leading-[1.5] text-[#A1A1A6] max-w-[630px] font-normal tracking-[-0.012em]">
-            Browse any archive like Finder, drag out individual files without unpacking the rest, edit ZIP, 7z, and TAR in place, and automate workflows from Shortcuts or Terminal.
+          <p class="mt-4 text-[17px] sm:text-[19px] leading-[1.52] text-[#55524C] max-w-[540px] mx-auto">
+            Browse inside any archive like Finder, pull out a single file without unpacking the rest, and build clean encrypted archives across macOS.
           </p>
 
-          <div class="mt-8">
-            <DownloadWidget client:load variant="hero" />
+          <div class="mt-7 flex flex-wrap items-center justify-center gap-3.5">
+            <a
+              href={RELEASES_URL}
+              data-dmg-link
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center justify-center h-11 px-6 rounded-full bg-[#191816] hover:bg-[#32302C] text-white text-[14.5px] font-medium tracking-[-0.01em] shadow-[0_8px_20px_rgba(25,24,22,0.16)] transition-all"
+            >
+              Download for Mac
+            </a>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center justify-center h-11 px-5 rounded-full bg-white/75 hover:bg-white border border-black/[0.08] text-[#191816] text-[14.5px] font-medium tracking-[-0.01em] transition-colors"
+            >
+              View on GitHub
+            </a>
           </div>
 
-          <div class="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12.5px] text-[#8E8E93]">
-            <span>Signed &amp; Notarized DMG</span>
-            <span class="text-white/20" aria-hidden="true">/</span>
-            <span>Zero Cloud · Zero Telemetry</span>
-            <span class="text-white/20" aria-hidden="true">/</span>
-            <span>Free &amp; Open Source</span>
-          </div>
+          <p class="mt-4 text-[13px] text-[#6B6760]">
+            Free on macOS 14+ / Apple Silicon &amp; Intel / Signed &amp; Notarized
+          </p>
         </div>
 
-        <!-- Hero Window Showcase -->
-        <div class="mt-14 sm:mt-16 rounded-[24px] sm:rounded-[30px] p-2 sm:p-3 bg-white/[0.04] border border-white/[0.1] shadow-[0_40px_100px_rgba(0,0,0,0.7)]">
+        <div class="mt-10 sm:mt-12 max-w-[1000px] mx-auto">
           <img
             src="/images/hero-browse.png"
-            alt="BentoZip archive browser showing Finder-style hierarchy and Info Inspector for Design-System-v4.2.tar.gz"
+            alt="BentoZip archive browser with Finder hierarchy and Info Inspector"
             width="1200"
             height="750"
-            class="w-full h-auto block rounded-[18px] sm:rounded-[22px]"
+            class="w-full h-auto block rounded-[18px] sm:rounded-[22px] border border-black/[0.07] shadow-[0_24px_60px_rgba(18,22,28,0.14)]"
           />
         </div>
       </div>
     </section>
 
-    <!-- 2. Interactive Workspace Showcase (Light Studio Band) -->
-    <section id="workspace" class="bg-white text-[#1D1D1F] py-24 sm:py-32">
-      <div class="max-w-[1180px] mx-auto px-5 sm:px-8">
-        <div class="max-w-[660px] mx-auto text-center">
-          <p class="font-mono text-[12px] uppercase tracking-[0.14em] text-[#0071E3] font-semibold">
-            Native AppKit + SwiftUI Workspace
-          </p>
-          <h2
-            class="mt-3 text-[#1D1D1F] font-semibold tracking-[-0.035em] leading-[1.06]"
-            style="font-size: clamp(32px, 4vw, 48px);"
-          >
-            Four workflows. One coherent window.
-          </h2>
-          <p class="mt-4 text-[17px] leading-[1.55] text-[#515154]">
-            Switch between archive browsing, compression presets, live background transfer telemetry, and your Touch ID password vault.
-          </p>
-        </div>
+    <!-- 2. Side-by-Side Feature Pair -->
+    <section id="features" class="max-w-[1200px] mx-auto px-4 sm:px-6 pt-20 sm:pt-28 pb-10">
+      <div class="max-w-[660px] mx-auto text-center">
+        <h2
+          class="font-serif-editorial text-[#191816] font-normal tracking-[-0.025em] leading-[1.08]"
+          style="font-size: clamp(32px, 4vw, 48px);"
+        >
+          Open carefully. Pack cleanly.
+        </h2>
+        <p class="mt-3 text-[16.5px] sm:text-[17.5px] leading-[1.55] text-[#63605A]">
+          Inspect, edit, and organize archives in one calm workspace instead of scattering folders across your Desktop.
+        </p>
+      </div>
 
-        <WorkspaceShowcase client:visible />
+      <div class="mt-10 sm:mt-12 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Left Card: Browse, Preview, Edit -->
+        <article class="bg-white rounded-[24px] border border-black/[0.07] p-6 sm:p-8 shadow-[0_8px_30px_rgba(20,20,18,0.04)] flex flex-col">
+          <div class="overflow-hidden rounded-[14px] border border-black/[0.06] bg-[#ECE9E2] aspect-[16/11]">
+            <img
+              src="/images/feature-welcome.png"
+              alt="BentoZip Welcome window with Recent archives sidebar"
+              width="960"
+              height="680"
+              loading="lazy"
+              class="w-full h-full object-cover object-center block"
+            />
+          </div>
+
+          <h3 class="mt-7 font-serif-editorial text-[26px] sm:text-[28px] leading-[1.15] tracking-[-0.02em] text-[#191816]">
+            Browse, preview, and edit inside.
+          </h3>
+
+          <p class="mt-2.5 text-[15.5px] leading-[1.6] text-[#55524C]">
+            Explore archives in Finder lists or icon grids (⌘2), press Spacebar for Quick Look, inspect images and text inline, or flip through CBZ and CBR comics in a full image gallery.
+          </p>
+
+          <div class="mt-6 pt-5 border-t border-black/[0.07] space-y-3 text-[14.5px] leading-[1.55] text-[#55524C]">
+            <p>
+              <strong class="font-medium text-[#191816]">Drag out &amp; edit in place:</strong>
+              Pull out a single file, drill into nested archives, or add, rename, move, and delete inside ZIP, 7z, and TAR — external edits save back automatically.
+            </p>
+            <p>
+              <strong class="font-medium text-[#191816]">Clean international filenames:</strong>
+              Legacy Windows ZIP archives in Chinese, Japanese, or Korean display cleanly on Mac with automatic encoding repair.
+            </p>
+          </div>
+        </article>
+
+        <!-- Right Card: Compress Inspector -->
+        <article class="bg-white rounded-[24px] border border-black/[0.07] p-6 sm:p-8 shadow-[0_8px_30px_rgba(20,20,18,0.04)] flex flex-col">
+          <div class="overflow-hidden rounded-[14px] border border-black/[0.06] bg-[#E8E9EC] aspect-[16/11]">
+            <img
+              src="/images/feature-compress.png"
+              alt="BentoZip Compress mode with resizable Archive Settings inspector"
+              width="1200"
+              height="720"
+              loading="lazy"
+              class="w-full h-full object-cover object-center block"
+            />
+          </div>
+
+          <h3 class="mt-7 font-serif-editorial text-[26px] sm:text-[28px] leading-[1.15] tracking-[-0.02em] text-[#191816]">
+            Every packing control in one inspector.
+          </h3>
+
+          <p class="mt-2.5 text-[15.5px] leading-[1.6] text-[#55524C]">
+            Save favorite settings as reusable presets, pack multiple items into separate archives or unpack several at once, and build compressed .dmg disk images.
+          </p>
+
+          <div class="mt-6 pt-5 border-t border-black/[0.07] space-y-3 text-[14.5px] leading-[1.55] text-[#55524C]">
+            <p>
+              <strong class="font-medium text-[#191816]">Encryption &amp; Touch ID vault:</strong>
+              Protect ZIP archives with AES-256, lock 7z filenames, generate strong passwords, and store archive passwords safely in Keychain with Touch ID.
+            </p>
+            <p>
+              <strong class="font-medium text-[#191816]">Mac-clean &amp; split archives:</strong>
+              Automatically leave .DS_Store files and macOS clutter behind, or split oversized backups into multi-volume parts.
+            </p>
+          </div>
+        </article>
       </div>
     </section>
 
-    <!-- 3. Engine & Architecture Bento Grid (Stone Studio Band) -->
-    <section id="engine" class="bg-[#F5F5F7] bg-studio-grid-light text-[#1D1D1F] py-24 sm:py-32 border-y border-black/[0.06]">
-      <div class="max-w-[1180px] mx-auto px-5 sm:px-8">
-        <div class="max-w-[640px]">
-          <p class="font-mono text-[12px] uppercase tracking-[0.14em] text-[#0071E3] font-semibold">
-            Architecture &amp; Craft
-          </p>
-          <h2
-            class="mt-3 text-[#1D1D1F] font-semibold tracking-[-0.035em] leading-[1.06]"
-            style="font-size: clamp(32px, 4vw, 46px);"
-          >
-            Engineered around native macOS primitives.
-          </h2>
-          <p class="mt-4 text-[17px] leading-[1.55] text-[#515154]">
-            Built on a persistent C++17 engine over Unix domain sockets, paired with Apple Archive and AppKit performance where it matters.
-          </p>
-        </div>
+    <!-- 3. Inset Dark Stage: Background Tasks & Finder Integration -->
+    <section class="max-w-[1200px] mx-auto px-4 sm:px-6 py-10 sm:py-14">
+      <div class="rounded-[28px] sm:rounded-[34px] bg-[#111215] text-[#F4F3EF] p-6 sm:p-10 lg:p-14 border border-black/[0.08] shadow-[0_20px_60px_rgba(17,18,21,0.14)]">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
+          <div class="lg:col-span-7">
+            <img
+              src="/images/feature-tasks-dark.png"
+              alt="BentoZip floating dark-mode Tasks window showing live speed and time remaining"
+              width="1100"
+              height="760"
+              loading="lazy"
+              class="w-full h-auto block rounded-[16px] sm:rounded-[20px] ring-1 ring-white/[0.1] shadow-[0_24px_60px_rgba(0,0,0,0.45)]"
+            />
+          </div>
 
-        <!-- Asymmetric Architectural Bento Grid -->
-        <div class="mt-12 grid grid-cols-1 md:grid-cols-12 gap-5">
-          <!-- Card 1 (7 cols) -->
-          <article class="md:col-span-7 rounded-[24px] bg-white border border-black/[0.08] p-7 sm:p-8 flex flex-col justify-between shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
-            <div>
-              <div class="flex items-center justify-between gap-3">
-                <div class="w-10 h-10 rounded-xl bg-[#F5F5F7] border border-black/[0.06] flex items-center justify-center text-[#1D1D1F]">
-                  <Cpu className="w-5 h-5" />
-                </div>
-                <span class="font-mono text-[11.5px] text-[#6E6E73] bg-[#F5F5F7] px-2.5 py-1 rounded-md border border-black/[0.06]">
-                  bento7z --server · Unix Socket
-                </span>
-              </div>
-              <h3 class="mt-5 text-[21px] font-semibold tracking-[-0.02em] text-[#1D1D1F]">
-                Persistent interactive worker, isolated heavy I/O
-              </h3>
-              <p class="mt-2.5 text-[15px] leading-[1.6] text-[#515154]">
-                BentoZip routes quick directory listings through a persistent Unix-socket worker while isolating long compressions and extractions in separate processes, with automatic JSONL stdio fallback.
-              </p>
-            </div>
-            <div class="mt-6 pt-4 border-t border-black/[0.06] flex flex-wrap gap-2 font-mono text-[11.5px] text-[#515154]">
-              <span class="px-2.5 py-1 rounded-md bg-[#F5F5F7]">O(1) FileNode Tree</span>
-              <span class="px-2.5 py-1 rounded-md bg-[#F5F5F7]">512 MB–4 GB .tar.* Cache</span>
-              <span class="px-2.5 py-1 rounded-md bg-[#F5F5F7]">AppleArchive (.aar)</span>
-            </div>
-          </article>
+          <div class="lg:col-span-5">
+            <h2
+              class="font-serif-editorial text-white font-normal tracking-[-0.025em] leading-[1.08]"
+              style="font-size: clamp(30px, 3.6vw, 42px);"
+            >
+              Heavy work runs quietly in its own window.
+            </h2>
 
-          <!-- Card 2 (5 cols) -->
-          <article class="md:col-span-5 rounded-[24px] bg-white border border-black/[0.08] p-7 sm:p-8 flex flex-col justify-between shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
-            <div>
-              <div class="flex items-center justify-between gap-3">
-                <div class="w-10 h-10 rounded-xl bg-[#F5F5F7] border border-black/[0.06] flex items-center justify-center text-[#1D1D1F]">
-                  <Archive className="w-5 h-5" />
-                </div>
-                <span class="font-mono text-[11.5px] text-[#6E6E73] bg-[#F5F5F7] px-2.5 py-1 rounded-md border border-black/[0.06]">
-                  ZIP · 7z · TAR
-                </span>
-              </div>
-              <h3 class="mt-5 text-[21px] font-semibold tracking-[-0.02em] text-[#1D1D1F]">
-                Edit archives in place
-              </h3>
-              <p class="mt-2.5 text-[15px] leading-[1.6] text-[#515154]">
-                Drop new files in, rename entries, create folders, or press Delete to prune clutter inside ZIP, 7z, and TAR archives without recompressing everything from scratch.
-              </p>
-            </div>
-            <div class="mt-6 pt-4 border-t border-black/[0.06] font-mono text-[11.5px] text-[#515154]">
-              Atomic rebuild fallback for solid 7z &amp; .tar.* streams
-            </div>
-          </article>
+            <p class="mt-4 text-[16px] leading-[1.6] text-[#A8A6A1]">
+              Compressing large builds or unpacking multi-gigabyte archives never locks up your browser. Track live speed, progress, and time remaining in a dedicated floating Tasks window.
+            </p>
 
-          <!-- Card 3 (5 cols) -->
-          <article class="md:col-span-5 rounded-[24px] bg-white border border-black/[0.08] p-7 sm:p-8 flex flex-col justify-between shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
-            <div>
-              <div class="flex items-center justify-between gap-3">
-                <div class="w-10 h-10 rounded-xl bg-[#F5F5F7] border border-black/[0.06] flex items-center justify-center text-[#1D1D1F]">
-                  <Layers className="w-5 h-5" />
-                </div>
-                <span class="font-mono text-[11.5px] text-[#6E6E73] bg-[#F5F5F7] px-2.5 py-1 rounded-md border border-black/[0.06]">
-                  Live Save-Back
-                </span>
+            <dl class="mt-7 border-t border-white/[0.1] divide-y divide-white/[0.1]">
+              <div class="py-4">
+                <dt class="text-[15px] font-semibold text-white">
+                  Integrated across Finder &amp; macOS
+                </dt>
+                <dd class="mt-1.5 text-[14.5px] leading-[1.58] text-[#A8A6A1]">
+                  Preview archive contents directly from Finder Quick Look, compress or unpack from Finder right-click and Services, search archived filenames in Spotlight, or automate with Apple Shortcuts.
+                </dd>
               </div>
-              <h3 class="mt-5 text-[21px] font-semibold tracking-[-0.02em] text-[#1D1D1F]">
-                Nested drill-down &amp; external editing
-              </h3>
-              <p class="mt-2.5 text-[15px] leading-[1.6] text-[#515154]">
-                Double-click archives nested inside archives to step deeper with breadcrumbs. Open a file in an external editor, save your changes, and BentoZip packs the updated file back into writable archives.
-              </p>
-            </div>
-            <div class="mt-6 pt-4 border-t border-black/[0.06] font-mono text-[11.5px] text-[#515154]">
-              NSFilePromiseProvider lazy single-file drag-out
-            </div>
-          </article>
-
-          <!-- Card 4 (7 cols) -->
-          <article class="md:col-span-7 rounded-[24px] bg-white border border-black/[0.08] p-7 sm:p-8 flex flex-col justify-between shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
-            <div>
-              <div class="flex items-center justify-between gap-3">
-                <div class="w-10 h-10 rounded-xl bg-[#F5F5F7] border border-black/[0.06] flex items-center justify-center text-[#1D1D1F]">
-                  <Languages className="w-5 h-5" />
-                </div>
-                <span class="font-mono text-[11.5px] text-[#6E6E73] bg-[#F5F5F7] px-2.5 py-1 rounded-md border border-black/[0.06]">
-                  GBK · Big5 · Shift-JIS
-                </span>
+              <div class="pt-4">
+                <dt class="text-[15px] font-semibold text-white">
+                  Fast re-open &amp; one-click safety
+                </dt>
+                <dd class="mt-1.5 text-[14.5px] leading-[1.58] text-[#A8A6A1]">
+                  Re-open huge .tar.gz, .tar.bz2, .tar.xz, and .tar.zst archives rapidly, verify archive integrity with one click, and inspect file checksums whenever needed.
+                </dd>
               </div>
-              <h3 class="mt-5 text-[21px] font-semibold tracking-[-0.02em] text-[#1D1D1F]">
-                Automatic CJK legacy ZIP filename repair
-              </h3>
-              <p class="mt-2.5 text-[15px] leading-[1.6] text-[#515154]">
-                Archives built on older Windows machines often turn Chinese or Japanese filenames into garbled mojibake on macOS. BentoZip detects non-UTF-8 codepages and converts entry paths via iconv during both browsing and extraction.
-              </p>
-            </div>
-            <div class="mt-6 pt-4 border-t border-black/[0.06] flex flex-wrap gap-2 font-mono text-[11.5px] text-[#515154]">
-              <span class="px-2.5 py-1 rounded-md bg-[#F5F5F7]">Zero manual encoding picker</span>
-              <span class="px-2.5 py-1 rounded-md bg-[#F5F5F7]">Preserved across browse &amp; extract</span>
-            </div>
-          </article>
-
-          <!-- Card 5 (5 cols) -->
-          <article class="md:col-span-5 rounded-[24px] bg-white border border-black/[0.08] p-7 sm:p-8 flex flex-col justify-between shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
-            <div>
-              <div class="flex items-center justify-between gap-3">
-                <div class="w-10 h-10 rounded-xl bg-[#F5F5F7] border border-black/[0.06] flex items-center justify-center text-[#1D1D1F]">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <span className="font-mono text-[11.5px] text-[#6E6E73] bg-[#F5F5F7] px-2.5 py-1 rounded-md border border-black/[0.06]">
-                  SHA-256 · MD5
-                </span>
-              </div>
-              <h3 class="mt-5 text-[21px] font-semibold tracking-[-0.02em] text-[#1D1D1F]">
-                Verification, path safety &amp; quarantine control
-              </h3>
-              <p class="mt-2.5 text-[15px] leading-[1.6] text-[#515154]">
-                Inspect streaming SHA-256 and MD5 checksums, block Zip-Slip path traversal segments automatically, and strip <code class="font-mono text-[13px] bg-[#F5F5F7] px-1.5 py-0.5 rounded">com.apple.quarantine</code> attributes on trusted extractions when enabled.
-              </p>
-            </div>
-            <div class="mt-6 pt-4 border-t border-black/[0.06] font-mono text-[11.5px] text-[#515154]">
-              Single-folder auto-unwrap &amp; CRC32 column support
-            </div>
-          </article>
-
-          <!-- Card 6 (7 cols with Welcome screenshot) -->
-          <article class="md:col-span-7 rounded-[24px] bg-white border border-black/[0.08] p-7 sm:p-8 grid grid-cols-1 sm:grid-cols-12 gap-6 items-center shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
-            <div class="sm:col-span-5">
-              <div class="w-10 h-10 rounded-xl bg-[#F5F5F7] border border-black/[0.06] flex items-center justify-center text-[#1D1D1F]">
-                <FolderSync className="w-5 h-5" />
-              </div>
-              <h3 class="mt-5 text-[20px] font-semibold tracking-[-0.02em] text-[#1D1D1F]">
-                Document-native multi-window flow
-              </h3>
-              <p class="mt-2.5 text-[14.5px] leading-[1.6] text-[#515154]">
-                Every archive opens in its own window with proxy icons, duplicate-window deduplication, recent archives history, and Finder drag-in drop targets.
-              </p>
-            </div>
-            <div class="sm:col-span-7 rounded-[16px] overflow-hidden border border-black/[0.08] shadow-[0_14px_34px_rgba(0,0,0,0.09)]">
-              <img
-                src="/images/feature-welcome.png"
-                alt="BentoZip Welcome window with Recent archives sidebar"
-                width="960"
-                height="680"
-                loading="lazy"
-                class="w-full h-auto block"
-              />
-            </div>
-          </article>
+            </dl>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 4. macOS Ecosystem & Automation (Obsidian Studio Band) -->
-    <section id="macos" class="bg-[#0B0C0F] text-white py-24 sm:py-32 border-b border-white/[0.08]">
-      <div class="max-w-[1180px] mx-auto px-5 sm:px-8">
-        <div class="max-w-[660px]">
-          <p class="font-mono text-[12px] uppercase tracking-[0.14em] text-[#409CFF] font-semibold">
-            System Integration &amp; Automation
-          </p>
-          <h2
-            class="mt-3 text-white font-semibold tracking-[-0.035em] leading-[1.06]"
-            style="font-size: clamp(32px, 4vw, 46px);"
-          >
-            Deeply wired into macOS.
-          </h2>
-          <p class="mt-4 text-[17px] leading-[1.55] text-[#A1A1A6]">
-            Use BentoZip directly inside Finder, Spotlight, Quick Look, Apple Shortcuts, or Terminal—without changing how you work.
-          </p>
-        </div>
+    <!-- 4. Clean Editorial Format Directory -->
+    <section id="formats" class="max-w-[1200px] mx-auto px-4 sm:px-6 py-16 sm:py-24">
+      <div class="max-w-[600px]">
+        <h2
+          class="font-serif-editorial text-[#191816] font-normal tracking-[-0.025em] leading-[1.08]"
+          style="font-size: clamp(32px, 3.8vw, 44px);"
+        >
+          One app for every archive you receive.
+        </h2>
+        <p class="mt-3 text-[16.5px] leading-[1.55] text-[#63605A]">
+          Open, preview, verify, and build thirty-plus archive, disk image, comic, and package formats in one place.
+        </p>
+      </div>
 
-        <MacEcosystem client:visible />
+      <div class="mt-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-10">
+        {FORMAT_DIRECTORY_GROUPS.map((group) => (
+          <div class="pt-5 border-t border-black/[0.1]">
+            <h3 class="text-[16px] font-semibold text-[#191816] tracking-[-0.01em]">
+              {group.category}
+            </h3>
+            <p class="mt-3 text-[14.5px] leading-[1.65] font-medium text-[#2F2D29]">
+              {group.formatsText}
+            </p>
+            <p class="mt-3 text-[14px] leading-[1.6] text-[#63605A]">
+              {group.summary}
+            </p>
+          </div>
+        ))}
       </div>
     </section>
 
-    <!-- 5. Searchable Format Matrix (Crisp Light Band) -->
-    <section id="formats" class="bg-white text-[#1D1D1F] py-24 sm:py-32">
-      <div class="max-w-[1180px] mx-auto px-5 sm:px-8">
-        <div class="max-w-[640px]">
-          <p class="font-mono text-[12px] uppercase tracking-[0.14em] text-[#0071E3] font-semibold">
-            Format Directory
-          </p>
-          <h2
-            class="mt-3 text-[#1D1D1F] font-semibold tracking-[-0.035em] leading-[1.06]"
-            style="font-size: clamp(32px, 4vw, 46px);"
-          >
-            36 formats. One consistent inspector.
-          </h2>
-          <p class="mt-4 text-[17px] leading-[1.55] text-[#515154]">
-            Detected by compound extension and magic bytes—from encrypted ZIP and 7z splits to Apple Archives, disk images, Linux packages, and comic bundles.
-          </p>
-        </div>
-
-        <FormatMatrix client:visible />
-      </div>
-    </section>
-
-    <!-- 6. Closing CTA (Obsidian Studio Band) -->
-    <section class="relative overflow-hidden bg-[#0A0B0E] bg-studio-grid-dark text-white py-24 sm:py-32 border-t border-white/[0.08]">
-      <div
-        class="pointer-events-none absolute inset-x-0 bottom-0 h-[360px] opacity-60"
-        style="background: radial-gradient(55% 70% at 50% 100%, rgba(10, 132, 255, 0.14) 0%, rgba(10, 11, 14, 0) 100%);"
-        aria-hidden="true"
-      ></div>
-
-      <div class="relative max-w-[1180px] mx-auto px-5 sm:px-8 flex flex-col items-center text-center">
+    <!-- 5. Quiet Closing CTA -->
+    <section class="max-w-[1200px] mx-auto px-4 sm:px-6 pt-4 pb-20 sm:pb-24">
+      <div class="border-t border-black/[0.08] pt-16 sm:pt-20 flex flex-col items-center text-center">
         <img
           src="/images/app-icon.png"
           alt="BentoZip"
-          width="84"
-          height="84"
+          width="72"
+          height="72"
           loading="lazy"
-          class="w-[84px] h-[84px] rounded-[20px] shadow-[0_24px_48px_rgba(0,0,0,0.6)] ring-1 ring-white/15 mb-7"
+          class="w-[72px] h-[72px] rounded-[17px] drop-shadow-[0_14px_26px_rgba(0,0,0,0.12)] mb-6"
         />
         <h2
-          class="text-white font-semibold tracking-[-0.038em] leading-[1.05] max-w-[660px]"
-          style="font-size: clamp(34px, 4.6vw, 54px);"
+          class="font-serif-editorial text-[#191816] font-normal tracking-[-0.025em] leading-[1.08]"
+          style="font-size: clamp(32px, 4.2vw, 48px);"
         >
           Built to belong on macOS.
         </h2>
-        <p class="mt-4 text-[17px] leading-[1.55] text-[#A1A1A6] max-w-[500px]">
-          Download the universal notarized disk image or inspect the source directly on GitHub.
-        </p>
-
-        <div class="mt-8">
-          <DownloadWidget client:load variant="compact" />
+        <div class="mt-7 flex flex-wrap items-center justify-center gap-3.5">
+          <a
+            href={RELEASES_URL}
+            data-dmg-link
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center justify-center h-11 px-6 rounded-full bg-[#191816] hover:bg-[#32302C] text-white text-[14.5px] font-medium tracking-[-0.01em] shadow-[0_8px_20px_rgba(25,24,22,0.16)] transition-all"
+          >
+            Download for Mac
+          </a>
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center justify-center h-11 px-5 rounded-full bg-white hover:bg-[#FAF9F6] border border-black/[0.09] text-[#191816] text-[14.5px] font-medium tracking-[-0.01em] transition-colors"
+          >
+            View on GitHub
+          </a>
         </div>
+        <p class="mt-4 text-[13px] text-[#6B6760]">
+          macOS 14+ / Universal (Apple Silicon &amp; Intel) / Signed &amp; Notarized
+        </p>
       </div>
     </section>
   </main>
 
-  <!-- Minimal Studio Footer -->
-  <footer class="bg-[#0A0B0E] border-t border-white/[0.08]">
-    <div class="max-w-[1180px] mx-auto px-5 sm:px-8 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-[13px] text-[#8E8E93]">
-      <div class="flex items-center gap-2.5">
-        <span class="font-semibold text-white">BentoZip</span>
-        <span class="text-white/20" aria-hidden="true">·</span>
-        <span>Native Archive Studio for macOS</span>
-      </div>
-
-      <div class="flex flex-wrap items-center justify-center gap-6">
-        <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">
-          Releases
+  <!-- Minimal Footer -->
+  <footer class="max-w-[1200px] mx-auto px-4 sm:px-6 pb-8">
+    <div class="border-t border-black/[0.08] pt-7 flex flex-col sm:flex-row items-center justify-between gap-4 text-[13px] text-[#6B6760]">
+      <span class="font-medium text-[#191816]">BentoZip</span>
+      <div class="flex items-center gap-6">
+        <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" class="hover:text-[#191816] transition-colors">
+          Latest Release
         </a>
-        <a href={CHANGELOG_URL} target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">
-          Changelog
-        </a>
-        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">
+        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" class="hover:text-[#191816] transition-colors">
           GitHub
         </a>
-        <a href={ISSUES_URL} target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">
+        <a href={ISSUES_URL} target="_blank" rel="noopener noreferrer" class="hover:text-[#191816] transition-colors">
           Issues
         </a>
       </div>
-
       <span>&copy; 2026 BentoZip</span>
     </div>
   </footer>
+
+  <script>
+    (() => {
+      const apiUrl = 'https://api.github.com/repos/alikia2x/BentoZip/releases/latest';
+      fetch(apiUrl, { headers: { Accept: 'application/vnd.github+json' } })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!data || !Array.isArray(data.assets)) return;
+          const dmg = data.assets.find(
+            (asset: { name?: string; browser_download_url?: string }) =>
+              typeof asset.name === 'string' &&
+              asset.name.toLowerCase().endsWith('.dmg') &&
+              typeof asset.browser_download_url === 'string',
+          );
+          if (!dmg?.browser_download_url) return;
+          document.querySelectorAll<HTMLAnchorElement>('a[data-dmg-link]').forEach((el) => {
+            el.href = dmg.browser_download_url;
+          });
+        })
+        .catch(() => {
+          // Silently retain the fallback releases URL when offline or rate-limited.
+        });
+    })();
+  </script>
 </Layout>

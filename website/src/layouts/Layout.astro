@@ -7,8 +7,8 @@ interface Props {
 }
 
 const {
-  title = 'BentoZip — Native Archive Studio for macOS',
-  description = 'Browse inside any archive like Finder, pull out single files lazily, edit ZIP, 7z, and TAR in place, and automate workflows with Shortcuts and CLI.',
+  title = 'BentoZip — Archives, the Mac way.',
+  description = 'Browse inside any archive like Finder, pull out a single file without unpacking the rest, and build clean encrypted archives across macOS.',
 } = Astro.props;
 ---
 
@@ -20,13 +20,19 @@ const {
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..500;1,6..72,400&display=swap"
+    />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="/images/hero-browse.png" />
-    <meta name="theme-color" content="#0A0B0E" />
+    <meta name="theme-color" content="#F7F6F3" />
   </head>
-  <body class="bg-[#0A0B0E] text-[#F5F5F7] antialiased selection:bg-[#0A84FF]/25 selection:text-white">
+  <body class="bg-[#F7F6F3] text-[#191816] antialiased selection:bg-[#0071E3]/15 selection:text-[#191816]">
     <slot />
   </body>
 </html>
