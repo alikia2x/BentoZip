@@ -1,70 +1,54 @@
 # BentoZip
 
-A native macOS archive manager built with SwiftUI, AppKit (`NSOutlineView` + Quick Look), and an embedded asynchronous C++17 `bento7z` engine (`bit7z` + `7z.so`).
+**Browse, preview, edit, and pack archives on macOS like a native Finder window.**
 
-BentoZip lets you browse archive contents like a Finder window, drag individual files out lazily without extracting an entire archive, inspect and edit writable archives in place, and run heavy compression or extraction jobs in a decoupled background Tasks window.
+BentoZip is a fast, local-first archive manager built for macOS 14+. Open an archive to inspect its folder tree without extracting everything first, drag out individual files on demand, edit existing archives in place, and integrate archive workflows directly into Finder, Quick Look, Spotlight, Shortcuts, and your terminal—with everything processed locally on your Mac and zero telemetry.
 
-## Key Capabilities
+## Why BentoZip
 
-- **Three-Mode Finder Workspace**: Welcome drop view (`.empty`), staging/configuration view (`.compress`), and archive browser (`.browseArchive`) with a unified `NSOutlineView`, column sorting, type-ahead navigation, breadcrumbs, and a resizable right inspector.
-- **Writable Formats**: Create archives in **ZIP** (AES-256 or ZipCrypto), **7z** (with header encryption), **TAR**, **TAR.GZ**, **TAR.BZ2**, **TAR.XZ**, and **Apple Archive (`.aar`)**. Create multi-volume split archives (`10 MB` – `4 GB`) for ZIP and 7z.
-- **In-Place Archive Editing**: Add or delete entries directly inside existing ZIP, 7z, and TAR archives via `BitArchiveEditor` (falling back to atomic extract-and-rebuild for solid 7z and compound `.tar.*` archives).
-- **Read-Only Format Support**: Browse and extract **GZIP**, **BZ2**, **XZ**, **ZSTD** (`.zst`, `.tar.zst`, `.tzst`), **RAR**, **DMG**, **ISO**, **XAR / PKG**, **CAB**, **WIM**, **CPIO**, **LZMA**, **DEB**, **RPM**, **LZH**, and split volumes (`.7z.001`, `.zip.001`, `.tar.001`, `.partN.rar`, `.rNN`, `.001`).
-- **Legacy CJK ZIP Filename Repair**: Automatically detects and converts non-UTF-8 legacy ZIP entry names (such as GBK, Big5, and Shift-JIS) during both listing and extraction.
-- **High-Throughput Engine & Disk Cache**:
-  - Multiplexed Unix Domain Socket client (`bento7z --server`) separating a persistent interactive worker from isolated heavy-task workers, with JSONL stdio fallback.
-  - Persistent LRU disk cache under `~/Library/Caches` for unwrapped `.tar` streams of non-encrypted compound `.tar.*` archives (`Off`, `512 MB`, `1 GB`, `2 GB`, `4 GB` quota).
-  - Native Document-Based multi-window routing and a standalone 7-Zip-style Tasks progress window.
+- **Finder-style browsing & instant preview**: Switch between list and Grid (`⌘2`) views with breadcrumb navigation, live search, Spacebar Quick Look, inline text and image previews, lazy drag-out extraction, and a dedicated Image Gallery for `CBZ`, `CBR`, and image folders.
+- **Broad format creation**: Create `ZIP` (AES-256 or ZipCrypto), `7z` (with optional header encryption), `TAR`, `TAR.GZ`, `TAR.BZ2`, `TAR.XZ`, Apple Archive (`AAR`), HFS+ `DMG`, `Zstd` / `TAR.ZST` (via `zstd`), and multi-volume split archives.
+- **Wide read & extraction support**: Open and extract `RAR`, `ISO`, `XAR` / `PKG`, `CAB`, `WIM`, `CPIO`, `LZMA`, `DEB`, `RPM`, `LZH`, `SquashFS`, `VMDK`, `CHM`, `ARJ`, `EPUB`, `LZ4` / `TAR.LZ4`, `Brotli`, and split volumes, with automatic CJK filename encoding recovery for legacy `ZIP` archives.
+- **In-place editing & verification**: Rename, move, add, delete, or change passwords directly inside `ZIP`, `7z`, and `TAR` archives, drill into nested archives, save changes back automatically after editing files in external apps, verify archive integrity, and compute `SHA-256` / `MD5` checksums.
+- **Workflow & security tools**: Save reusable Compression Presets, compress multiple items into separate archives or extract multiple archives at once, and store archive passwords in the macOS Keychain Password Vault with Touch ID unlock and a built-in strong password generator.
+- **Deep macOS integration**: Works across the macOS Services menu, Quick Look extension, Finder Sync context menu, Spotlight archive indexing, Apple Shortcuts, a `bentozip` CLI wrapper, and an in-app GitHub Releases updater.
 
-## Monorepo Layout
+## Download & Install
 
-```text
-BentoZip/
-├── BentoZip/                  # macOS SwiftUI + AppKit application target
-├── BentoZipCore/              # Swift Package: models, engines, coordinator, and view models
-├── BentoZipTests/             # Swift Testing & XCTest unit tests
-├── BentoZipUITests/           # macOS UI tests
-├── BentoZip.xcodeproj/        # Xcode project (bundles & codesigns bento7z + 7z.so)
-├── engine/
-│   └── bento7z/               # C++17 archive engine (bit7z + 7z.so)
-├── website/                   # Astro + React + Tailwind landing page
-└── scripts/                   # Build, DMG packaging, and release automation scripts
-    ├── build-engine.sh
-    ├── build-release.sh
-    └── create-dmg.sh
-```
+Grab the latest Universal macOS (`arm64` + `x86_64`, macOS 14+) build from [GitHub Releases](https://github.com/alikia2x/BentoZip/releases/latest):
 
-## Development Prerequisites
+1. Download `BentoZip-<version>-macos-universal.dmg` (or `.zip`).
+2. Open the disk image and drag **BentoZip** into **Applications**.
+3. Optionally install the `bentozip` command-line wrapper from **BentoZip > Settings** (installs to `/usr/local/bin/bentozip`).
 
-- macOS 14.0+ (deployment target: macOS 14.0, currently targeting `arm64`)
-- Xcode 15.0+ and Swift 5.9+
-- CMake 3.20+, Ninja/Make, and Apple Clang (for `engine/bento7z`)
-- Node.js 22+ and pnpm 10+ (for `website/`, optional)
+## Developer Quickstart
 
-## Local Build & Test Commands
+### Prerequisites
 
-### 1. Build the `bento7z` Engine
+- macOS 14.0+ and Xcode 15.0+
+- CMake 3.20+ and Apple Clang (for the bundled `bento7z` engine)
+- Optional CLI compressors on `PATH`: `zstd`, `lz4`, and `brotli` (for `Zstd`, `LZ4`, and `Brotli` archive support)
+- Optional for `website/`: Node.js 22+ and pnpm 10+
 
-Must be run before building `BentoZip.xcodeproj` (the Xcode build phase copies and codesigns `engine/bento7z/build/bento7z` and `engine/bento7z/build/7z.so` into `BentoZip.app/Contents/Helpers/`):
+### Build the Engine & App
+
+Build the bundled `bento7z` engine first (Xcode copies and signs `bento7z` and `7z.so` into the app bundle):
 
 ```bash
 ./scripts/build-engine.sh
+# Or build a universal arm64 + x86_64 engine binary:
+./scripts/build-engine.sh --universal
 ```
 
-### 2. Build & Test the macOS App
+Build the core Swift package, build the macOS app, and run unit tests:
 
 ```bash
-# Build BentoZipCore Swift package independently
 cd BentoZipCore && swift build -Xswiftc -warnings-as-errors
-
-# Build the macOS app (Debug)
 xcodebuild -project BentoZip.xcodeproj -scheme BentoZip -configuration Debug build
-
-# Run unit tests
 xcodebuild -project BentoZip.xcodeproj -scheme BentoZip -configuration Debug -only-testing:BentoZipTests test
 ```
 
-### 3. Website (`website/`)
+### Website (`website/`)
 
 ```bash
 pnpm --dir website install
@@ -72,19 +56,32 @@ pnpm --dir website dev
 pnpm --dir website build
 ```
 
-## Release & Signing Workflow
+### Release Workflow
 
-CI and Release automation live under `.github/workflows/`:
+Bump the Xcode marketing/build version and fold `CHANGELOG.md` `[Unreleased]` notes into a release entry:
 
-- **CI (`.github/workflows/ci.yml`)**: Runs on pushes to `main` and pull requests. Builds `engine/bento7z`, checks for prohibited middle-dot (`U+00B7`) characters in `BentoZip/` and `BentoZipCore/`, builds `BentoZipCore` with `-warnings-as-errors`, builds the Xcode Debug target, runs `BentoZipTests`, and builds `website/`.
-- **Release (`.github/workflows/release.yml`)**: Triggered by `v*` tags (verified against `MARKETING_VERSION` in `BentoZip.xcodeproj/project.pbxproj`) or `workflow_dispatch`. Executes `./scripts/build-release.sh`, signs `7z.so`, `bento7z`, `BentoZip.app`, and the UDZO `.dmg` (created via `./scripts/create-dmg.sh`), notarizes and staples both the app and DMG when signing secrets are configured, generates `SHA256SUMS.txt`, and publishes the GitHub Release.
+```bash
+./scripts/release.sh <major|minor|patch|x.y.z> [--dry-run] [--skip-changelog]
+```
 
-To enable Developer ID signing and Apple notarization in GitHub Actions, configure the following repository secrets (secret names only; no values are stored in this repository):
+Build universal release `.dmg` and `.zip` artifacts locally into `dist/` (with optional `CODESIGN=1` and `NOTARIZE=1`):
 
-- `MACOS_CERT_P12`
-- `MACOS_CERT_PASSWORD`
-- `MACOS_KEYCHAIN_PASSWORD`
-- `MACOS_DEVELOPER_ID`
-- `APPLE_TEAM_ID`
-- `APPLE_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
+```bash
+./scripts/build-release.sh --universal
+```
+
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which verifies the version, tests, and website, builds universal artifacts, signs and notarizes when the secrets below are configured, generates `SHA256SUMS.txt`, and publishes the GitHub Release:
+
+| Secret | Purpose |
+|---|---|
+| `MACOS_CERT_P12` | Base64-encoded Developer ID Application `.p12` certificate |
+| `MACOS_CERT_PASSWORD` | Password for the `.p12` certificate |
+| `MACOS_KEYCHAIN_PASSWORD` | Temporary CI keychain password |
+| `MACOS_DEVELOPER_ID` | Signing identity name (`Developer ID Application: ...`) |
+| `APPLE_TEAM_ID` | Apple Developer Team ID |
+| `APPLE_ID` | Apple ID email for `notarytool` |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for Apple notarization |
+
+## License
+
+No `LICENSE` file is currently present in this repository.

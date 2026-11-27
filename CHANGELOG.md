@@ -4,6 +4,15 @@ All notable changes to BentoZip are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-27
+
+### Added
+- Rewritten product website with interactive workflow switcher, macOS ecosystem integration showcase, live GitHub release download widget, and searchable 36-format matrix.
+- Rewritten user-first `README.md` with clear Universal download and Developer ID / notarization setup instructions.
+
+### Changed
+- Enabled full Developer ID signing and Apple notarization pipeline on `alikia2x/BentoZip` GitHub Releases.
+
 ## [1.0.0] - 2026-11-27
 
 ### Added
