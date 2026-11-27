@@ -71,6 +71,7 @@ struct FinderGridView: NSViewRepresentable {
         collection.dataSource = nil
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate {
         let actions: FinderOutlineCoordinator
         private var sourceIDs: [UUID] = []

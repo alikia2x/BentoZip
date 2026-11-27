@@ -4,7 +4,7 @@ All notable changes to BentoZip are documented in this file.
 
 ## [Unreleased]
 
-## [1.0.3] - 2026-11-27
+## [1.0.4] - 2026-11-27
 
 ### Changed
 - Refined archive and compression inspectors, including a dedicated password dialog and system Quick Look previews.
