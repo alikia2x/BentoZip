@@ -102,6 +102,7 @@ if [ "${DO_CODESIGN}" = "1" ]; then
   XCODEBUILD_ARGS+=(
     "CODE_SIGN_IDENTITY=${MACOS_DEVELOPER_ID}"
     "DEVELOPMENT_TEAM=${APPLE_TEAM_ID}"
+    "CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO"
     "OTHER_CODE_SIGN_FLAGS=--timestamp"
   )
 else
@@ -123,6 +124,58 @@ echo "==> Step 3: Staging app bundle to ${APP_OUT}"
 rm -rf "${APP_OUT}"
 ditto "${BUILT_APP}" "${APP_OUT}"
 
+sign_with_clean_entitlements() {
+  local target_path="$1"
+  local tmp_ent
+  tmp_ent="$(mktemp "${TMPDIR:-/tmp}/bentoZip-ent.XXXXXX.plist")"
+  if codesign -d --entitlements :- "${target_path}" > "${tmp_ent}" 2>/dev/null && [ -s "${tmp_ent}" ]; then
+    /usr/libexec/PlistBuddy -c "Delete :com.apple.security.get-task-allow" "${tmp_ent}" >/dev/null 2>&1 || true
+    local key_count
+    key_count="$(/usr/libexec/PlistBuddy -c "Print" "${tmp_ent}" 2>/dev/null | grep -c '=' || true)"
+    if [ "${key_count}" -gt 0 ]; then
+      codesign --force --options runtime --timestamp --entitlements "${tmp_ent}" --sign "${MACOS_DEVELOPER_ID}" "${target_path}"
+    else
+      codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${target_path}"
+    fi
+  else
+    codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${target_path}"
+  fi
+  rm -f "${tmp_ent}"
+}
+
+notarize_and_verify() {
+  local artifact_path="$1"
+  local notary_json
+  notary_json="$(mktemp "${TMPDIR:-/tmp}/bentoZip-notary-res.XXXXXX.json")"
+  if ! xcrun notarytool submit "${artifact_path}" \
+    --apple-id "${APPLE_ID}" \
+    --team-id "${APPLE_TEAM_ID}" \
+    --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+    --wait \
+    --output-format json > "${notary_json}"; then
+    cat "${notary_json}" >&2 || true
+    rm -f "${notary_json}"
+    return 1
+  fi
+
+  local submission_id submission_status
+  submission_id="$(/usr/bin/python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("id",""))' "${notary_json}")"
+  submission_status="$(/usr/bin/python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("status",""))' "${notary_json}")"
+  cat "${notary_json}"
+  rm -f "${notary_json}"
+
+  if [ "${submission_status}" != "Accepted" ]; then
+    echo "error: Apple notarization failed with status '${submission_status}' (submission id: ${submission_id})" >&2
+    if [ -n "${submission_id}" ]; then
+      xcrun notarytool log "${submission_id}" \
+        --apple-id "${APPLE_ID}" \
+        --team-id "${APPLE_TEAM_ID}" \
+        --password "${APPLE_APP_SPECIFIC_PASSWORD}" >&2 || true
+    fi
+    return 1
+  fi
+}
+
 if [ "${DO_CODESIGN}" = "1" ]; then
   echo "==> Step 4: Hardening runtime & signing inside-out"
   if [ -d "${APP_OUT}/Contents/Frameworks" ]; then
@@ -135,12 +188,12 @@ if [ "${DO_CODESIGN}" = "1" ]; then
       while IFS= read -r -d '' nested_bin; do
         codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${nested_bin}"
       done < <(find "${appex}/Contents" -type f \( -name "*.dylib" -o -name "*.so" -o -perm -111 \) ! -path "*/MacOS/*" -print0 2>/dev/null || true)
-      codesign --force --options runtime --timestamp --preserve-metadata=entitlements --sign "${MACOS_DEVELOPER_ID}" "${appex}"
+      sign_with_clean_entitlements "${appex}"
     done < <(find "${APP_OUT}/Contents/PlugIns" -maxdepth 1 -type d -name "*.appex" -print0 | sort -z)
   fi
   codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${APP_OUT}/Contents/Helpers/7z.so"
   codesign --force --options runtime --timestamp --sign "${MACOS_DEVELOPER_ID}" "${APP_OUT}/Contents/Helpers/bento7z"
-  codesign --force --options runtime --timestamp --preserve-metadata=entitlements --sign "${MACOS_DEVELOPER_ID}" "${APP_OUT}"
+  sign_with_clean_entitlements "${APP_OUT}"
   codesign --verify --deep --strict --verbose=2 "${APP_OUT}"
 fi
 
@@ -149,11 +202,7 @@ if [ "${DO_NOTARIZE}" = "1" ]; then
   NOTARY_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bentoZip-notary.XXXXXX")"
   APP_NOTARY_ZIP="${NOTARY_TMP_DIR}/BentoZip-notary.zip"
   ditto -c -k --keepParent "${APP_OUT}" "${APP_NOTARY_ZIP}"
-  xcrun notarytool submit "${APP_NOTARY_ZIP}" \
-    --apple-id "${APPLE_ID}" \
-    --team-id "${APPLE_TEAM_ID}" \
-    --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
-    --wait
+  notarize_and_verify "${APP_NOTARY_ZIP}"
   rm -rf "${NOTARY_TMP_DIR}"
   xcrun stapler staple "${APP_OUT}"
   xcrun stapler validate "${APP_OUT}"
@@ -177,11 +226,7 @@ fi
 
 if [ "${DO_NOTARIZE}" = "1" ]; then
   echo "==> Step 8: Notarizing and stapling ${DMG_NAME}"
-  xcrun notarytool submit "${DMG_PATH}" \
-    --apple-id "${APPLE_ID}" \
-    --team-id "${APPLE_TEAM_ID}" \
-    --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
-    --wait
+  notarize_and_verify "${DMG_PATH}"
   xcrun stapler staple "${DMG_PATH}"
   xcrun stapler validate "${DMG_PATH}"
 fi
