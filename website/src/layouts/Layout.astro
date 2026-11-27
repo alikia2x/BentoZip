@@ -7,8 +7,8 @@ interface Props {
 }
 
 const {
-  title = 'BentoZip — Archives, the Mac way.',
-  description = 'Browse inside any archive like Finder, pull out a single file without unpacking the rest, and build clean encrypted archives across macOS.',
+  title = 'BentoZip — Archives without the mess.',
+  description = 'Browse inside any archive like Finder, pull out a single file without unpacking the rest, and create clean encrypted archives on macOS.',
 } = Astro.props;
 ---
 
@@ -24,15 +24,15 @@ const {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..500;1,6..72,400&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
     />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="/images/hero-browse.png" />
-    <meta name="theme-color" content="#F7F6F3" />
+    <meta name="theme-color" content="#FFFFFF" />
   </head>
-  <body class="bg-[#F7F6F3] text-[#191816] antialiased selection:bg-[#0071E3]/15 selection:text-[#191816]">
+  <body class="bg-[#FFFFFF] text-[#111214] antialiased selection:bg-[#111214]/10 selection:text-[#111214]">
     <slot />
   </body>
 </html>

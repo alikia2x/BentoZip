@@ -2,9 +2,9 @@
 
 @layer base {
   html {
-    background-color: #F7F6F3;
-    color: #191816;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
+    background-color: #FFFFFF;
+    color: #111214;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
@@ -12,12 +12,8 @@
 
   body {
     margin: 0;
-    background-color: #F7F6F3;
-    color: #191816;
+    background-color: #FFFFFF;
+    color: #111214;
     overflow-x: hidden;
   }
-}
-
-.font-serif-editorial {
-  font-family: "Newsreader", Georgia, "Times New Roman", serif;
 }
