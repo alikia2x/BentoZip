@@ -236,15 +236,6 @@ private struct WorkspaceMenuCommands: Commands {
         (activeAppState?.isLoading ?? false) || (activeProgressState?.isOperationInProgress ?? false)
     }
 
-    private func setViewMode(_ mode: BrowserViewMode) {
-        if let appState = activeAppState {
-            appState.viewMode = mode
-        }
-        preferencesManager.updatePreferences { prefs in
-            prefs.defaultViewMode = mode.rawValue
-        }
-    }
-
     private var canUpdatePassword: Bool {
         guard isBrowsingArchive,
               let appState = activeAppState,
@@ -275,14 +266,14 @@ private struct WorkspaceMenuCommands: Commands {
         CommandGroup(after: .sidebar) {
             Divider()
 
-            Button("as List") {
-                setViewMode(.list)
+            Button("as Icons") {
+                activeAppState?.setBrowserViewMode(.grid)
             }
             .keyboardShortcut("1", modifiers: .command)
             .disabled(!canSearch)
 
-            Button("as Icons") {
-                setViewMode(.grid)
+            Button("as List") {
+                activeAppState?.setBrowserViewMode(.list)
             }
             .keyboardShortcut("2", modifiers: .command)
             .disabled(!canSearch)

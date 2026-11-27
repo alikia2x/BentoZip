@@ -139,9 +139,6 @@ struct ContentView: View {
         .sheet(isPresented: $uiState.showUpdatePasswordSheet) {
             UpdatePasswordSheet()
         }
-        .sheet(isPresented: $uiState.showImageGallery) {
-            ImageGallerySheet(initialNodeID: uiState.galleryInitialNodeID)
-        }
         .alert(
             testArchiveAlertTitle,
             isPresented: Binding(
@@ -261,6 +258,9 @@ struct ContentView: View {
                             ),
                             idealWidth: min(Self.idealInspectorWidth, maxAllowedInspector)
                         )
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                        .zIndex(1)
 
                         CompressionSettingsView()
                             .frame(width: clampedPanelWidth)
@@ -313,52 +313,85 @@ private struct InspectorBackdropView: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
-private struct InspectorResizeDivider: View {
+private struct InspectorResizeDivider: NSViewRepresentable {
     @Binding var width: CGFloat
     let idealWidth: CGFloat
 
-    @State private var dragStartWidth: CGFloat?
+    func makeNSView(context: Context) -> DividerView {
+        DividerView()
+    }
 
-    var body: some View {
-        Rectangle()
-            .fill(Color(nsColor: .separatorColor))
-            .frame(width: 1)
-            .frame(maxHeight: .infinity)
-            .overlay {
-                ResizeCursorOverlay()
-                    .frame(width: 7)
-                    .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { value in
-                                if dragStartWidth == nil {
-                                    dragStartWidth = width
-                                }
-                                let baseline = dragStartWidth ?? width
-                                width = baseline - value.translation.width
-                            }
-                            .onEnded { _ in
-                                dragStartWidth = nil
-                            }
-                    )
-                    .onTapGesture(count: 2) {
-                        width = idealWidth
-                    }
+    func updateNSView(_ view: DividerView, context: Context) {
+        view.width = $width
+        view.idealWidth = idealWidth
+    }
+
+    final class DividerView: NSView {
+        var width: Binding<CGFloat>?
+        var idealWidth: CGFloat = 0
+        private var dragStart: (mouseX: CGFloat, width: CGFloat)?
+        private var cursorTrackingArea: NSTrackingArea?
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let cursorTrackingArea {
+                removeTrackingArea(cursorTrackingArea)
             }
-    }
-}
+            let area = NSTrackingArea(
+                rect: bounds.insetBy(dx: -4, dy: 0),
+                options: [.activeAlways, .cursorUpdate, .mouseEnteredAndExited, .enabledDuringMouseDrag],
+                owner: self
+            )
+            addTrackingArea(area)
+            cursorTrackingArea = area
+            window?.invalidateCursorRects(for: self)
+        }
 
-private struct ResizeCursorOverlay: NSViewRepresentable {
-    func makeNSView(context: Context) -> CursorRectView {
-        CursorRectView()
-    }
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let local = convert(point, from: superview)
+            return bounds.insetBy(dx: -4, dy: 0).contains(local) ? self : nil
+        }
 
-    func updateNSView(_ nsView: CursorRectView, context: Context) {}
+        override func cursorUpdate(with event: NSEvent) {
+            NSCursor.resizeLeftRight.set()
+        }
 
-    final class CursorRectView: NSView {
+        override func mouseEntered(with event: NSEvent) {
+            NSCursor.resizeLeftRight.set()
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            if dragStart == nil {
+                NSCursor.arrow.set()
+            }
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.separatorColor.setFill()
+            NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
+        }
+
         override func resetCursorRects() {
-            addCursorRect(bounds, cursor: .resizeLeftRight)
+            addCursorRect(bounds.insetBy(dx: -4, dy: 0), cursor: .resizeLeftRight)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let width else { return }
+            if event.clickCount == 2 {
+                width.wrappedValue = idealWidth
+                return
+            }
+            dragStart = (event.locationInWindow.x, width.wrappedValue)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let dragStart else { return }
+            NSCursor.resizeLeftRight.set()
+            width?.wrappedValue = dragStart.width + dragStart.mouseX - event.locationInWindow.x
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            dragStart = nil
         }
     }
 }

@@ -4,6 +4,17 @@ All notable changes to BentoZip are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-27
+
+### Changed
+- Refined archive and compression inspectors, including a dedicated password dialog and system Quick Look previews.
+- Moved list and icon view controls to the toolbar and improved icon view selection and navigation.
+- Added a configurable preview size limit and inline loading feedback.
+- Updated the website product screenshots and layout.
+
+### Removed
+- Removed the archive image gallery.
+
 ## [1.0.1] - 2026-11-27
 
 ### Added

@@ -37,6 +37,23 @@ struct ToolbarCommands: ToolbarContent {
                 .help("Back to Home")
             }
 
+            ToolbarItem(placement: .primaryAction) {
+                Picker("View", selection: Binding(
+                    get: { appState.viewMode },
+                    set: { appState.setBrowserViewMode($0) }
+                )) {
+                    Label("Icon View", systemImage: "square.grid.2x2")
+                        .tag(BrowserViewMode.grid)
+                    Label("List View", systemImage: "list.bullet")
+                        .tag(BrowserViewMode.list)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityIdentifier("toolbar.view-mode")
+                .help("View")
+            }
+
+
             ToolbarItemGroup(placement: .primaryAction) {
                 if appState.mode == .compress {
                     Button {
@@ -156,6 +173,7 @@ struct ToolbarCommands: ToolbarContent {
                     .help("Extract")
                 }
             }
+
 
 #if compiler(>=6.2)
             if #available(macOS 26.0, *) {

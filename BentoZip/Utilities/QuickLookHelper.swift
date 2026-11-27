@@ -6,7 +6,7 @@ import QuickLookUI
 final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     static let shared = QuickLookHelper()
 
-    private weak var activeOutlineView: FinderOutlineView?
+    private weak var activeOwner: NSView?
     private var previewURLs: [URL] = []
     private var requestID: UInt64 = 0
     private var activeTask: Task<Void, Never>?
@@ -22,30 +22,29 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
 
     // MARK: - Responder Chain Control
 
-    func beginControl(panel: QLPreviewPanel, owner: FinderOutlineView) {
-        let ownerChanged = (activeOutlineView !== owner)
-        activeOutlineView = owner
+    func beginControl(panel: QLPreviewPanel, owner: NSView, onOwnershipChange: (() -> Void)? = nil) {
+        let ownerChanged = (activeOwner !== owner)
+        activeOwner = owner
         panel.dataSource = self
         panel.delegate = self
         if ownerChanged && panel.isVisible && !isPresentingPanel {
-            owner.onBecameQuickLookOwner?()
+            onOwnershipChange?()
         }
     }
 
-    func endControl(panel: QLPreviewPanel, owner: FinderOutlineView) {
-        if activeOutlineView === owner {
-            activeOutlineView = nil
-        }
+    func endControl(panel: QLPreviewPanel, owner: NSView) {
+        guard activeOwner === owner else { return }
+        activeOwner = nil
         panel.dataSource = nil
         panel.delegate = nil
     }
 
-    func detachOwner(_ owner: FinderOutlineView) {
-        guard activeOutlineView === owner else { return }
+    func detachOwner(_ owner: NSView) {
+        guard activeOwner === owner else { return }
         activeTask?.cancel()
         activeTask = nil
         requestID &+= 1
-        activeOutlineView = nil
+        activeOwner = nil
         previewURLs = []
         if isVisible {
             QLPreviewPanel.shared()?.orderOut(nil)
@@ -60,8 +59,8 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         panel.orderOut(nil)
     }
 
-    func closeIfVisible(for owner: FinderOutlineView) {
-        guard activeOutlineView === owner || activeOutlineView == nil else { return }
+    func closeIfVisible(for owner: NSView) {
+        guard activeOwner === owner || activeOwner == nil else { return }
         closeIfVisible()
     }
 
@@ -240,7 +239,7 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         MainActor.assumeIsolated {
             guard let event,
                   event.type == .keyDown,
-                  let activeOutlineView else {
+                  let activeOwner else {
                 return false
             }
 
@@ -251,13 +250,13 @@ final class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
                 guard modifiers.isEmpty || modifiers == .command || modifiers == .shift else {
                     return false
                 }
-                activeOutlineView.keyDown(with: event)
+                activeOwner.keyDown(with: event)
                 return true
             case 123, 124: // Left, Right arrows
                 guard modifiers.isEmpty, previewURLs.count <= 1 else {
                     return false
                 }
-                activeOutlineView.keyDown(with: event)
+                activeOwner.keyDown(with: event)
                 return true
             default:
                 return false

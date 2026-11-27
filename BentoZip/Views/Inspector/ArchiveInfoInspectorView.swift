@@ -1,4 +1,5 @@
 import AppKit
+import QuickLookUI
 import BentoZipCore
 import SwiftUI
 
@@ -88,27 +89,15 @@ struct ArchiveInfoInspectorView: View {
         let uncompressedStr = Self.byteFormatter.string(fromByteCount: appState.totalSize)
 
         if let archiveURL = appState.sourceArchiveURL {
-            InspectorCard {
-                HStack(spacing: 10) {
-                    Image(nsImage: FileIconCache.icon(forFileAt: archiveURL.path))
-                        .resizable()
-                        .frame(width: 32, height: 32)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(archiveURL.lastPathComponent)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-
-                        Text(archiveMetaSummary)
-                            .font(.system(size: 11))
-                            .foregroundStyle(secondaryTextColor)
-                    }
-                }
+            InspectorPreviewHeader(
+                name: archiveURL.lastPathComponent,
+                kind: archiveMetaSummary
+            ) {
+                InspectorFileIcon(image: FileIconCache.icon(forFileAt: archiveURL.path))
             }
         }
 
-        InspectorCard("Info") {
+        InspectorInfoSection("Info") {
             InspectorRow("Items") {
                 Text(String(localized: "\(totalCount) items"))
                     .monospacedDigit()
@@ -208,7 +197,7 @@ struct ArchiveInfoInspectorView: View {
         }
 
         if let comment = appState.archiveComment, !comment.isEmpty {
-            InspectorCard("Comment") {
+            InspectorInfoSection("Comment") {
                 Text(comment)
                     .font(.system(size: 12))
                     .foregroundStyle(secondaryTextColor)
@@ -225,87 +214,15 @@ struct ArchiveInfoInspectorView: View {
         let kind = FileKindCache.localizedKind(for: node)
         let location = parentLocation(for: node)
 
-        InspectorCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(nsImage: FileIconCache.icon(for: node))
-                        .resizable()
-                        .frame(width: 32, height: 32)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(node.name)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-
-                        Text(kind)
-                            .font(.system(size: 11))
-                            .foregroundStyle(secondaryTextColor)
-                    }
-                }
-
-                if !node.isDirectory {
-                    HStack(spacing: 6) {
-                        Button {
-                            let entry = node.toFileEntry()
-                            QuickLookHelper.shared.preview(
-                                nodes: [node],
-                                sourceArchiveURL: appState.sourceArchiveURL,
-                                password: appState.archivePassword,
-                                encoding: appState.selectedEncoding.iconvName
-                            ) { error in
-                                FileListTreeSupport.handleExtractionError(
-                                    error,
-                                    appState: appState,
-                                    retryAction: .preview([entry])
-                                )
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "eye")
-                                    .font(.system(size: 11, weight: .medium))
-                                Text("Quick Look")
-                                    .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(InspectorPillButtonStyle(compact: true))
-                        .disabled(isBusy)
-
-                        Button {
-                            let entry = node.toFileEntry()
-                            Task {
-                                await appState.coordinator.extractEntryForOpen(
-                                    entry,
-                                    archiveURL: appState.sourceArchiveURL,
-                                    password: appState.archivePassword,
-                                    appState: appState
-                                )
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.up.forward.app")
-                                    .font(.system(size: 11, weight: .medium))
-                                Text("Open")
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(InspectorPillButtonStyle(compact: true))
-                        .disabled(isBusy)
-                    }
-                }
+        InspectorPreviewHeader(name: node.name, kind: kind) {
+            if node.isDirectory {
+                InspectorFileIcon(image: FileIconCache.icon(for: node))
+            } else {
+                SingleEntryPreviewSection(node: node)
             }
         }
 
-        if !node.isDirectory,
-           InlinePreviewHelper.isImageFile(node.name) ||
-           (InlinePreviewHelper.isTextPreviewable(node.name) && node.size <= 256 * 1024) {
-            SingleEntryPreviewSection(node: node)
-        }
-
-        InspectorCard("Info") {
+        InspectorInfoSection("Info") {
             if let location {
                 InspectorRow("Location") {
                     Text(location)
@@ -413,8 +330,7 @@ struct ArchiveInfoInspectorView: View {
     private func multiSelectionSections(for selectedNodes: [FileNode]) -> some View {
         let totals = combinedSelectionTotals(for: selectedNodes)
 
-        InspectorCard {
-            HStack(spacing: 10) {
+        HStack(spacing: 10) {
                 Image(systemName: "doc.on.doc")
                     .font(.system(size: 22))
                     .foregroundStyle(secondaryTextColor)
@@ -422,10 +338,11 @@ struct ArchiveInfoInspectorView: View {
 
                 Text(String(localized: "\(selectedNodes.count) items selected"))
                     .font(.system(size: 12.5, weight: .semibold))
-            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 10)
 
-        InspectorCard("Info") {
+        InspectorInfoSection("Info") {
             InspectorRow("Size") {
                 Text(Self.byteFormatter.string(fromByteCount: totals.uncompressed))
                     .monospacedDigit()
@@ -637,30 +554,60 @@ struct ArchiveInfoInspectorView: View {
     }
 }
 
+private struct InspectorPreviewHeader<Preview: View>: View {
+    let name: String
+    let kind: String
+    @ViewBuilder let preview: Preview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            preview
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(3)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                Text(kind)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct InspectorFileIcon: View {
+    let image: NSImage
+
+    var body: some View {
+        GeometryReader { geometry in
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+}
+
 private struct SingleEntryPreviewSection: View {
     @Environment(AppState.self) private var appState
-    @Environment(WorkspaceUIState.self) private var uiState
-    @Environment(\.colorScheme) private var colorScheme
 
     let node: FileNode
-
-    @State private var previewImage: NSImage?
-    @State private var previewText: String?
-    @State private var isLoading: Bool = false
-
-    private var secondaryTextColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.60) : Color(nsColor: .secondaryLabelColor)
-    }
+    @AppStorage("BentoZipPreviewLimitMB") private var previewLimitMB = 100
+    @State private var previewURL: URL?
+    @State private var isLoading = false
+    @State private var exceedsLimit = false
 
     private struct PreviewKey: Equatable {
         let nodeID: UUID
         let archiveURL: URL?
         let password: String?
         let encoding: FilenameEncodingOption
-    }
-
-    private var isImage: Bool {
-        InlinePreviewHelper.isImageFile(node.name)
+        let limitMB: Int
     }
 
     private var taskKey: PreviewKey {
@@ -668,102 +615,113 @@ private struct SingleEntryPreviewSection: View {
             nodeID: node.id,
             archiveURL: appState.sourceArchiveURL,
             password: appState.archivePassword,
-            encoding: appState.selectedEncoding
+            encoding: appState.selectedEncoding,
+            limitMB: previewLimitMB
         )
     }
 
     var body: some View {
-        InspectorCard("Preview") {
-            VStack(alignment: .leading, spacing: 8) {
-                if isLoading {
-                    HStack {
-                        Spacer()
+        GeometryReader { geometry in
+            if let previewURL {
+                SystemInlinePreview(url: previewURL)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+            } else {
+                VStack(spacing: 8) {
+                    if isLoading {
                         ProgressView()
                             .controlSize(.small)
-                        Spacer()
-                    }
-                    .frame(height: 64)
-                } else if isImage, let previewImage {
-                    Image(nsImage: previewImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: 150)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-                    if !appState.galleryImageNodes.isEmpty {
-                        Button {
-                            uiState.galleryInitialNodeID = node.id
-                            uiState.showImageGallery = true
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "photo.on.rectangle.angled")
-                                    .font(.system(size: 11.5, weight: .medium))
-                                Text("Open Gallery")
-                            }
-                            .frame(maxWidth: .infinity)
+                    } else {
+                        Image(nsImage: FileIconCache.icon(for: node))
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 80, height: 80)
+                        if exceedsLimit {
+                            Text("File exceeds the preview size limit.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
-                        .buttonStyle(InspectorPillButtonStyle())
                     }
-                } else if let previewText {
-                    ScrollView {
-                        Text(previewText.isEmpty ? String(localized: "(Empty file)") : previewText)
-                            .font(.system(size: 10.5, design: .monospaced))
-                            .foregroundStyle(secondaryTextColor)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-                    .frame(maxHeight: 140)
-                } else {
-                    Text("Preview unavailable")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.tertiary)
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }
+        .aspectRatio(1, contentMode: .fit)
         .task(id: taskKey) {
-            await loadPreview()
+            previewURL = nil
+            exceedsLimit = previewLimitMB > 0 && node.size > Int64(previewLimitMB) * 1024 * 1024
+            guard !exceedsLimit else {
+                isLoading = false
+                return
+            }
+            isLoading = true
+            defer {
+                if !Task.isCancelled {
+                    isLoading = false
+                }
+            }
+            do {
+                let url = try await DragDropManager.shared.prepareForDragThrowing(
+                    node.toFileEntry(),
+                    sourceArchiveURL: appState.sourceArchiveURL,
+                    password: appState.archivePassword,
+                    encoding: appState.selectedEncoding.iconvName,
+                    showTransfer: false
+                )
+                guard !Task.isCancelled else { return }
+                previewURL = url
+            } catch {
+                guard !Task.isCancelled else { return }
+                previewURL = nil
+            }
+        }
+    }
+}
+
+private struct SystemInlinePreview: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> NSView {
+        guard let view = QLPreviewView(frame: .zero, style: .compact) else {
+            return NSView()
+        }
+        view.autostarts = true
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let view = nsView as? QLPreviewView else { return }
+        if (view.previewItem as? NSURL) != (url as NSURL) {
+            view.previewItem = url as NSURL
         }
     }
 
-    @MainActor
-    private func loadPreview() async {
-        previewImage = nil
-        previewText = nil
-        isLoading = true
-        defer { isLoading = false }
+    static func dismantleNSView(_ view: NSView, coordinator: ()) {
+        (view as? QLPreviewView)?.close()
+    }
+}
 
-        let targetURL: URL
-        if !node.isFromArchive {
-            targetURL = node.url
-        } else {
-            guard let archiveURL = appState.sourceArchiveURL else { return }
-            do {
-                guard let extracted = try await DragDropManager.shared.prepareForDragThrowing(
-                    node.toFileEntry(),
-                    sourceArchiveURL: archiveURL,
-                    password: appState.archivePassword,
-                    encoding: appState.selectedEncoding.iconvName
-                ) else {
-                    return
-                }
-                targetURL = extracted
-            } catch {
-                return
-            }
-        }
+private struct InspectorInfoSection<Content: View>: View {
+    let title: LocalizedStringKey
+    @ViewBuilder let content: Content
 
-        guard !Task.isCancelled else { return }
-        if isImage {
-            let loaded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
-                guard let data = try? Data(contentsOf: targetURL) else { return nil }
-                return NSImage(data: data)
-            }.value
-            guard !Task.isCancelled else { return }
-            previewImage = loaded
-        } else {
-            let snippet = await InlinePreviewHelper.loadTextSnippet(from: targetURL, maxBytes: 16_384)
-            guard !Task.isCancelled else { return }
-            previewText = snippet
+    init(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Divider()
+            content
         }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 8)
     }
 }

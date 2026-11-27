@@ -1,375 +1,352 @@
 import AppKit
 import BentoZipCore
+import QuickLookUI
 import SwiftUI
 
-struct FinderGridView: View {
-    @Environment(AppState.self) private var appState
-    @Environment(ProgressState.self) private var progressState
-    @Environment(WorkspaceUIState.self) private var uiState
+struct FinderGridView: NSViewRepresentable {
+    let appState: AppState
+    let progressState: ProgressState
+    let uiState: WorkspaceUIState
+    let displayedNodes: [FileNode]
+    let nodeUpdateRevision: UInt64
+    let selectedEntryIDs: Set<UUID>
+    let focusRequestID: UInt64
+    let onRequestArchiveDelete: ([FileEntry]) -> Void
 
-    @State private var lastAnchorNodeID: UUID?
-    @State private var showDeleteConfirmation = false
-    @State private var pendingDeleteEntries: [FileEntry] = []
-
-    private let gridColumns = [
-        GridItem(.adaptive(minimum: 104, maximum: 124), spacing: 12)
-    ]
-
-    private var isBusy: Bool {
-        appState.isLoading || progressState.isOperationInProgress
+    func makeCoordinator() -> Coordinator {
+        Coordinator(actions: FinderOutlineCoordinator(
+            appState: appState,
+            progressState: progressState,
+            uiState: uiState,
+            onRequestArchiveDelete: onRequestArchiveDelete
+        ))
     }
 
-    private var sortedItems: [FileNode] {
-        let prefs = appState.preferencesManager?.loadPreferences()
-        let descriptor = NSSortDescriptor(
-            key: prefs?.sortColumnKey ?? "name",
-            ascending: prefs?.sortAscending ?? true
-        )
-        return FileListTreeSupport.sortNodes(appState.displayedNodes, using: descriptor)
+    func makeNSView(context: Context) -> NSScrollView {
+        let layout = NSCollectionViewGridLayout()
+        layout.minimumItemSize = NSSize(width: 100, height: 108)
+        layout.maximumItemSize = layout.minimumItemSize
+        layout.minimumInteritemSpacing = 12
+        layout.minimumLineSpacing = 12
+        layout.margins = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+
+        let collection = FileIconCollectionView()
+        collection.collectionViewLayout = layout
+        collection.backgroundColors = [.controlBackgroundColor]
+        collection.isSelectable = true
+        collection.allowsMultipleSelection = true
+        collection.allowsEmptySelection = true
+        collection.autoresizingMask = [.width]
+        collection.setAccessibilityIdentifier("workspace.icon-view")
+        collection.register(FileIconCollectionItem.self, forItemWithIdentifier: FileIconCollectionItem.identifier)
+        collection.setDraggingSourceOperationMask(.copy, forLocal: false)
+        collection.setDraggingSourceOperationMask([], forLocal: true)
+        collection.dataSource = context.coordinator
+        collection.delegate = context.coordinator
+        collection.gridCoordinator = context.coordinator
+        context.coordinator.actions.alternatePreviewOwner = collection
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .controlBackgroundColor
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        collection.frame = scrollView.contentView.bounds
+        scrollView.documentView = collection
+        return scrollView
     }
 
-    var body: some View {
-        let items = sortedItems
-
-        ScrollView {
-            LazyVGrid(columns: gridColumns, spacing: 14) {
-                ForEach(items) { node in
-                    gridTile(for: node, in: items)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .background(
-            Color(nsColor: .controlBackgroundColor)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    appState.clearSelection()
-                }
-        )
-        .contextMenu {
-            if appState.isWritableArchive {
-                Button("New Folder…") {
-                    uiState.showNewFolderSheet = true
-                }
-                .disabled(isBusy)
-            }
-        }
-        .focusable()
-        .focusEffectDisabled()
-        .onKeyPress(.space) {
-            handleSpaceKey()
-            return .handled
-        }
-        .onKeyPress(.return) {
-            handleReturnKey()
-            return .handled
-        }
-        .onKeyPress(.escape) {
-            handleEscapeKey()
-            return .handled
-        }
-        .onKeyPress(.delete) {
-            handleDeleteKey()
-            return .handled
-        }
-        .onDeleteCommand {
-            handleDeleteKey()
-        }
-        .confirmationDialog(
-            Text("Delete \(pendingDeleteEntries.count) selected items from archive?"),
-            isPresented: $showDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                let entriesToDelete = pendingDeleteEntries
-                pendingDeleteEntries = []
-                Task {
-                    await appState.coordinator.removeEntries(
-                        appState: appState,
-                        entries: entriesToDelete,
-                        progressState: progressState
-                    )
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                pendingDeleteEntries = []
-            }
-        } message: {
-            Text("This modifies the archive and cannot be undone.")
-        }
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let collection = scrollView.documentView as? FileIconCollectionView else { return }
+        let coordinator = context.coordinator
+        coordinator.actions.bindResumePreview()
+        coordinator.actions.onRequestArchiveDelete = onRequestArchiveDelete
+        coordinator.sync(from: self, in: collection)
     }
 
-    @ViewBuilder
-    private func gridTile(for node: FileNode, in items: [FileNode]) -> some View {
-        let isSelected = appState.selectedEntryIDs.contains(node.id)
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        guard let collection = scrollView.documentView as? FileIconCollectionView else { return }
+        QuickLookHelper.shared.detachOwner(collection)
+        collection.delegate = nil
+        collection.dataSource = nil
+    }
 
-        VStack(spacing: 6) {
-            ZStack(alignment: .bottomTrailing) {
-                Image(nsImage: FileIconCache.icon(for: node))
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 54, height: 54)
+    final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate {
+        let actions: FinderOutlineCoordinator
+        private var sourceIDs: [UUID] = []
+        private var navigationIDs: [UUID] = []
+        private var nodeRevision: UInt64?
+        private var focusRequestID: UInt64?
+        private var sortDescriptor: NSSortDescriptor?
+        private var syncing = false
+        private var nodes: [FileNode] = []
 
-                if node.isEncrypted {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(3)
-                        .background(.regularMaterial, in: Circle())
-                        .offset(x: 2, y: 2)
-                }
-            }
-            .frame(width: 76, height: 68)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.primary.opacity(0.11) : Color.clear)
+        init(actions: FinderOutlineCoordinator) {
+            self.actions = actions
+        }
+
+        fileprivate func sync(from view: FinderGridView, in collection: FileIconCollectionView) {
+            let prefs = actions.appState.preferencesManager?.loadPreferences()
+            let descriptor = NSSortDescriptor(
+                key: prefs?.sortColumnKey ?? "name",
+                ascending: prefs?.sortAscending ?? true
             )
+            let ids = view.displayedNodes.map(\.id)
+            syncing = true
+            defer { syncing = false }
 
-            Text(node.name)
-                .font(.system(size: 12))
-                .foregroundStyle(isSelected ? .white : .primary)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .truncationMode(.middle)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(isSelected ? Color.accentColor : Color.clear)
-                )
-        }
-        .frame(maxWidth: .infinity, alignment: .top)
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            openNode(node)
-        }
-        .onTapGesture(count: 1) {
-            selectNode(node, in: items)
-        }
-        .contextMenu {
-            contextMenuItems(for: contextTargetNodes(for: node))
-        }
-    }
-
-    // MARK: - Selection & Actions
-
-    private func selectNode(_ node: FileNode, in items: [FileNode]) {
-        let modifiers = NSEvent.modifierFlags.intersection([.command, .shift])
-        if modifiers.contains(.command) {
-            if appState.selectedEntryIDs.contains(node.id) {
-                appState.selectedEntryIDs.remove(node.id)
-            } else {
-                appState.selectedEntryIDs.insert(node.id)
+            if ids != sourceIDs || view.nodeUpdateRevision != nodeRevision || descriptor != sortDescriptor {
+                nodes = FileListTreeSupport.sortNodes(view.displayedNodes, using: descriptor)
+                sourceIDs = ids
+                nodeRevision = view.nodeUpdateRevision
+                sortDescriptor = descriptor
+                collection.reloadData()
             }
-            lastAnchorNodeID = node.id
-        } else if modifiers.contains(.shift),
-                  let anchorID = lastAnchorNodeID,
-                  let startIdx = items.firstIndex(where: { $0.id == anchorID }),
-                  let endIdx = items.firstIndex(where: { $0.id == node.id }) {
-            let lower = min(startIdx, endIdx)
-            let upper = max(startIdx, endIdx)
-            appState.selectedEntryIDs = Set(items[lower...upper].map(\.id))
-        } else {
-            appState.selectedEntryIDs = [node.id]
-            lastAnchorNodeID = node.id
+
+            if navigationIDs != actions.appState.navigationNodeIDs {
+                navigationIDs = actions.appState.navigationNodeIDs
+                collection.scroll(.zero)
+            }
+
+            let selection = Set(nodes.indices.compactMap { index in
+                view.selectedEntryIDs.contains(nodes[index].id) ? IndexPath(item: index, section: 0) : nil
+            })
+            if collection.selectionIndexPaths != selection {
+                collection.selectionIndexPaths = selection
+            }
+
+            let requestedFocus = focusRequestID.map { $0 != view.focusRequestID } ?? false
+            focusRequestID = view.focusRequestID
+            if requestedFocus {
+                DispatchQueue.main.async { [weak collection] in
+                    guard let collection, let window = collection.window else { return }
+                    window.makeFirstResponder(collection)
+                    if collection.selectionIndexPaths.isEmpty && !self.nodes.isEmpty {
+                        collection.selectItems(at: [IndexPath(item: 0, section: 0)], scrollPosition: .nearestVerticalEdge)
+                        self.selectionChanged(in: collection)
+                    }
+                }
+            }
         }
 
-        if QuickLookHelper.shared.isVisible {
-            previewNodes(appState.selectedNodes)
+        func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+            nodes.count
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath)
+            -> NSCollectionViewItem {
+            let item = collectionView.makeItem(withIdentifier: FileIconCollectionItem.identifier, for: indexPath)
+            if let item = item as? FileIconCollectionItem, let node = node(at: indexPath) {
+                item.configure(with: node)
+            }
+            return item
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+            selectionChanged(in: collectionView)
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+            selectionChanged(in: collectionView)
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath)
+            -> (any NSPasteboardWriting)? {
+            node(at: indexPath).flatMap { actions.makePasteboardWriter(for: $0) }
+        }
+
+        fileprivate func node(at path: IndexPath) -> FileNode? {
+            nodes.indices.contains(path.item) ? nodes[path.item] : nil
+        }
+
+        fileprivate func selectionChanged(in collection: NSCollectionView) {
+            guard !syncing else { return }
+            let ids = Set(collection.selectionIndexPaths.compactMap { node(at: $0)?.id })
+            guard ids != actions.appState.selectedEntryIDs else { return }
+            actions.appState.selectedEntryIDs = ids
+            actions.handleBecameQuickLookOwner()
+        }
+    }
+}
+
+private final class FileIconCollectionView: NSCollectionView, NSUserInterfaceValidations {
+    weak var gridCoordinator: FinderGridView.Coordinator?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window,
+                  window.attachedSheet == nil, !(window.firstResponder is NSText),
+                  gridCoordinator?.actions.appState.isSearchVisible == false else { return }
+            window.makeFirstResponder(self)
         }
     }
 
-    private func contextTargetNodes(for clickedNode: FileNode) -> [FileNode] {
-        if appState.selectedEntryIDs.contains(clickedNode.id) {
-            return appState.selectedNodes
+    override func mouseDown(with event: NSEvent) {
+        let clickedPath = indexPathForItem(at: convert(event.locationInWindow, from: nil))
+        super.mouseDown(with: event)
+        if event.clickCount == 2, let clickedPath, let node = gridCoordinator?.node(at: clickedPath) {
+            gridCoordinator?.actions.openNode(node)
         }
-        return [clickedNode]
     }
 
-    private func openNode(_ node: FileNode) {
-        if node.isDirectory {
-            appState.navigateInto(node)
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let gridCoordinator else { return nil }
+        guard let path = indexPathForItem(at: convert(event.locationInWindow, from: nil)),
+              let node = gridCoordinator.node(at: path) else {
+            return gridCoordinator.actions.makeContextMenu(for: [])
+        }
+        let targets = selectionIndexPaths.contains(path)
+            ? selectionIndexPaths.sorted().compactMap { gridCoordinator.node(at: $0) }
+            : [node]
+        window?.makeFirstResponder(self)
+        return gridCoordinator.actions.makeContextMenu(for: targets)
+    }
+
+    override func selectAll(_ sender: Any?) {
+        super.selectAll(sender)
+        gridCoordinator?.selectionChanged(in: self)
+    }
+
+    @objc func copy(_ sender: Any?) {
+        gridCoordinator?.actions.handleCopyNames()
+    }
+
+    func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)) {
+            return !selectionIndexPaths.isEmpty
+        }
+        return true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard let actions = gridCoordinator?.actions else { return super.keyDown(with: event) }
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if modifiers == [.command, .option], event.charactersIgnoringModifiers?.lowercased() == "c" {
+            actions.handleCopyPaths()
             return
         }
-        let isArchiveItem = !node.url.path.hasPrefix("/")
-            ? (!node.name.isEmpty && FormatDetector.detectReadableFormat(of: URL(fileURLWithPath: "/tmp/\(node.name)")) != nil)
-            : FormatDetector.isArchiveFile(node.url)
-        if appState.mode == .browseArchive, isArchiveItem {
-            guard !isBusy else { return }
-            let entry = node.toFileEntry()
-            Task {
-                await appState.coordinator.openNestedArchive(
-                    entry: entry,
-                    appState: appState,
-                    progressState: progressState
-                )
-            }
-            return
-        }
-        let entry = node.toFileEntry()
-        Task {
-            await appState.coordinator.extractEntryForOpen(
-                entry,
-                archiveURL: appState.sourceArchiveURL,
-                password: appState.archivePassword,
-                appState: appState
-            )
+        switch event.keyCode {
+        case 49 where modifiers.isEmpty:
+            actions.handleSpaceKey()
+        case 36 where modifiers.isEmpty, 76 where modifiers.isEmpty, 125 where modifiers == .command:
+            actions.handleOpenKey()
+        case 126 where modifiers == .command:
+            actions.handleNavigateUpKey()
+        case 51 where modifiers.isEmpty || modifiers == .command,
+             117 where modifiers.isEmpty || modifiers == .command:
+            actions.handleDeleteKey()
+        case 53 where modifiers.isEmpty:
+            actions.handleEscapeKey()
+        default:
+            super.keyDown(with: event)
         }
     }
 
-    private func previewNodes(_ nodes: [FileNode]) {
-        let previewEntries = nodes
-            .filter { !$0.isDirectory || !$0.isFromArchive }
-            .map { $0.toFileEntry() }
-        QuickLookHelper.shared.preview(
-            nodes: nodes,
-            sourceArchiveURL: appState.sourceArchiveURL,
-            password: appState.archivePassword,
-            encoding: appState.selectedEncoding.iconvName
-        ) { error in
-            FileListTreeSupport.handleExtractionError(
-                error,
-                appState: appState,
-                retryAction: previewEntries.isEmpty ? nil : .preview(previewEntries)
-            )
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        QuickLookHelper.shared.beginControl(panel: panel, owner: self) { [weak self] in
+            self?.gridCoordinator?.actions.handleBecameQuickLookOwner()
         }
     }
 
-    private func handleSpaceKey() {
-        if QuickLookHelper.shared.isVisible {
-            QuickLookHelper.shared.closeIfVisible()
-            return
-        }
-        let targets = appState.selectedNodes
-        guard !targets.isEmpty else { return }
-        previewNodes(targets)
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        QuickLookHelper.shared.endControl(panel: panel, owner: self)
     }
+}
 
-    private func handleReturnKey() {
-        let targets = appState.selectedNodes
-        guard targets.count == 1, let node = targets.first else { return }
-        openNode(node)
-    }
+private final class FileIconCollectionItem: NSCollectionViewItem {
+    static let identifier = NSUserInterfaceItemIdentifier("FileIconCollectionItem")
 
-    private func handleEscapeKey() {
-        if QuickLookHelper.shared.isVisible {
-            QuickLookHelper.shared.closeIfVisible()
-        } else if appState.isSearchVisible || !appState.searchQuery.isEmpty {
-            appState.searchQuery = ""
-            appState.isSearchVisible = false
-        } else if appState.canNavigateUp {
-            appState.navigateUp()
-        } else {
-            appState.clearSelection()
+    private let iconBackground = NSBox()
+    private let icon = NSImageView()
+    private let nameBackground = NSBox()
+    private let name = NSTextField(wrappingLabelWithString: "")
+    private let lock = NSImageView()
+
+    override var isSelected: Bool {
+        didSet {
+            guard isViewLoaded else { return }
+            updateSelection()
         }
     }
 
-    private func handleDeleteKey() {
-        guard !isBusy else { return }
-        let targets = appState.selectedNodes
-        guard !targets.isEmpty else { return }
-        if appState.mode == .compress {
-            appState.removeNodes(targets)
-        } else if appState.isWritableArchive {
-            pendingDeleteEntries = targets.map { $0.toFileEntry() }
-            showDeleteConfirmation = true
+    override var highlightState: NSCollectionViewItem.HighlightState {
+        didSet {
+            guard isViewLoaded else { return }
+            updateSelection()
         }
     }
 
-    @ViewBuilder
-    private func contextMenuItems(for targets: [FileNode]) -> some View {
-        if targets.count == 1, let node = targets.first {
-            Button("Open") {
-                openNode(node)
-            }
-            if !node.isDirectory || !node.isFromArchive {
-                Button("Quick Look") {
-                    previewNodes([node])
-                }
-            }
-        } else if targets.contains(where: { !$0.isDirectory || !$0.isFromArchive }) {
-            Button("Quick Look") {
-                previewNodes(targets)
-            }
+    override func loadView() {
+        view = NSView()
+        for box in [iconBackground, nameBackground] {
+            box.boxType = .custom
+            box.titlePosition = .noTitle
+            box.borderWidth = 0
+            box.cornerRadius = 6
+            box.contentViewMargins = .zero
+            view.addSubview(box)
+            box.translatesAutoresizingMaskIntoConstraints = false
         }
 
-        if appState.mode == .browseArchive {
-            Divider()
-            Button("Extract Selected Here") {
-                let entries = targets.map { $0.toFileEntry() }
-                Task {
-                    await appState.coordinator.extract(
-                        appState: appState,
-                        progressState: progressState,
-                        entries: entries,
-                        chooseDestination: false
-                    )
-                }
-            }
-            .disabled(isBusy)
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        iconBackground.addSubview(icon)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        imageView = icon
 
-            Button("Extract Selected…") {
-                let entries = targets.map { $0.toFileEntry() }
-                Task {
-                    await appState.coordinator.extract(
-                        appState: appState,
-                        progressState: progressState,
-                        entries: entries,
-                        chooseDestination: true
-                    )
-                }
-            }
-            .disabled(isBusy)
-        }
+        lock.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: String(localized: "Encrypted"))
+        lock.contentTintColor = .secondaryLabelColor
+        iconBackground.addSubview(lock)
+        lock.translatesAutoresizingMaskIntoConstraints = false
 
-        if appState.mode == .compress {
-            Divider()
-            if targets.count == 1, let first = targets.first {
-                Button("Show in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([first.url])
-                }
-            }
-            Button("Remove", role: .destructive) {
-                appState.removeNodes(targets)
-            }
-            .disabled(isBusy)
-        } else if appState.isWritableArchive {
-            Divider()
-            Button("New Folder…") {
-                uiState.showNewFolderSheet = true
-            }
-            .disabled(isBusy)
+        name.font = .systemFont(ofSize: 12)
+        name.alignment = .center
+        name.maximumNumberOfLines = 2
+        name.lineBreakMode = .byTruncatingMiddle
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        name.translatesAutoresizingMaskIntoConstraints = false
+        nameBackground.addSubview(name)
+        textField = name
 
-            if targets.count == 1, let first = targets.first {
-                Button("Rename…") {
-                    uiState.renameTargetEntry = first.toFileEntry()
-                }
-                .disabled(isBusy)
-            }
+        NSLayoutConstraint.activate([
+            iconBackground.topAnchor.constraint(equalTo: view.topAnchor, constant: 2),
+            iconBackground.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            iconBackground.widthAnchor.constraint(equalToConstant: 74),
+            iconBackground.heightAnchor.constraint(equalToConstant: 74),
+            icon.centerXAnchor.constraint(equalTo: iconBackground.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: iconBackground.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 64),
+            icon.heightAnchor.constraint(equalToConstant: 64),
+            lock.widthAnchor.constraint(equalToConstant: 12),
+            lock.heightAnchor.constraint(equalToConstant: 12),
+            lock.trailingAnchor.constraint(equalTo: iconBackground.trailingAnchor, constant: -4),
+            lock.bottomAnchor.constraint(equalTo: iconBackground.bottomAnchor, constant: -4),
+            nameBackground.topAnchor.constraint(equalTo: iconBackground.bottomAnchor, constant: 2),
+            nameBackground.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            nameBackground.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor),
+            name.leadingAnchor.constraint(equalTo: nameBackground.leadingAnchor, constant: 4),
+            name.trailingAnchor.constraint(equalTo: nameBackground.trailingAnchor, constant: -4),
+            name.topAnchor.constraint(equalTo: nameBackground.topAnchor, constant: 1),
+            name.bottomAnchor.constraint(equalTo: nameBackground.bottomAnchor, constant: -1),
+        ])
+        updateSelection()
+    }
 
-            Button("Delete", role: .destructive) {
-                pendingDeleteEntries = targets.map { $0.toFileEntry() }
-                showDeleteConfirmation = true
-            }
-            .disabled(isBusy)
-        }
+    func configure(with node: FileNode) {
+        loadViewIfNeeded()
+        icon.image = FileIconCache.icon(for: node)
+        lock.isHidden = !node.isEncrypted
+        name.stringValue = node.name
+        view.toolTip = node.name
+    }
 
-        Divider()
-        Button(targets.count == 1 ? "Copy Name" : "Copy Names") {
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setString(targets.map(\.name).joined(separator: "\n"), forType: .string)
-        }
-        Button(targets.count == 1 ? "Copy Path" : "Copy Paths") {
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setString(
-                targets.map { $0.archiveRelativePath ?? $0.url.path }.joined(separator: "\n"),
-                forType: .string
-            )
-        }
+    private func updateSelection() {
+        let showsSelection = highlightState == .forSelection
+            || (isSelected && highlightState != .forDeselection)
+        iconBackground.fillColor = showsSelection ? NSColor.labelColor.withAlphaComponent(0.12) : .clear
+        nameBackground.fillColor = showsSelection ? .selectedContentBackgroundColor : .clear
+        name.textColor = showsSelection ? .alternateSelectedControlTextColor : .labelColor
     }
 }

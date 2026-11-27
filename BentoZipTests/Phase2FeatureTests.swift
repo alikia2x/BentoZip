@@ -157,49 +157,7 @@ struct Phase2PresetsAndStateTests {
         #expect(reloaded.viewMode == .grid)
     }
 
-    @Test func galleryImageNodes_filtersCurrentFolderOrComicArchiveInNaturalOrder() {
-        let appState = AppState()
-        appState.mode = .browseArchive
-        appState.sourceArchiveURL = URL(fileURLWithPath: "/tmp/album.zip")
 
-        let entries = ArchiveTreeBuilder.buildTree(from: [
-            ArchiveTreeBuilder.FlatEntry(path: "page10.png", name: "page10.png", isDirectory: false, size: 100),
-            ArchiveTreeBuilder.FlatEntry(path: "page2.jpg", name: "page2.jpg", isDirectory: false, size: 100),
-            ArchiveTreeBuilder.FlatEntry(path: ".hidden.png", name: ".hidden.png", isDirectory: false, size: 50),
-            ArchiveTreeBuilder.FlatEntry(path: "notes.txt", name: "notes.txt", isDirectory: false, size: 20),
-            ArchiveTreeBuilder.FlatEntry(path: "chapter1/01.webp", name: "01.webp", isDirectory: false, size: 80),
-            ArchiveTreeBuilder.FlatEntry(path: "chapter2/02.png", name: "02.png", isDirectory: false, size: 80)
-        ], unwrapSingleTopDirectory: false)
-        appState.setEntries(entries)
-
-        // Regular .zip only lists images in the current folder (natural sort: page2 < page10), hiding dotfiles
-        #expect(appState.galleryImageNodes.map(\.name) == ["page2.jpg", "page10.png"])
-
-        appState.showHiddenFiles = true
-        #expect(appState.galleryImageNodes.map(\.name) == [".hidden.png", "page2.jpg", "page10.png"])
-        appState.showHiddenFiles = false
-
-        // Comic archive (.cbz / .cbr) flattens images recursively across all subfolders
-        appState.sourceArchiveURL = URL(fileURLWithPath: "/tmp/issue1.cbz")
-        #expect(
-            appState.galleryImageNodes.compactMap(\.archiveRelativePath) == [
-                "chapter1/01.webp",
-                "chapter2/02.png",
-                "page2.jpg",
-                "page10.png"
-            ]
-        )
-
-        appState.sourceArchiveURL = URL(fileURLWithPath: "/tmp/issue1.cbr")
-        #expect(appState.galleryImageNodes.count == 4)
-
-        // Active search query narrows gallery images across the tree
-        appState.searchQuery = "chapter"
-        #expect(appState.galleryImageNodes.compactMap(\.archiveRelativePath) == [
-            "chapter1/01.webp",
-            "chapter2/02.png"
-        ])
-    }
 }
 
 // MARK: - Password Vault & Generator Tests

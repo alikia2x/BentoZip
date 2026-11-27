@@ -79,7 +79,8 @@ public final class DragDropManager {
         _ entry: FileEntry,
         sourceArchiveURL: URL?,
         password: String? = nil,
-        encoding: String? = nil
+        encoding: String? = nil,
+        showTransfer: Bool = true
     ) async throws -> URL? {
         if !entry.isFromArchive {
             return entry.url
@@ -114,7 +115,7 @@ public final class DragDropManager {
             )
         }
 
-        let shouldTrackTransfer = entry.isDirectory || entry.size >= Self.trackedTransferThresholdBytes
+        let shouldTrackTransfer = showTransfer && (entry.isDirectory || entry.size >= Self.trackedTransferThresholdBytes)
         let transferTask: TransferTask?
         if shouldTrackTransfer {
             let tracked = TransferTask(

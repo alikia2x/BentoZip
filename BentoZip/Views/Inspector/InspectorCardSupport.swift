@@ -158,27 +158,6 @@ struct InspectorRowDivider: View {
     }
 }
 
-struct InspectorInputWellModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-
-    func body(content: Content) -> some View {
-        content
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(colorScheme == .dark ? Color.black.opacity(0.28) : Color(nsColor: .textBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(
-                        colorScheme == .dark ? Color.white.opacity(0.14) : Color.black.opacity(0.14),
-                        lineWidth: 0.75
-                    )
-            )
-    }
-}
-
 struct InspectorPillButtonStyle: ButtonStyle {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isEnabled

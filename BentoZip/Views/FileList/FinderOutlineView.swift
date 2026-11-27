@@ -142,7 +142,7 @@ final class FinderOutlineView: NSOutlineView {
     }
 
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        QuickLookHelper.shared.beginControl(panel: panel, owner: self)
+        QuickLookHelper.shared.beginControl(panel: panel, owner: self, onOwnershipChange: onBecameQuickLookOwner)
     }
 
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {

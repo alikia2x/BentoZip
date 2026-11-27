@@ -121,6 +121,15 @@ extension AppState {
         showHiddenFiles = prefs.showHiddenFiles
     }
 
+    public func setBrowserViewMode(_ mode: BrowserViewMode) {
+        guard viewMode != mode else { return }
+        if mode == .grid {
+            selectedEntryIDs.formIntersection(displayedNodes.map(\.id))
+        }
+        viewMode = mode
+        preferencesManager?.updatePreferences { $0.defaultViewMode = mode.rawValue }
+    }
+
     /// Persist current compression settings and behavior toggles to `AppPreferences`.
     public func savePreferences() {
         preferencesManager?.updatePreferences { prefs in

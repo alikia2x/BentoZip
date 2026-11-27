@@ -6,7 +6,7 @@ struct CompressInspectorView: View {
     @Environment(AppState.self) private var appState
     @Environment(ProgressState.self) private var progressState
 
-    @State private var showPassword: Bool = false
+    @State private var showPasswordSheet = false
     @State private var savedFeedbackVisible: Bool = false
     @State private var feedbackTask: Task<Void, Never>?
     @State private var presets: [ArchivePreset] = []
@@ -31,6 +31,11 @@ struct CompressInspectorView: View {
                                 }
                             }
                         }
+                        Divider()
+                        Button("Save as Preset…") {
+                            newPresetName = ""
+                            showSavePresetSheet = true
+                        }
                     } label: {
                         InspectorMenuLabel(title: selectedPreset?.name ?? String(localized: "Custom"))
                     }
@@ -38,16 +43,6 @@ struct CompressInspectorView: View {
                     .fixedSize(horizontal: true, vertical: false)
                 }
 
-                InspectorRowDivider()
-
-                HStack {
-                    Spacer()
-                    Button("Save as Preset…") {
-                        newPresetName = ""
-                        showSavePresetSheet = true
-                    }
-                    .buttonStyle(InspectorPillButtonStyle(compact: true))
-                }
             }
 
             InspectorCard {
@@ -102,73 +97,20 @@ struct CompressInspectorView: View {
                         prompt: Text(appState.suggestedArchiveName)
                     )
                     .labelsHidden()
-                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel(Text("Name"))
                     .textFieldStyle(.plain)
-                    .modifier(InspectorInputWellModifier())
+                    .multilineTextAlignment(.trailing)
+                    .padding(.vertical, 4)
                 }
 
                 if supportsPasswordEncryption {
                     InspectorRowDivider()
-
                     InspectorRow("Password") {
-                        HStack(spacing: 4) {
-                            Group {
-                                if showPassword {
-                                    TextField("", text: passwordBinding, prompt: Text("Optional"))
-                                } else {
-                                    SecureField("", text: passwordBinding, prompt: Text("Optional"))
-                                }
-                            }
-                            .labelsHidden()
-                            .multilineTextAlignment(.trailing)
-                            .textFieldStyle(.plain)
-
-                            if !(appState.compressionSettings.password ?? "").isEmpty {
-                                Button {
-                                    appState.compressionSettings.password = nil
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.tertiary)
-                                        .frame(width: 18, height: 18)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(Text("Clear Password"))
-                                .help("Clear Password")
-                            }
-
-                            Button {
-                                let generated = PasswordGenerator.generate()
-                                appState.compressionSettings.password = generated
-                                showPassword = true
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(generated, forType: .string)
-                            } label: {
-                                Image(systemName: "wand.and.stars")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 18, height: 18)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(Text("Generate Strong Password"))
-                            .help("Generate Strong Password")
-
-                            Button {
-                                showPassword.toggle()
-                            } label: {
-                                Image(systemName: showPassword ? "eye.slash" : "eye")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 18, height: 18)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(Text(showPassword ? "Hide Password" : "Show Password"))
-                            .help(showPassword ? "Hide Password" : "Show Password")
+                        Button((appState.compressionSettings.password ?? "").isEmpty ? "Set Password…" : "Change Password…") {
+                            showPasswordSheet = true
                         }
-                        .modifier(InspectorInputWellModifier())
+                        .buttonStyle(.borderless)
+                        .accessibilityIdentifier("compression.password.button")
                     }
 
                     if appState.compressionSettings.format == .zip && !(appState.compressionSettings.password ?? "").isEmpty {
@@ -301,6 +243,11 @@ struct CompressInspectorView: View {
             feedbackTask?.cancel()
             feedbackTask = nil
         }
+        .sheet(isPresented: $showPasswordSheet) {
+            CompressionPasswordSheet(password: appState.compressionSettings.password) { password in
+                appState.compressionSettings.password = password
+            }
+        }
         .sheet(isPresented: $showSavePresetSheet) {
             SavePresetSheet(name: $newPresetName) { presetName in
                 let preset = ArchivePreset(name: presetName, settings: appState.compressionSettings)
@@ -340,12 +287,7 @@ struct CompressInspectorView: View {
         appState.compressionSettings.format == .zip || appState.compressionSettings.format == .sevenZip
     }
 
-    private var passwordBinding: Binding<String> {
-        Binding(
-            get: { appState.compressionSettings.password ?? "" },
-            set: { appState.compressionSettings.password = $0.isEmpty ? nil : $0 }
-        )
-    }
+
 }
 
 private struct SavePresetSheet: View {
@@ -407,5 +349,70 @@ private struct SavePresetSheet: View {
         .onAppear {
             isNameFocused = true
         }
+    }
+}
+
+
+private struct CompressionPasswordSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var password: String
+    @State private var isVisible = false
+    @FocusState private var isFocused: Bool
+    let onSave: (String?) -> Void
+
+    init(password: String?, onSave: @escaping (String?) -> Void) {
+        _password = State(initialValue: password ?? "")
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Archive Password")
+                .font(.headline)
+
+            HStack(spacing: 10) {
+                Group {
+                    if isVisible {
+                        TextField("Password", text: $password)
+                    } else {
+                        SecureField("Password", text: $password)
+                    }
+                }
+                .textFieldStyle(.roundedBorder)
+                .focused($isFocused)
+                .onSubmit { save() }
+
+                Button {
+                    isVisible.toggle()
+                    isFocused = true
+                } label: {
+                    Image(systemName: isVisible ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(isVisible ? "Hide Password" : "Show Password"))
+            }
+            .padding(.vertical, 2)
+
+            Text("Leave blank to remove password.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16)
+        .frame(width: 300)
+        .onAppear { isFocused = true }
+    }
+
+    private func save() {
+        onSave(password.isEmpty ? nil : password)
+        dismiss()
     }
 }

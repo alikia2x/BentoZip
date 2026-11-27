@@ -40,6 +40,7 @@
       }
     },
     "(Empty file)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -104,6 +105,7 @@
       }
     },
     "%lld / %lld" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -534,6 +536,16 @@
         }
       }
     },
+    "Archive Password" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "压缩包密码"
+          }
+        }
+      }
+    },
     "Archive Verified" : {
       "localizations" : {
         "en" : {
@@ -546,6 +558,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "压缩包校验通过"
+          }
+        }
+      }
+    },
+    "File exceeds the preview size limit." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件超过预览大小上限。"
+          }
+        }
+      }
+    },
+    "Maximum Preview Size" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览文件大小上限"
+          }
+        }
+      }
+    },
+    "Unlimited" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不限制"
           }
         }
       }
@@ -1022,6 +1064,7 @@
       }
     },
     "Clear Password" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -1339,6 +1382,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "复制名称"
+          }
+        }
+      }
+    },
+    "Copy Password" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制密码"
           }
         }
       }
@@ -3206,6 +3260,7 @@
       }
     },
     "No images available" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3390,6 +3445,7 @@
       }
     },
     "Open Gallery" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3464,6 +3520,7 @@
       }
     },
     "Optional" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -3541,6 +3598,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "密码"
+          }
+        }
+      }
+    },
+    "Password Actions" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码操作"
+          }
+        }
+      }
+    },
+    "Password Copied" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码已复制"
           }
         }
       }
@@ -3646,6 +3725,7 @@
       }
     },
     "Preview" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3662,6 +3742,7 @@
       }
     },
     "Preview unavailable" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4510,6 +4591,7 @@
       }
     },
     "Unable to extract image" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4526,6 +4608,7 @@
       }
     },
     "Unable to load image" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4600,6 +4683,7 @@
       }
     },
     "Unsupported image format" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4820,10 +4904,21 @@
         }
       }
     },
+    "View" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示方式"
+          }
+        }
+      }
+    },
     "ZIP" : {
 
     },
     "Zoom In" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4840,6 +4935,7 @@
       }
     },
     "Zoom Out" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

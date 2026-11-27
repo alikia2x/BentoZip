@@ -11,6 +11,7 @@ struct FilePromisePayload: Sendable {
 @MainActor
 final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
     weak var outlineView: FinderOutlineView?
+    weak var alternatePreviewOwner: NSView?
     weak var packedColumn: NSTableColumn?
     weak var ratioColumn: NSTableColumn?
     weak var crcColumn: NSTableColumn?
@@ -77,7 +78,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
         }
     }
 
-    private func bindResumePreview() {
+    func bindResumePreview() {
         appState.onResumePreview = { [weak self] entries in
             guard let self else { return }
             let nodes = entries.map { self.appState.node(for: $0.id) ?? FileNode(entry: $0) }
@@ -276,7 +277,7 @@ final class FinderOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutli
     }
 
     func selectedNodes(in outlineView: NSOutlineView? = nil) -> [FileNode] {
-        guard let view = outlineView ?? self.outlineView else { return [] }
+        guard let view = outlineView ?? self.outlineView else { return appState.selectedNodes }
         return view.selectedRowIndexes.compactMap { view.item(atRow: $0) as? FileNode }
     }
 

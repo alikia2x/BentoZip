@@ -40,7 +40,18 @@ struct FileListView: View {
 
             Group {
                 if appState.viewMode == .grid {
-                    FinderGridView()
+                    FinderGridView(
+                        appState: appState,
+                        progressState: progressState,
+                        uiState: uiState,
+                        displayedNodes: appState.displayedNodes,
+                        nodeUpdateRevision: appState.nodeUpdateRevision,
+                        selectedEntryIDs: appState.selectedEntryIDs,
+                        focusRequestID: uiState.outlineFocusRequestID
+                    ) { entries in
+                        pendingDeleteEntries = entries
+                        showDeleteConfirmation = true
+                    }
                 } else {
                     FinderFileListRepresentable(
                         appState: appState,

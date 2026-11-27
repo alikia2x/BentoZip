@@ -125,8 +125,8 @@ extension FinderOutlineCoordinator {
     }
 
     func previewNodes(_ nodes: [FileNode]) {
-        if let outlineView {
-            outlineView.window?.makeFirstResponder(outlineView)
+        if let owner = outlineView as NSView? ?? alternatePreviewOwner {
+            owner.window?.makeFirstResponder(owner)
         }
         let previewEntries = nodes
             .filter { !$0.isDirectory || !$0.isFromArchive }

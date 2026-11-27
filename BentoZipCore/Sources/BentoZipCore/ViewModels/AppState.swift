@@ -347,47 +347,7 @@ public class AppState {
         return currentFolderNodes
     }
 
-    /// Sorted image `FileNode`s for the inline gallery/comic reader.
-    /// Returns images in the current folder, or across the entire archive for `.cbz`/`.cbr` or active search.
-    public var galleryImageNodes: [FileNode] {
-        _ = treeStructureRevision
-        _ = nodeUpdateRevision
 
-        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let ext = sourceArchiveURL?.pathExtension.lowercased()
-        let isComicArchive = (ext == "cbz" || ext == "cbr")
-
-        let candidates: [FileNode]
-        if !trimmedQuery.isEmpty {
-            candidates = displayedNodes.filter { !$0.isDirectory && InlinePreviewHelper.isImageFile($0.name) }
-        } else if isComicArchive {
-            var collected: [FileNode] = []
-            func walkImages(_ nodes: [FileNode]) {
-                for node in nodes {
-                    if !showHiddenFiles && node.isHidden {
-                        continue
-                    }
-                    if node.isDirectory {
-                        if let children = node.children {
-                            walkImages(children)
-                        }
-                    } else if InlinePreviewHelper.isImageFile(node.name) {
-                        collected.append(node)
-                    }
-                }
-            }
-            walkImages(rootNodes)
-            candidates = collected
-        } else {
-            candidates = currentFolderNodes.filter { !$0.isDirectory && InlinePreviewHelper.isImageFile($0.name) }
-        }
-
-        return candidates.sorted { lhs, rhs in
-            let lhsKey = lhs.archiveRelativePath ?? lhs.name
-            let rhsKey = rhs.archiveRelativePath ?? rhs.name
-            return lhsKey.localizedStandardCompare(rhsKey) == .orderedAscending
-        }
-    }
 
     private func matchingNodes(for query: String) -> [FileNode] {
         var matches: [FileNode] = []

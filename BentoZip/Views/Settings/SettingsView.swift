@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     let preferencesManager: PreferencesManager
 
+    @AppStorage("BentoZipPreviewLimitMB") private var previewLimitMB = 100
+
     // General
     @State private var defaultFormat: ArchiveFormat = .zip
     @State private var defaultLevel: CompressionLevel = .normal
@@ -142,6 +144,17 @@ struct SettingsView: View {
                 }
 
                 Toggle("Show hidden files", isOn: $showHiddenFiles)
+            }
+
+            Section("Preview") {
+                Picker("Maximum Preview Size", selection: $previewLimitMB) {
+                    Text("10 MB").tag(10)
+                    Text("50 MB").tag(50)
+                    Text("100 MB").tag(100)
+                    Text("500 MB").tag(500)
+                    Text("1 GB").tag(1024)
+                    Text("Unlimited").tag(0)
+                }
             }
 
             Section("Cache") {
